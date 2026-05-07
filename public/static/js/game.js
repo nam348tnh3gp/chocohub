@@ -1,22 +1,22 @@
 // ══════════════════════════════════════════════════════
-// SNAKE ENGINE - CHOCO HUB
+// SNAKE ENGINE - CHOCO HUB (SYNCED v2)
 // ══════════════════════════════════════════════════════
 
-// ── CONFIGURAÇÕES ──
+// ── CONFIG ──
 const BOX = 15;
 const COLS = 20;
-const CC_NORMAL_APPLE = 10;
-const CC_HC_APPLE = 50;
-const CC_NORMAL_MAX = 500;
-const CC_HC_MAX = 2500;
-const COOLDOWN_MS = 3600000;
+const CC_NORMAL_APPLE = 0,5;
+const CC_HC_APPLE = 2;
+const CC_NORMAL_MAX = 100;
+const CC_HC_MAX = 150;
+const COOLDOWN_MS = 15 * 60 * 1000; // 15 phút
 
-// ── ESTADO ──
+// ── STATE ──
 let canvas, ctx;
 let gameLoop = null;
 let score = 0;
 let snake = [];
-let food = {x: 0, y: 0};
+let food = { x: 0, y: 0 };
 let goldFood = null;
 let direction = "";
 let nextDir = "";
@@ -33,18 +33,16 @@ const SPD_BASE_HC = 105;
 const SPD_MIN     = 65;
 
 window.currentUser = "";
+window.currentPin  = "";
 window._isLagGhost = false;
+let cooldownInterval = null;
 
 // ── INIT ──
-// FIX: use DOMContentLoaded instead of window.onload so canvas/ctx is
-// initialised as soon as the DOM is parsed, without waiting for audio
-// resources (which 404 and would otherwise delay the entire init).
 document.addEventListener('DOMContentLoaded', () => {
     canvas = document.getElementById("snakeCanvas");
     if (!canvas) { console.error("snakeCanvas element not found!"); return; }
-    ctx    = canvas.getContext("2d");
+    ctx = canvas.getContext("2d");
 
-    // Pre-fill username from Hub login
     const savedUser = localStorage.getItem('choco_user');
     if (savedUser) {
         const inp = document.getElementById("player-user");
@@ -60,15 +58,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadBestScore();
     loadLb();
-    console.log("Snake Engine Loaded");
+    console.log("Snake Engine Loaded (Synced v2)");
 });
 
-// ── D-PAD (FIX: was missing dpadHit entirely) ──
+// ── D-PAD ──
 function dpadHit(dir, event) {
-    if (event) {
-        event.preventDefault();
-        event.stopPropagation();
-    }
+    if (event) { event.preventDefault(); event.stopPropagation(); }
     setDir(dir);
 }
 
@@ -94,12 +89,12 @@ function safeRoundRect(ctx, x, y, width, height, radius) {
 }
 
 function draw() {
-    if (!ctx) return; // safety guard: ctx not yet initialised
+    if (!ctx) return;
     ctx.fillStyle = "#020208";
     ctx.fillRect(0, 0, 300, 300);
-    
+
     ctx.strokeStyle = "rgba(255,149,0,0.06)";
-    ctx.lineWidth   = 0.5;
+    ctx.lineWidth = 0.5;
     for (let i = 0; i <= 300; i += BOX) {
         ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 300); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(300, i); ctx.stroke();
@@ -107,9 +102,9 @@ function draw() {
 
     const pulse = 0.85 + 0.15 * Math.sin(Date.now() / 200);
     ctx.save();
-    ctx.fillStyle  = "#ff2d78";
+    ctx.fillStyle = "#ff2d78";
     ctx.shadowColor = "#ff2d78";
-    ctx.shadowBlur  = 12 * pulse;
+    ctx.shadowBlur = 12 * pulse;
     ctx.beginPath();
     ctx.arc(food.x + BOX/2, food.y + BOX/2, 6 * pulse, 0, Math.PI*2);
     ctx.fill();
@@ -118,9 +113,9 @@ function draw() {
     if (goldFood) {
         const gp = 0.8 + 0.2 * Math.sin(Date.now() / 100);
         ctx.save();
-        ctx.fillStyle  = "#ffd700";
+        ctx.fillStyle = "#ffd700";
         ctx.shadowColor = "#ffd700";
-        ctx.shadowBlur  = 20 * gp;
+        ctx.shadowBlur = 20 * gp;
         ctx.beginPath();
         ctx.arc(goldFood.x + BOX/2, goldFood.y + BOX/2, 7 * gp, 0, Math.PI*2);
         ctx.fill();
@@ -129,24 +124,24 @@ function draw() {
 
     snake.forEach((seg, idx) => {
         const isHead = (idx === 0);
-        const t      = idx / snake.length;
+        const t = idx / snake.length;
         ctx.save();
-        
+
         if (window._isLagGhost) {
-            ctx.fillStyle  = idx % 2 === 0 ? "rgba(0,225,255,0.8)" : "rgba(255,255,255,0.5)";
+            ctx.fillStyle = idx % 2 === 0 ? "rgba(0,225,255,0.8)" : "rgba(255,255,255,0.5)";
             ctx.shadowColor = "#00e1ff";
-            ctx.shadowBlur  = 15;
+            ctx.shadowBlur = 15;
         } else if (isHead) {
             const g = ctx.createRadialGradient(seg.x+BOX/2, seg.y+BOX/2, 0, seg.x+BOX/2, seg.y+BOX/2, BOX);
             g.addColorStop(0, "#ffcc44");
             g.addColorStop(1, "#f58a00");
-            ctx.fillStyle  = g;
+            ctx.fillStyle = g;
             ctx.shadowColor = "#f58a00";
-            ctx.shadowBlur  = 15;
+            ctx.shadowBlur = 15;
         } else {
             ctx.fillStyle = `rgb(${Math.floor(210*(1-t*.7))}, ${Math.floor(72*(1-t*.7))}, 0)`;
         }
-        
+
         const pad = isHead ? 1 : 2 + (t * 2);
         safeRoundRect(ctx, seg.x + pad, seg.y + pad, BOX - (pad*2), BOX - (pad*2), isHead ? 5 : 3);
         ctx.restore();
@@ -196,7 +191,7 @@ function tick() {
     if (hx === food.x && hy === food.y) {
         score++;
         eaten = true;
-        food  = spawnFood();
+        food = spawnFood();
         handleCombo();
         spawnParticles(hx, hy, ["#ff2d78","#ffffff"]);
     } else if (goldFood && hx === goldFood.x && hy === goldFood.y) {
@@ -242,24 +237,55 @@ function spawnGoldMark() {
     }
 }
 
-// ── LOGIN & START ──
-function checkUser() {
+// ── AUTH & START ── (Đồng bộ: gọi POST /auth)
+async function checkUser() {
     const userInp = document.getElementById("player-user").value.trim();
+    const pinInp  = document.getElementById("player-pin").value.trim();
+
     if (!userInp || userInp.length < 2) return toast("❌ Enter a valid username!", "error");
+    if (!pinInp) return toast("❌ Enter your PIN!", "error");
 
-    const pin = localStorage.getItem('choco_pin');
-    if (!pin) return toast("❌ Please login from the Hub first!", "error");
+    // Lưu user vào localStorage để lần sau tự điền
+    localStorage.setItem('choco_user', userInp);
 
-    window.currentUser = userInp;
-    window.currentPin  = pin;
-    document.getElementById("setup-screen").style.display = "none";
-    document.getElementById("game-screen").style.display  = "block";
-    loadBestScore();
-    startGame();
+    try {
+        // Bước 1: Xác thực qua API
+        const authRes = await fetch('/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: userInp, pin: pinInp })
+        });
+        const authData = await authRes.json();
+
+        if (authData.status !== 'success') {
+            return toast("❌ " + (authData.message || "Auth failed"), "error");
+        }
+
+        // Bước 2: Kiểm tra cooldown
+        const cdRes = await fetch(`/snake/cooldown?username=${encodeURIComponent(userInp)}`);
+        const cdData = await cdRes.json();
+
+        if (cdData.cooldown) {
+            return toast(`⏳ Cooldown! Còn ${cdData.remaining_minutes} phút`, "error");
+        }
+
+        // OK → vào game
+        window.currentUser = userInp;
+        window.currentPin  = pinInp;
+
+        document.getElementById("setup-screen").style.display = "none";
+        document.getElementById("game-screen").style.display  = "block";
+        loadBestScore();
+        startGame();
+
+    } catch (e) {
+        toast("⚠️ Server offline hoặc lỗi mạng", "error");
+        console.error(e);
+    }
 }
 
+// ── GAME CONTROL ──
 function startGame() {
-    // Defensive: re-initialise canvas context in case it wasn't ready at DOMContentLoaded
     if (!ctx) {
         canvas = document.getElementById("snakeCanvas");
         if (canvas) ctx = canvas.getContext("2d");
@@ -282,7 +308,7 @@ function startGame() {
     draw();
     gameLoop = setInterval(tick, curSpeed);
 
-    // Audio — src is set here (not on the element) to prevent 404s blocking page load
+    // Audio
     const nm = document.getElementById("normalMusic");
     const hm = document.getElementById("hardcoreMusic");
     if (nm && hm) {
@@ -300,6 +326,33 @@ function startGame() {
     if (hardcoreMode && typeof startHardcoreSystems === "function") {
         startHardcoreSystems();
     }
+}
+
+function triggerGameOver() {
+    if (dead) return;
+    dead = true;
+    clearInterval(gameLoop);
+
+    document.getElementById("normalMusic").pause();
+    document.getElementById("hardcoreMusic").pause();
+
+    const r = hardcoreMode
+        ? Math.min(score * CC_HC_APPLE, CC_HC_MAX)
+        : Math.min(score * CC_NORMAL_APPLE, CC_NORMAL_MAX);
+
+    document.getElementById("m-score").textContent  = score;
+    document.getElementById("m-reward").textContent = r + " CC";
+    document.getElementById("m-user").textContent   = window.currentUser;
+
+    const modal = document.getElementById("modal");
+    modal.classList.add("show");
+
+    const btn = document.getElementById("btn-claim");
+    btn.disabled    = false;
+    btn.textContent = "💰 CLAIM CC";
+
+    saveBestScore();
+    if (typeof _cleanHC === "function") _cleanHC();
 }
 
 function toggleHardcoreMode() {
@@ -323,31 +376,96 @@ function toggleHardcoreMode() {
     }
 }
 
-function triggerGameOver() {
-    if (dead) return;
-    dead = true;
-    clearInterval(gameLoop);
-    
-    document.getElementById("normalMusic").pause();
-    document.getElementById("hardcoreMusic").pause();
+function restartGame() {
+    document.getElementById("modal").classList.remove("show");
+    clearCooldownUI();
+    startGame();
+}
 
-    const r = hardcoreMode
-        ? Math.min(score * CC_HC_APPLE, CC_HC_MAX)
-        : Math.min(score * CC_NORMAL_APPLE, CC_NORMAL_MAX);
-
-    document.getElementById("m-score").textContent  = score;
-    document.getElementById("m-reward").textContent = r + " CC";
-    document.getElementById("m-user").textContent   = window.currentUser;
-
-    const modal = document.getElementById("modal");
-    modal.classList.add("show");
-
+// ── API CLAIM ── (Đồng bộ: POST /snake/claim)
+async function claimReward() {
     const btn = document.getElementById("btn-claim");
-    btn.disabled    = false;
-    btn.textContent = "💰 CLAIM CC";
+    btn.disabled    = true;
+    btn.textContent = "CLAIMING…";
 
-    saveBestScore();
-    if (typeof _cleanHC === "function") _cleanHC();
+    try {
+        const mode = hardcoreMode ? 'hardcore' : 'normal';
+        const res = await fetch("/snake/claim", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                username: window.currentUser,
+                pin:      window.currentPin,
+                apples:   score,        // backend cần "apples" không phải "score"
+                mode:     mode
+            })
+        });
+        const data = await res.json();
+
+        if (data.status === "success") {
+            toast("✅ Claimed " + data.reward + " CC! Balance: " + data.new_balance + " CC", "success");
+            btn.textContent = "✅ CLAIMED!";
+
+            // Cooldown bar 15 phút
+            startCooldownUI();
+
+            // Notification
+            if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification('🍫 CC Received!', {
+                    body: `+${data.reward} CC credited to your account!`
+                });
+            }
+        } else {
+            toast("❌ " + (data.message || "Claim failed"), "error");
+            btn.disabled    = false;
+            btn.textContent = "💰 CLAIM CC";
+        }
+    } catch (e) {
+        toast("⚠️ API Offline", "error");
+        btn.disabled    = false;
+        btn.textContent = "💰 CLAIM CC";
+    }
+}
+
+// ── COOLDOWN UI ── (15 phút)
+function startCooldownUI() {
+    clearCooldownUI();
+    const cdWrap  = document.getElementById("cooldown-wrap");
+    const cdLabel = document.getElementById("cooldown-label");
+    const cdFill  = document.getElementById("cooldown-fill");
+
+    if (!cdWrap || !cdLabel || !cdFill) return;
+
+    cdWrap.style.display = "block";
+    let remaining = COOLDOWN_MS;
+
+    const tick = () => {
+        remaining -= 1000;
+        if (remaining <= 0) {
+            cdLabel.textContent = "⏳ Ready to claim again!";
+            cdFill.style.width  = "100%";
+            cdWrap.style.display = "none";
+            clearInterval(cooldownInterval);
+            cooldownInterval = null;
+            return;
+        }
+        const m = Math.floor(remaining / 60000);
+        const s = Math.floor((remaining % 60000) / 1000);
+        cdLabel.textContent = `⏳ Cooldown: ${m}m ${s.toString().padStart(2, '0')}s`;
+        cdFill.style.width  = ((COOLDOWN_MS - remaining) / COOLDOWN_MS * 100) + "%";
+    };
+
+    tick();
+    cooldownInterval = setInterval(tick, 1000);
+}
+
+function clearCooldownUI() {
+    if (cooldownInterval) {
+        clearInterval(cooldownInterval);
+        cooldownInterval = null;
+    }
+    const cdWrap = document.getElementById("cooldown-wrap");
+    if (cdWrap) cdWrap.style.display = "none";
 }
 
 // ── COMBO, PARTICLES, SPEED ──
@@ -371,7 +489,7 @@ function handleCombo() {
 function spawnParticles(x, y, colors, count = 10) {
     const wrap = document.getElementById("canvas-wrap");
     for (let i = 0; i < count; i++) {
-        const p     = document.createElement("div");
+        const p = document.createElement("div");
         p.className = "particle";
         const angle = Math.random() * Math.PI * 2;
         const dist  = 20 + Math.random() * 40;
@@ -404,11 +522,7 @@ function togglePause() {
     document.getElementById("pause-btn").textContent = paused ? "▶ RESUME" : "⏸ PAUSE";
 }
 
-function restartGame() {
-    document.getElementById("modal").classList.remove("show");
-    startGame();
-}
-
+// ── UI HELPERS ──
 function toast(msg, type) {
     const t = document.getElementById("toast");
     t.textContent = msg;
@@ -416,15 +530,21 @@ function toast(msg, type) {
     setTimeout(() => t.className = "", 3000);
 }
 
-function showPU(msg) { document.getElementById("pu-banner").textContent = msg; document.getElementById("pu-banner").classList.add("show"); }
-function hidePU()    { document.getElementById("pu-banner").classList.remove("show"); }
+function showPU(msg) {
+    document.getElementById("pu-banner").textContent = msg;
+    document.getElementById("pu-banner").classList.add("show");
+}
+function hidePU() {
+    document.getElementById("pu-banner").classList.remove("show");
+}
 
 function updateHUD() {
-    document.getElementById("score-val").textContent  = score;
+    document.getElementById("score-val").textContent = score;
     const r = hardcoreMode ? Math.min(score * CC_HC_APPLE, CC_HC_MAX) : Math.min(score * CC_NORMAL_APPLE, CC_NORMAL_MAX);
     document.getElementById("reward-val").textContent = r + " CC";
 }
 
+// ── BEST SCORE ──
 function saveBestScore() {
     const b = localStorage.getItem(`snake_best_${window.currentUser}`) || 0;
     if (score > b) {
@@ -440,70 +560,10 @@ function loadBestScore() {
     }
 }
 
-// ── API — CLAIM ──
-async function claimReward() {
-    const btn = document.getElementById("btn-claim");
-    btn.disabled    = true;
-    btn.textContent = "CLAIMING…";
-
-    try {
-        const res  = await fetch("/payout", {
-            method:  "POST",
-            headers: { "Content-Type": "application/json" },
-            body:    JSON.stringify({
-                username: window.currentUser,
-                pin:      window.currentPin,
-                score:    score,
-                hardcore: hardcoreMode
-            })
-        });
-        const data = await res.json();
-
-        if (data.status === "success") {
-            toast("✅ " + data.message + " Balance: " + data.new_balance + " CC", "success");
-            btn.textContent = "✅ CLAIMED!";
-
-            // Browser notification
-            if ('Notification' in window && Notification.permission === 'granted') {
-                new Notification('🍫 CC Received!', {
-                    body: `+${data.reward} CC credited to your account!`
-                });
-            }
-
-            // Cooldown bar
-            const cdWrap  = document.getElementById("cooldown-wrap");
-            const cdLabel = document.getElementById("cooldown-label");
-            const cdFill  = document.getElementById("cooldown-fill");
-            if (cdWrap) {
-                cdWrap.style.display = "block";
-                let remaining        = 3600;
-                const tick = () => {
-                    remaining--;
-                    const m = Math.floor(remaining / 60);
-                    const s = remaining % 60;
-                    cdLabel.textContent = `⏳ Next claim in: ${m}m ${s}s`;
-                    cdFill.style.width  = ((3600 - remaining) / 3600 * 100) + "%";
-                    if (remaining > 0) setTimeout(tick, 1000);
-                    else { cdWrap.style.display = "none"; }
-                };
-                tick();
-            }
-        } else {
-            toast("❌ " + (data.message || "Claim failed"), "error");
-            btn.disabled    = false;
-            btn.textContent = "💰 CLAIM CC";
-        }
-    } catch (e) {
-        toast("⚠️ API Offline", "error");
-        btn.disabled    = false;
-        btn.textContent = "💰 CLAIM CC";
-    }
-}
-
 // ── LEADERBOARD ──
 async function loadLb() {
     try {
-        const res  = await fetch("/leaderboard");
+        const res = await fetch("/leaderboard");
         const data = await res.json();
         window.lbData = data;
         showLb('normal');
