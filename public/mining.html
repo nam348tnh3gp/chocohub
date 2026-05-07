@@ -9,6 +9,7 @@
         :root {
             --bg: #0a0a0c; --card: #14151a; --border: rgba(255,184,108,0.15);
             --gold: #ffb86c; --text: #e0e0e0; --mid: #8b949e; --dim: #484f58;
+            --green: #50fa7b; --red: #ff5555;
         }
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -22,7 +23,7 @@
             font-family: 'Space Mono', monospace; font-size: 0.7rem;
             padding: 8px 12px; background: rgba(255,255,255,0.02);
             border: 1px solid var(--border); border-radius: 8px;
-            text-decoration: none; color: var(--mid); transition: .3s;
+            text-decoration: none; color: var(--mid); transition: .3s; z-index: 1000;
         }
         .btn-back:hover { color: var(--gold); border-color: var(--gold); background: rgba(255,184,108,0.05); }
         .header { text-align: center; margin: 20px 0; }
@@ -48,39 +49,36 @@
         .block-card.mining { border-color: var(--gold); box-shadow: 0 0 10px rgba(255,184,108,0.1); }
         .block-info { flex: 1; }
         .block-id   { font-family: 'Space Mono', monospace; font-size: 0.75rem; color: var(--gold); margin-bottom: 6px; }
-        .block-meta { display: flex; gap: 6px; flex-wrap: wrap; }
         .badge {
             font-size: 0.65rem; font-weight: 600; padding: 3px 8px; border-radius: 6px;
-            font-family: 'Space Mono', monospace;
+            font-family: 'Space Mono', monospace; margin-right: 4px;
         }
         .badge-diff   { background: rgba(255,184,108,0.1); color: var(--gold); }
-        .badge-reward { background: rgba(255,184,108,0.1); color: var(--gold); }
+        .badge-reward { background: rgba(100,200,255,0.1); color: #6be5ff; }
         .badge-mining { background: rgba(255,184,108,0.25); color: #fff; }
-        .btn-mine { background: var(--gold); color: #000; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 0.7rem; white-space: nowrap; }
-        .btn-mine:disabled { opacity: 0.3; cursor: not-allowed; }
-        .empty-state { text-align: center; padding: 40px 20px; color: var(--dim); font-size: 0.9rem; }
         .progress-bar-bg { height: 4px; background: #222; border-radius: 2px; overflow: hidden; margin-bottom: 14px; }
         .progress-bar    { height: 100%; background: var(--gold); width: 0%; transition: width .5s; }
-        .control-panel { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 14px; }
-        .btn-start-mining, .btn-stop-mining {
+        .control-panel { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+        .btn-start, .btn-stop {
             width: 100%; padding: 14px; border-radius: 10px;
             font-weight: 800; font-size: 0.9rem; cursor: pointer;
             transition: .3s; margin-bottom: 10px; border: none;
         }
-        .btn-start-mining { background: linear-gradient(135deg, #f58a00 0%, #ffae42 100%); color: #000; box-shadow: 0 4px 15px rgba(245,138,0,0.3); }
-        .btn-start-mining:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(245,138,0,0.4); }
-        .btn-start-mining:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-        .btn-stop-mining { background: rgba(255,85,85,0.1); color: #ff5555; border: 1px solid #ff5555; }
-        .btn-stop-mining:disabled { opacity: 0.3; cursor: not-allowed; }
+        .btn-start { background: linear-gradient(135deg, #f58a00 0%, #ffae42 100%); color: #000; box-shadow: 0 4px 15px rgba(245,138,0,0.3); }
+        .btn-start:hover { transform: translateY(-2px); }
+        .btn-start:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-stop { background: rgba(255,85,85,0.1); color: #ff5555; border: 1px solid #ff5555; }
+        .btn-stop:disabled { opacity: 0.3; cursor: not-allowed; }
         .console {
             margin-top: 16px; background: #050505; border-radius: 8px;
-            padding: 12px; height: 120px; overflow-y: auto;
+            padding: 12px; height: 150px; overflow-y: auto;
             font-family: 'Space Mono', monospace; font-size: 0.7rem;
             color: #50fa7b; border: 1px solid rgba(80,250,123,0.1);
         }
-        .log-win  { color: #50fa7b; }
-        .log-err  { color: #ff5555; }
+        .log-win  { color: var(--green); }
+        .log-err  { color: var(--red); }
         .log-warn { color: #f1fa8c; }
+        .log-info { color: #6be5ff; }
         #toast {
             position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(60px);
             background: var(--card); border: 1px solid var(--border);
@@ -88,8 +86,8 @@
             font-size: 0.85rem; opacity: 0; transition: .4s; pointer-events: none; z-index: 999;
         }
         #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-        #toast.win  { border-color: #50fa7b; color: #50fa7b; }
-        #toast.err  { border-color: #ff5555; color: #ff5555; }
+        #toast.win  { border-color: var(--green); color: var(--green); }
+        #toast.err  { border-color: var(--red); color: var(--red); }
     </style>
 </head>
 <body>
@@ -99,7 +97,7 @@
 <div class="container">
     <div class="header">
         <h1>💻 Web Miner</h1>
-        <p>SHA-256 CPU Miner · Click START to begin</p>
+        <p>SHA-256 · Auto-mine best block</p>
     </div>
 
     <div class="stats-row">
@@ -107,14 +105,22 @@
         <div class="stat-card"><div class="stat-val" id="stat-hashes">0</div><div class="stat-lbl">Total Hashes</div></div>
     </div>
 
-    <div class="section-title">Available Blocks</div>
-    <div id="block-list" class="block-list"><div class="empty-state"><div class="icon">🔍</div>Loading blocks...</div></div>
+    <div class="section-title">Current Block</div>
+    <div id="block-info" style="margin-bottom: 20px;">
+        <div class="block-card">
+            <div class="block-info">
+                <div class="block-id" id="current-block-id">No block selected</div>
+                <span class="badge badge-diff" id="current-block-diff">-</span>
+                <span class="badge badge-reward" id="current-block-reward">-</span>
+            </div>
+        </div>
+    </div>
 
     <div class="progress-bar-bg"><div class="progress-bar" id="progress-bar"></div></div>
 
     <div class="control-panel">
-        <button id="btn-start" class="btn-start-mining" onclick="startMining()">▶ START MINING</button>
-        <button id="btn-stop" class="btn-stop-mining" disabled onclick="stopMining()">■ STOP MINING</button>
+        <button id="btn-start" class="btn-start" onclick="startMining()">▶ START MINING</button>
+        <button id="btn-stop" class="btn-stop" disabled onclick="stopMining()">■ STOP MINING</button>
         <div id="console" class="console"></div>
     </div>
 </div>
@@ -124,13 +130,13 @@
 <script>
 const API = window.location.origin;
 let miningActive = false;
-let miningInterval = null;
 let currentBountyId = null;
 let currentJob = null;
 let totalHashes = 0;
 let startTime = null;
 let currentNonce = 0;
 let hashrateInterval = null;
+let allBounties = {};
 
 function getWorkerName() { return (localStorage.getItem('choco_user') || 'anonymous').toLowerCase(); }
 function fmtHashrate(hps) { if (hps >= 1e6) return (hps/1e6).toFixed(2)+' MH/s'; if (hps>=1e3) return (hps/1e3).toFixed(2)+' kH/s'; return hps.toFixed(1)+' H/s'; }
@@ -138,17 +144,22 @@ function fmtNum(n) { if (n>=1e9) return (n/1e9).toFixed(1)+'B'; if (n>=1e6) retu
 
 function log(msg, cls='') {
     const con = document.getElementById('console');
-    const line = document.createElement('div'); line.className = 'log-line '+cls; line.textContent = '> '+msg;
-    con.appendChild(line); con.scrollTop = con.scrollHeight;
-    while(con.children.length>80) con.removeChild(con.firstChild);
+    const line = document.createElement('div');
+    line.className = 'log-line ' + cls;
+    line.textContent = '> ' + msg;
+    con.appendChild(line);
+    con.scrollTop = con.scrollHeight;
+    while (con.children.length > 100) con.removeChild(con.firstChild);
 }
 
 function toast(msg, type='') {
-    const t = document.getElementById('toast'); t.textContent=msg; t.className='show '+type;
-    setTimeout(()=> t.className='', 3500);
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'show ' + type;
+    setTimeout(() => t.className = '', 3500);
 }
 
-// SHA-256
+// ── SHA-256 ────────────────────────────────────────
 async function sha256(str) {
     const encoder = new TextEncoder();
     const data = encoder.encode(str);
@@ -158,58 +169,65 @@ async function sha256(str) {
 }
 
 function meetsTarget(hashHex, targetBinStr) {
-    let bitsRequired = targetBinStr.length;
-    let hexLen = Math.ceil(bitsRequired / 4);
-    let prefixHex = hashHex.substring(0, hexLen);
+    const bitsRequired = targetBinStr.length;
+    const hexLen = Math.ceil(bitsRequired / 4);
+    const prefixHex = hashHex.substring(0, hexLen);
     let binFull = '';
-    for (let ch of prefixHex) binFull += parseInt(ch, 16).toString(2).padStart(4, '0');
+    for (const ch of prefixHex) {
+        binFull += parseInt(ch, 16).toString(2).padStart(4, '0');
+    }
     return binFull.startsWith(targetBinStr);
 }
 
+// ── Fetch blocks ───────────────────────────────────
 async function fetchBlocks() {
     try {
         const res = await fetch(`${API}/active_bounties_list`);
         const data = await res.json();
-        renderBlocks(data);
-    } catch(e) { log('Error loading blocks: '+e.message, 'log-err'); }
+        allBounties = data;
+        updateBlockDisplay();
+    } catch (e) {
+        log('Cannot connect to server', 'log-err');
+    }
 }
 
-function renderBlocks(data) {
-    const list = document.getElementById('block-list');
-    const ids = Object.keys(data);
+function updateBlockDisplay() {
+    const ids = Object.keys(allBounties);
     if (ids.length === 0) {
-        list.innerHTML = '<div class="empty-state"><div class="icon">📭</div>No blocks available</div>';
+        document.getElementById('current-block-id').textContent = 'No blocks available';
+        document.getElementById('current-block-diff').textContent = '-';
+        document.getElementById('current-block-reward').textContent = '-';
         return;
     }
-    list.innerHTML = ids.map(id => {
-        const b = data[id];
-        const isMining = id === currentBountyId;
-        return `<div class="block-card${isMining ? ' mining' : ''}">
-            <div class="block-info">
-                <div class="block-id">#${id.substring(0,10)}...</div>
-                <div class="block-meta">
-                    <span class="badge badge-diff">${b.difficulty_bits} bits</span>
-                    <span class="badge badge-reward">${b.reward} CC</span>
-                    ${isMining ? '<span class="badge badge-mining">⚡ MINING</span>' : ''}
-                </div>
-            </div>
-            ${!isMining ? `<button class="btn-mine" onclick="selectBlock('${id}')">SELECT</button>` : ''}
-        </div>`;
-    }).join('');
-}
-
-function selectBlock(bountyId) {
-    if (miningActive) stopMining();
-    currentBountyId = bountyId;
-    document.getElementById('btn-start').disabled = false;
-    log(`📌 Block #${bountyId.substring(0,10)}... selected. Press START to mine.`);
-    fetchBlocks();
-}
-
-async function startMining() {
-    if (!currentBountyId) {
-        toast('Please select a block first', 'err');
+    
+    // Nếu đang mining, giữ block hiện tại
+    if (miningActive && currentBountyId && allBounties[currentBountyId]) {
+        displayBlockInfo(currentBountyId);
         return;
+    }
+    
+    // Chọn block đầu tiên (mới nhất)
+    if (!miningActive) {
+        currentBountyId = ids[0];
+        displayBlockInfo(currentBountyId);
+    }
+}
+
+function displayBlockInfo(bountyId) {
+    const b = allBounties[bountyId];
+    if (!b) return;
+    document.getElementById('current-block-id').textContent = '#' + bountyId.substring(0, 12) + '...';
+    document.getElementById('current-block-diff').textContent = (b.difficulty_bits || '?') + ' bits';
+    document.getElementById('current-block-reward').textContent = (b.reward || 0) + ' CC';
+}
+
+// ── Mining ─────────────────────────────────────────
+async function startMining() {
+    if (miningActive) return;
+    if (!currentBountyId || !allBounties[currentBountyId]) {
+        log('No block available. Waiting for server...', 'log-warn');
+        await fetchBlocks();
+        if (!currentBountyId) return;
     }
     
     stopMining();
@@ -217,9 +235,16 @@ async function startMining() {
     // Get job
     try {
         const res = await fetch(`${API}/get_job/${currentBountyId}`);
-        if (!res.ok) { log('Block not found','log-err'); fetchBlocks(); return; }
+        if (!res.ok) {
+            log('Block expired, fetching new...', 'log-warn');
+            await fetchBlocks();
+            return startMining();
+        }
         currentJob = await res.json();
-    } catch(e) { log('Error: '+e.message,'log-err'); return; }
+    } catch (e) {
+        log('Error: ' + e.message, 'log-err');
+        return;
+    }
     
     miningActive = true;
     totalHashes = 0;
@@ -232,19 +257,24 @@ async function startMining() {
     const workerName = getWorkerName();
     const targetBin = currentJob.target_bin;
     const lastHash = currentJob.last_hash;
+    const bountyId = currentBountyId;
     
-    log(`⛏️ Mining block #${currentBountyId.substring(0,10)}... (${currentJob.difficulty_bits} bits)`);
-    renderBlocks(await (await fetch(`${API}/active_bounties_list`)).json());
+    log(`⛏️ Mining #${bountyId.substring(0,10)}... (${currentJob.difficulty_bits} bits, ${allBounties[bountyId]?.reward} CC)`, 'log-info');
     
-    // Progress bar update
+    // Update progress bar
     hashrateInterval = setInterval(() => {
         if (!miningActive) return;
         const elapsed = (Date.now() - startTime) / 1000;
-        if (elapsed > 0) document.getElementById('stat-hashrate').textContent = fmtHashrate(totalHashes / elapsed);
-        document.getElementById('progress-bar').style.width = Math.min(90, 20 + (totalHashes / 500000) * 60) + '%';
+        if (elapsed > 0) {
+            document.getElementById('stat-hashrate').textContent = fmtHashrate(totalHashes / elapsed);
+        }
+        document.getElementById('progress-bar').style.width = Math.min(90, 10 + (totalHashes / 300000) * 70) + '%';
     }, 1000);
     
-    // Mining loop
+    // ═══════════════════════════════════════════════
+    // MINING LOOP - ĐÚNG THỨ TỰ INPUT
+    // Server: last_hash + nonce + workerName
+    // ═══════════════════════════════════════════════
     async function mine() {
         if (!miningActive) return;
         
@@ -254,13 +284,15 @@ async function startMining() {
         for (let i = 0; i < BATCH; i++) {
             if (!miningActive) return;
             
-            const candidate = lastHash + workerName + currentBountyId + currentNonce.toString();
-            const hashed = await sha256(candidate);
+            // ⚠️ QUAN TRỌNG: Server dùng last_hash + nonce + workerName
+            const input = lastHash + currentNonce + workerName;
+            const hashed = await sha256(input);
             
             if (meetsTarget(hashed, targetBin)) {
                 log(`🎯 Nonce found: ${currentNonce}`, 'log-win');
+                document.getElementById('progress-bar').style.width = '100%';
                 miningActive = false;
-                await submitSolution(currentBountyId, currentNonce, workerName);
+                await submitSolution(bountyId, currentNonce, workerName);
                 return;
             }
             
@@ -283,34 +315,72 @@ function stopMining() {
     document.getElementById('btn-start').disabled = false;
     document.getElementById('btn-stop').disabled = true;
     document.getElementById('progress-bar').style.width = '0%';
+    document.getElementById('stat-hashrate').textContent = '0 H/s';
 }
 
+// ── Submit ─────────────────────────────────────────
 async function submitSolution(id, nonce, workerName) {
-    log(`📡 Submitting nonce ${nonce}...`);
+    log(`📡 Submitting nonce ${nonce}...`, 'log-info');
     try {
         const res = await fetch(`${API}/submit_solution`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ bounty_id: id, nonce: nonce, worker_name: workerName, device_type: 'web_miner' })
+            body: JSON.stringify({
+                bounty_id: id,
+                nonce: nonce,
+                worker_name: workerName,
+                device_type: 'web_miner'
+            })
         });
         const result = await res.json();
         
         if (res.ok && result.status === 'success') {
-            log('🏆 ' + (result.message || 'Block solved!'), 'log-win');
-            toast('🏆 Block solved! ' + (result.reward || '') + ' CC', 'win');
+            log('🏆 BLOCK SOLVED! +' + (result.reward || '?') + ' CC', 'log-win');
+            toast('🏆 +' + (result.reward || '?') + ' CC!', 'win');
         } else {
             log('❌ ' + (result.reason || 'Rejected'), 'log-err');
             toast('❌ Rejected', 'err');
         }
-    } catch(e) { log('Error: '+e.message, 'log-err'); }
+    } catch (e) {
+        log('Connection error: ' + e.message, 'log-err');
+    }
     
     stopMining();
-    fetchBlocks();
+    await fetchBlocks();
+    
+    // Auto-restart sau 3 giây
+    setTimeout(async () => {
+        if (!miningActive) {
+            log('🔄 Auto-restarting miner...', 'log-info');
+            await startMining();
+        }
+    }, 3000);
 }
 
-// Init
-fetchBlocks();
-setInterval(fetchBlocks, 30000);
+// ── Init ───────────────────────────────────────────
+window.onload = async () => {
+    await fetchBlocks();
+    
+    // Auto-start sau 2 giây
+    setTimeout(() => {
+        if (!miningActive && currentBountyId) {
+            startMining();
+        }
+    }, 2000);
+    
+    // Refresh blocks mỗi 30s
+    setInterval(fetchBlocks, 30000);
+    
+    // Nếu block hiện tại bị solve, tự chuyển block mới
+    setInterval(async () => {
+        if (miningActive && currentBountyId && !allBounties[currentBountyId]) {
+            log('⚠️ Block solved by another miner. Switching...', 'log-warn');
+            stopMining();
+            await fetchBlocks();
+            if (currentBountyId) startMining();
+        }
+    }, 5000);
+};
 </script>
 </body>
 </html>
