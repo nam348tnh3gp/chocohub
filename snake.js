@@ -1,21 +1,22 @@
 // snake.js
 const db = require('./db');
+const Database = require('better-sqlite3');
+const path = require('path');
+const sqlite = new Database(path.join(__dirname, 'chocohub.db'));
 
 const REWARD_NORMAL = 0.5;
 const REWARD_HARDCORE = 2.0;
-const COOLDOWN_MS = 60 * 60 * 1000; // 1 giờ
+const COOLDOWN_MS = 60 * 60 * 1000;
 
 function processClaim(username, pin, apples, mode) {
   username = username.toLowerCase().trim();
-  
-  // Verify credentials
+
   db.authenticate(username, pin);
-  
-  // Check cooldown
-  const lastClaim = db.db.prepare(
+
+  const lastClaim = sqlite.prepare(
     'SELECT claimed_at FROM snake_claims WHERE username=? ORDER BY claimed_at DESC LIMIT 1'
   ).get(username);
-  
+
   if (lastClaim) {
     const lastTime = new Date(lastClaim.claimed_at + 'Z').getTime();
     const elapsed = Date.now() - lastTime;
@@ -24,21 +25,18 @@ function processClaim(username, pin, apples, mode) {
       throw new Error(`Cooldown active. Wait ${remaining} minutes.`);
     }
   }
-  
-  // Calculate reward
+
   const rate = mode === 'hardcore' ? REWARD_HARDCORE : REWARD_NORMAL;
   const reward = parseFloat((apples * rate).toFixed(4));
-  
-  // Update balance
+
   db.updateBalance(username, reward);
-  
-  // Log claim
-  db.db.prepare('INSERT INTO snake_claims (username, apples, mode, reward) VALUES (?, ?, ?, ?)')
-    .run(username, apples, mode, reward);
-  
+
+  sqlite.prepare('INSERT INTO snake_claims (username, apples, mode, reward) VALUES (?, ?, ?, ?)')
+    .run(username, apples, mode || 'normal', reward);
+
   return {
     status: 'success',
-    message: `Claimed ${reward} CC from ${apples} apples (${mode})`,
+    message: `Claimed ${reward} CC from ${apples} apples (${mode || 'normal'})`,
     reward: reward,
     new_balance: db.getUser(username).balance
   };
