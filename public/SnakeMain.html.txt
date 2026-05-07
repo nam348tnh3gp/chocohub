@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>CHOCO HUB · Snake Faucet</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Space+Mono:wght@400;700&family=Press+Start+2P&display=swap" rel="stylesheet">
+    
+    <style>
+        /* ═══════════════════════════════════════════
+           CHOCO HUB · GLOBAL DESIGN SYSTEM (merged style.css)
+           ═══════════════════════════════════════════ */
+        :root {
+            --void:        #0a0a12;
+            --deep:        #0d0b0a;
+            --surface:     rgba(20, 20, 35, 0.7);
+            --raised:      #1d1d2e;
+            --overlay:     rgba(8, 8, 16, 0.94);
+            --border:      rgba(255, 149, 0, 0.08);
+            --border-mid:  rgba(255, 149, 0, 0.18);
+            --border-hi:   rgba(255, 149, 0, 0.35);
+            --text:        #eee4d8;
+            --mid:         #8b8296;
+            --dim:         #4a4458;
+            --amber:       #f58a00;
+            --amber-soft:  #ffb347;
+            --amber-glow:  rgba(245, 138, 0, 0.25);
+            --amber-faint: rgba(245, 138, 0, 0.04);
+            --gold:        #f2c94c;
+            --green:       #40c057;
+            --red:         #fa5252;
+            --pink:        #f06292;
+            
+            --bg: var(--void);
+            --radius-sm: 12px;
+            --radius-md: 20px;
+            --radius-lg: 28px;
+            --radius-full: 99px;
+            --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.4);
+            --shadow-card-hover: 0 20px 48px rgba(0, 0, 0, 0.55);
+            --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
+            --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+            --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { font-size: 14px; scroll-behavior: smooth; }
+        
+        body {
+            margin: 0; padding: 0; background-color: #0a0807;
+            background-image: 
+                radial-gradient(circle at 50% 40%, rgba(255, 120, 0, 0.08) 0%, transparent 70%), 
+                radial-gradient(circle at 50% 50%, #140d0a 0%, #0a0807 100%);
+            background-attachment: fixed; color: var(--text); font-family: 'Outfit', sans-serif;
+            overflow-x: hidden; min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+        }
+        
+        button { font-family: inherit; cursor: pointer; border: none; outline: none; }
+        a { color: var(--amber); text-decoration: none; }
+        
+        /* Animations */
+        @keyframes pulseGlow {
+            0% { box-shadow: 0 0 5px rgba(255, 149, 0, 0.05); }
+            50% { box-shadow: 0 0 15px rgba(255, 149, 0, 0.2); }
+            100% { box-shadow: 0 0 5px rgba(255, 149, 0, 0.05); }
+        }
+        @keyframes liquidMove {
+            0% { transform: translate(0, 0) scale(1) rotate(30deg); }
+            50% { transform: translate(-5%, 5%) scale(1.3) rotate(100deg); }
+            100% { transform: translate(5%, -5%) scale(1) rotate(-2deg); }
+        }
+        @keyframes hudPop { from { transform: scale(1.3); } to { transform: scale(1); } }
+        @keyframes pBurst {
+            0% { transform: translate(0,0) scale(1); opacity: 1; }
+            100% { transform: translate(var(--tx),var(--ty)) scale(0); opacity: 0; }
+        }
+        
+        /* Liquid background */
+        .liquid-bg {
+            position: fixed; top: -25%; left: -25%; width: 150%; height: 150%;
+            background: radial-gradient(circle at center, rgba(255, 149, 0, 0.04) 0%, rgba(30, 20, 10, 0.2) 30%, transparent 60%);
+            z-index: -1; pointer-events: none; filter: blur(60px);
+            animation: liquidMove 20s ease-in-out infinite alternate;
+        }
+        
+        /* Back Button */
+        .btn-back {
+            position: fixed; top: 20px; left: 20px; z-index: 1000;
+            color: var(--mid); font-family: 'Space Mono', monospace; font-size: 0.7rem; font-weight: 700;
+            text-decoration: none; padding: 10px 16px; background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border); border-radius: 8px;
+            transition: all 0.2s; text-transform: uppercase;
+            backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+        }
+        .btn-back:hover {
+            color: var(--amber); border-color: var(--amber);
+            background: rgba(255, 149, 0, 0.1); transform: translateX(-3px);
+        }
+        
+        /* Header */
+        header {
+            position: relative; z-index: 2; text-align: center; padding: 40px 20px 15px;
+        }
+        .logo {
+            font-family: 'Outfit', sans-serif; font-weight: 800;
+            font-size: clamp(1.4rem, 5vw, 2.2rem); color: var(--amber);
+            letter-spacing: 1px; text-shadow: 0 0 16px var(--amber-glow), 0 0 45px rgba(255,149,0,.18);
+        }
+        .logo-sub {
+            font-family: 'Space Mono', monospace; font-size: .65rem; color: var(--dim);
+            letter-spacing: 2px; text-transform: uppercase; margin-top: 6px;
+        }
+        
+        /* Hub container */
+        .hub {
+            position: relative; z-index: 2; width: min(500px, 96vw); margin: 10px auto 60px;
+        }
+        
+        /* Panel */
+        .panel {
+            position: relative; z-index: 1; width: 100%; max-width: 680px;
+            background: var(--surface); backdrop-filter: blur(14px) saturate(160%);
+            -webkit-backdrop-filter: blur(14px) saturate(160%);
+            border: 1px solid var(--border); border-radius: 18px; padding: 35px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+        }
+        
+        .c-tr, .c-bl {
+            content: ''; position: absolute; width: 18px; height: 18px;
+            border-color: var(--amber); border-style: solid; opacity: .45;
+        }
+        .c-tr { top: -1px; right: -1px; border-width: 2px 2px 0 0; border-radius: 0 18px 0 0; }
+        .c-bl { bottom: -1px; left: -1px; border-width: 0 0 2px 2px; border-radius: 0 0 0 18px; }
+        
+        /* Setup Screen */
+        #setup-screen { text-align: center; }
+        .game-title {
+            font-family: 'Outfit'; font-weight: 800; font-size: 2.2rem;
+            color: var(--amber); margin-bottom: 5px;
+        }
+        .game-sub { font-size: .85rem; color: var(--mid); line-height: 1.6; margin-bottom: 20px; }
+        
+        .reward-row {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 20px;
+        }
+        .rcard {
+            padding: 20px 10px; background: linear-gradient(145deg, rgba(29, 29, 46, 0.4), rgba(15, 15, 25, 0.5));
+            border: 1px solid var(--border); border-radius: 12px; text-align: center;
+        }
+        .rcard-val {
+            font-family: 'Space Mono'; font-size: 1.15rem; font-weight: 700;
+            color: var(--amber); margin-bottom: 5px;
+        }
+        .rcard-lbl { font-size: .7rem; color: var(--mid); }
+        
+        /* Hardcore Switch & Badges */
+        .hc-wrap {
+            background: rgba(255, 45, 120, .04); border: 1px solid rgba(255, 45, 120, .12);
+            border-radius: 12px; padding: 15px; margin-bottom: 12px; cursor: pointer; transition: 0.3s;
+        }
+        .hc-wrap.hc-on {
+            background: rgba(255, 45, 120, .09); border-color: rgba(255, 45, 120, .32);
+        }
+        .hc-row { display: flex; align-items: center; justify-content: space-between; }
+        .hc-label { font-weight: 700; font-size: .8rem; color: var(--text); }
+        
+        .sw {
+            width: 44px; height: 22px; background: rgba(255, 255, 255, .08);
+            border-radius: 11px; position: relative; transition: 0.3s;
+        }
+        .sw.on { background: var(--pink); }
+        .sw::after {
+            content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+            background: #fff; border-radius: 50%; transition: 0.2s; box-shadow: 0 1px 4px rgba(0, 0, 0, .4);
+        }
+        .sw.on::after { transform: translateX(22px); }
+        
+        .hc-badges {
+            display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; justify-content: center;
+        }
+        .hc-badge {
+            font-size: .6rem; font-family: 'Space Mono', monospace; color: var(--pink);
+            background: rgba(255, 45, 120, .1); border: 1px solid rgba(255, 45, 120, .2);
+            border-radius: 5px; padding: 3px 8px;
+        }
+        
+        #epilepsy-warning {
+            background: rgba(255, 59, 48, .08); border: 1px solid rgba(255, 59, 48, .22);
+            border-radius: 8px; padding: 10px; font-size: .7rem; color: #ff6666;
+            margin-bottom: 15px; display: none; line-height: 1.4;
+        }
+        
+        /* Inputs & Buttons */
+        .field-lbl {
+            font-family: 'Space Mono', monospace; font-size: .65rem; color: var(--dim);
+            letter-spacing: 1px; text-transform: uppercase; margin-bottom: 7px; text-align: left;
+        }
+        .field-inp {
+            width: 100%; padding: 16px 20px; background: rgba(10, 10, 20, 0.6);
+            border: 1px solid var(--border-mid); border-radius: 10px; color: var(--amber);
+            font-family: 'Space Mono'; font-size: 1.05rem;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+            outline: none; transition: 0.2s; animation: pulseGlow 3s infinite ease-in-out;
+        }
+        .field-inp:focus { border-color: var(--border-hi); }
+        
+        .btn-start {
+            width: 100%; background: var(--amber); color: #000; border-radius: 12px;
+            padding: 18px; font-weight: 800; font-size: 1rem; letter-spacing: 1px;
+            box-shadow: 0 4px 22px rgba(255,149,0,.3); transition: 0.2s; margin-top: 15px;
+        }
+        .btn-start:hover { background: var(--amber-soft); transform: translateY(-2px); }
+        
+        /* Leaderboard */
+        .lb-container {
+            margin: 60px auto 100px auto;
+            background: rgba(15, 15, 25, 0.8);
+            border: 1px solid var(--border-mid);
+            border-radius: 18px;
+            width: 100%; max-width: 500px;
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            position: relative; clear: both; display: block !important;
+        }
+        .lb-header { display: flex; border-bottom: 1px solid #333; }
+        .lb-tab {
+            flex: 1; padding: 12px; background: none; border: none;
+            color: #888; cursor: pointer; font-family: 'Space Mono', monospace;
+            font-weight: bold; transition: 0.3s;
+        }
+        .lb-tab.active-n { color: #ffb300; border-bottom: 2px solid #ffb300; }
+        .lb-tab.active-h { color: #ff0055; border-bottom: 2px solid #ff0055; }
+        .lb-list { padding: 15px; }
+        .lb-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .lb-user { font-family: 'Outfit', sans-serif; font-weight: 600; color: #eee; }
+        .lb-score { color: #ffb300; font-family: 'Press Start 2P', monospace; font-size: 0.7rem; }
+        .lb-empty {
+            display: flex; align-items: center; justify-content: center;
+            padding: 25px; font-size: .8rem; color: var(--dim);
+        }
+        
+        /* Game HUD & Canvas */
+        #game-screen { display: none; }
+        .hud {
+            display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7px;
+            margin-bottom: 12px; position: relative;
+        }
+        .hud-cell {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; padding: 10px; text-align: center;
+        }
+        .hud-lbl {
+            font-family: 'Space Mono'; font-size: .55rem; color: var(--dim);
+            letter-spacing: 1px; margin-bottom: 4px;
+        }
+        .hud-val {
+            font-family: 'Space Mono'; font-weight: 700; font-size: 1.15rem;
+            color: var(--amber); text-shadow: 0 0 10px var(--amber-glow);
+        }
+        .hud-val.pop { animation: hudPop .25s cubic-bezier(.34, 1.6, .64, 1); }
+        
+        .combo-disp {
+            position: absolute; top: -25px; right: 0;
+            font-family: 'Press Start 2P', monospace; font-size: 8px; color: var(--gold);
+            opacity: 0; transform: translateY(5px); transition: 0.2s; pointer-events: none;
+        }
+        .combo-disp.visible { opacity: 1; transform: translateY(0); }
+        
+        .cvs-wrap {
+            position: relative; width: 100%; border-radius: 12px; overflow: hidden;
+            border: 2px solid var(--border-hi); transition: filter 0.1s, transform 0.1s;
+            background: #000;
+        }
+        #snakeCanvas {
+            display: block; width: 100%; aspect-ratio: 1; image-rendering: pixelated;
+        }
+        .cvs-wrap::after {
+            content: ''; position: absolute; inset: 0;
+            background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0, 0, 0, 0.05) 2px, rgba(0, 0, 0, 0.05) 4px);
+            pointer-events: none; z-index: 1;
+        }
+        
+        .pu-banner {
+            position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+            font-family: 'Press Start 2P', monospace; font-size: 7px; color: var(--gold);
+            background: rgba(0,0,0,0.9); padding: 8px 15px;
+            border: 1px solid var(--gold); border-radius: 6px;
+            opacity: 0; transition: 0.3s; z-index: 10; white-space: nowrap;
+        }
+        .pu-banner.show { opacity: 1; }
+        
+        .spd-bar-bg {
+            margin-top: 8px; height: 5px; background: var(--border);
+            border-radius: 3px; overflow: hidden;
+        }
+        .spd-bar {
+            height: 100%; background: linear-gradient(90deg, var(--green), var(--amber), var(--red));
+            width: 4%; transition: width 0.6s ease;
+        }
+        
+        /* D-PAD Mobile */
+        .dpad {
+            display: grid; grid-template-columns: repeat(3, 1fr);
+            gap: 10px; margin: 25px auto; max-width: 210px;
+        }
+        .dpad-btn {
+            aspect-ratio: 1; background: var(--surface); border: 1px solid var(--border);
+            border-radius: 12px; color: var(--amber); font-size: 1.6rem;
+            display: flex; align-items: center; justify-content: center;
+            transition: 0.1s; touch-action: none; user-select: none;
+        }
+        .dpad-btn:active { background: var(--amber); color: #000; transform: scale(0.9); }
+        
+        .gbtn-row { display: flex; gap: 10px; margin-top: 15px; }
+        .gbtn {
+            flex: 1; background: rgba(255,255,255,0.05); color: var(--mid);
+            padding: 12px; border-radius: 8px; border: 1px solid var(--border);
+            font-weight: 600; font-size: 0.8rem;
+        }
+        .gbtn:hover { border-color: var(--amber); color: var(--amber); }
+        
+        /* Modal Overlay */
+        .overlay {
+            position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.92);
+            backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+            display: none; align-items: center; justify-content: center;
+            padding: 20px; opacity: 0; transition: 0.3s;
+        }
+        .overlay.show { display: flex !important; opacity: 1; }
+        
+        .modal {
+            background: #0a0a0a; border: 1px solid var(--border-hi);
+            border-radius: 24px; padding: 35px; width: 100%; max-width: 420px;
+            text-align: center; transform: scale(0.85);
+            transition: 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .overlay.show .modal { transform: scale(1); }
+        
+        .modal-em { font-size: 3.5rem; margin-bottom: 10px; }
+        .modal-ttl { font-weight: 800; font-size: 1.4rem; color: var(--amber); margin-bottom: 20px; }
+        
+        .modal-stats {
+            background: rgba(255,255,255,0.03); border-radius: 15px;
+            margin: 20px 0; border: 1px solid var(--border); overflow: hidden;
+        }
+        .modal-stat {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 14px 20px; border-bottom: 1px solid var(--border);
+        }
+        .modal-stat:last-child { border-bottom: none; }
+        .ms-val { font-family: 'Space Mono'; font-weight: 700; color: var(--amber); font-size: 1rem; }
+        
+        .modal-btns { display: flex; gap: 10px; margin-top: 10px; }
+        .mbtn {
+            flex: 1; padding: 16px; border-radius: 12px; font-weight: 700;
+            font-size: .9rem; transition: 0.2s;
+        }
+        .mbtn-claim { background: var(--amber); color: #000; box-shadow: 0 5px 15px rgba(245,138,0,0.3); }
+        .mbtn-retry { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+        .mbtn:active { transform: scale(0.96); }
+        
+        /* Cooldown & Toast */
+        .cd-wrap { margin-top: 15px; }
+        .cd-lbl {
+            font-size: .7rem; color: var(--dim); margin-bottom: 6px;
+            font-family: 'Space Mono';
+        }
+        .cd-bg { height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
+        .cd-fill { height: 100%; background: linear-gradient(90deg, var(--amber), var(--gold)); width: 0%; }
+        
+        #toast {
+            position: fixed; bottom: 30px; left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: #111; padding: 14px 28px; border-radius: 50px;
+            border: 1px solid var(--amber); color: #fff; font-weight: 600;
+            font-size: 0.9rem; opacity: 0; transition: 0.3s; z-index: 10005;
+            pointer-events: none;
+        }
+        #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        #toast.success { border-color: var(--green); color: var(--green); }
+        #toast.error { border-color: var(--red); color: var(--red); }
+        
+        /* Particles */
+        .particle {
+            position: absolute; border-radius: 50%; pointer-events: none; z-index: 50;
+            animation: pBurst 0.6s ease-out forwards;
+        }
+        
+        .hc-element { pointer-events: none; position: absolute; z-index: 10001; }
+        .hc-warning {
+            font-family: 'Press Start 2P', monospace; font-size: 10px; color: #ff9900;
+            background: rgba(0,0,0,0.95); padding: 15px 25px; border: 2px solid #ff9900;
+            border-radius: 10px; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            white-space: nowrap; z-index: 10005; box-shadow: 0 0 30px rgba(255,153,0,0.4);
+        }
+        
+        /* Responsive */
+        @media (max-width: 600px) {
+            .panel { padding: 20px; }
+            .game-title { font-size: 1.6rem; }
+            .dpad-btn { font-size: 1.3rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Back Button -->
+    <a href="/" class="btn-back">← BACK</a>
+    
+    <!-- Animated Background -->
+    <div class="liquid-bg"></div>
+
+    <header>
+        <div class="logo">CHOCO HUB</div>
+        <div class="logo-sub">Snake Minigame · CC Edition</div>
+    </header>
+
+    <div class="hub">
+        <!-- Main Game Panel -->
+        <div class="panel">
+            <div class="c-tr"></div><div class="c-bl"></div>
+
+            <!-- Setup Screen (Login & Config) -->
+            <div id="setup-screen">
+                <div class="game-title">Snake Faucet</div>
+                <p class="game-sub">Play and earn CC Points directly to your account.</p>
+             
+                <!-- Reward Info Cards -->
+                <div class="reward-row">
+                    <div class="rcard">
+                        <div class="rcard-val" id="val-apple">10 CC</div>
+                        <div class="rcard-lbl">Per Apple</div>
+                    </div>
+                    <div class="rcard">
+                        <div class="rcard-val" id="val-max">500 CC</div>
+                        <div class="rcard-lbl">Max Payment</div>
+                    </div>
+                    <div class="rcard">
+                        <div class="rcard-val">1h</div>
+                        <div class="rcard-lbl">Cooldown</div>
+                    </div>
+                </div>
+
+                <!-- Hardcore Mode Toggle -->
+                <div class="hc-wrap" id="hc-wrap" onclick="toggleHardcoreMode()">
+                    <div class="hc-row">
+                        <div class="hc-label">🔥 HARDCORE CHAOS MODE</div>
+                        <div class="sw" id="hardcore-switch"></div>
+                    </div>
+                    <div class="hc-badges" id="hc-badges" style="display:none">
+                        <span class="hc-badge">5× REWARD</span>
+                        <span class="hc-badge">VISUAL CHAOS</span>
+                        <span class="hc-badge">MAX 2500 CC</span>
+                    </div>
+                </div>
+
+                <!-- Epilepsy Warning -->
+                <div id="epilepsy-warning">
+                    ⚠️ EPILEPSY WARNING: Rapid flashing and intense visual chaos.
+                </div>
+
+                <!-- Authentication Fields -->
+                <div style="margin-bottom:15px">
+                    <div class="field-lbl">Username</div>
+                    <input type="text" id="player-user" class="field-inp" placeholder="your_username" autocomplete="off">
+                    
+                    <div class="field-lbl" style="margin-top:10px;">Security PIN</div>
+                    <input type="password" id="player-pin" class="field-inp" placeholder="Enter PIN" maxlength="8">
+                </div>
+
+                <button class="btn-start" onclick="checkUser()">▶ START GAME</button>
+            </div>
+
+            <!-- Game Screen (active after login) -->
+            <div id="game-screen">
+                <div class="hud">
+                    <div class="hud-cell">
+                        <div class="hud-lbl">APPLES</div>
+                        <div class="hud-val" id="score-val">0</div>
+                    </div>
+                    <div class="hud-cell">
+                        <div class="hud-lbl">EARNED</div>
+                        <div class="hud-val" id="reward-val">0 CC</div>
+                    </div>
+                    <div class="hud-cell">
+                        <div class="hud-lbl">BEST</div>
+                        <div class="hud-val" id="best-val">0</div>
+                    </div>
+                    <div class="combo-disp" id="combo-disp"></div>
+                </div>
+
+                <div class="cvs-wrap" id="canvas-wrap">
+                    <canvas id="snakeCanvas" width="300" height="300"></canvas>
+                    <div class="pu-banner" id="pu-banner"></div>
+                </div>
+
+                <!-- Speed Bar -->
+                <div class="spd-bar-bg">
+                    <div class="spd-bar" id="spd-bar"></div>
+                </div>
+
+                <!-- D-PAD Touch Controls -->
+                <div class="dpad">
+                    <div></div>
+                    <button class="dpad-btn" onpointerdown="dpadHit('UP',event)">▲</button>
+                    <div></div>
+                    
+                    <button class="dpad-btn" onpointerdown="dpadHit('LEFT',event)">◀</button>
+                    <div></div>
+                    <button class="dpad-btn" onpointerdown="dpadHit('RIGHT',event)">▶</button>
+                    
+                    <div></div>
+                    <button class="dpad-btn" onpointerdown="dpadHit('DOWN',event)">▼</button>
+                    <div></div>
+                </div>
+
+                <div class="gbtn-row">
+                    <button class="gbtn" id="pause-btn" onclick="togglePause()">⏸ PAUSE</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Leaderboard Section -->
+        <div class="lb-container">
+            <div class="lb-header">
+                <button id="lb-tab-normal" class="lb-tab active-n" onclick="showLb('normal')">NORMAL</button>
+                <button id="lb-tab-hardcore" class="lb-tab" onclick="showLb('hardcore')">HARDCORE</button>
+            </div>
+            <div id="lb-body" class="lb-list">
+                <div class="lb-empty">Loading scores...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Over / Claim Modal -->
+    <div class="overlay" id="modal">
+        <div class="modal">
+            <div class="modal-em" id="modal-em">💀</div>
+            <div class="modal-ttl">GAME OVER</div>
+            
+            <div class="modal-stats">
+                <div class="modal-stat">
+                    <span class="ms-lbl">APPLES</span>
+                    <span class="ms-val" id="m-score">0</span>
+                </div>
+                <div class="modal-stat">
+                    <span class="ms-lbl">REWARD</span>
+                    <span class="ms-val" id="m-reward">0 CC</span>
+                </div>
+                <div class="modal-stat">
+                    <span class="ms-lbl">PLAYER</span>
+                    <span class="ms-val" id="m-user">—</span>
+                </div>
+            </div>
+            
+            <div class="modal-btns">
+                <button class="mbtn mbtn-retry" onclick="restartGame()">↺ RETRY</button>
+                <button class="mbtn mbtn-claim" id="btn-claim" onclick="claimReward()">💰 CLAIM</button>
+            </div>
+
+            <!-- Cooldown Bar (appears after claim) -->
+            <div class="cd-wrap" id="cooldown-wrap" style="display:none">
+                <div class="cd-lbl" id="cooldown-label">⏳ Wait: --</div>
+                <div class="cd-bg"><div class="cd-fill" id="cooldown-fill"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast"></div>
+
+    <!-- Audio Elements -->
+    <audio id="normalMusic" src="OSTS/High_Score_Chase.mp3" loop></audio>
+    <audio id="hardcoreMusic" src="OSTS/High_Score_Overdrive_Hardcore.mp3"></audio>
+
+    <!-- Game Scripts -->
+    <script src="static/js/hardcore.js"></script>
+    <script src="static/js/game.js"></script>
+</body>
+</html>
