@@ -1,9 +1,10 @@
-// server.js - Full fix
+// server.js - Full fix + Auto-Bounty
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const path = require('path');
+const fs = require('fs');
 const db = require('./db');
 const blockchain = require('./blockchain');
 const snake = require('./snake');
@@ -156,24 +157,47 @@ app.get('/api/test', (req, res) => {
   res.json({ 
     status: 'ok', 
     time: new Date().toISOString(),
-    message: 'ChocoHub API is running'
+    message: 'ChocoHub API is running',
+    uptime: process.uptime()
   });
 });
 
 // ─── SPA fallback ─────────────────────────────────────
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, 'public', 'index.html');
-  // Kiểm tra file tồn tại
   try {
-    if (require('fs').existsSync(indexPath)) {
+    if (fs.existsSync(indexPath)) {
       res.sendFile(indexPath);
     } else {
       res.status(200).send(`
+        <!DOCTYPE html>
         <html>
-        <head><title>ChocoHub</title></head>
-        <body style="background:#0a0a12;color:#eee4d8;font-family:sans-serif;text-align:center;padding:50px;">
-          <h1>🍫 ChocoHub</h1>
-          <p>Server running. Upload your HTML files to the public folder.</p>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>ChocoHub</title>
+          <style>
+            body {
+              background: #0a0a12;
+              color: #eee4d8;
+              font-family: 'Outfit', sans-serif;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              height: 100vh;
+              margin: 0;
+              text-align: center;
+            }
+            h1 { color: #f58a00; font-size: 2.5rem; }
+            p { color: #8b8296; margin-top: 10px; }
+          </style>
+        </head>
+        <body>
+          <div>
+            <h1>🍫 ChocoHub</h1>
+            <p>Server is running. Please upload frontend files to continue.</p>
+            <p style="font-size:0.8rem; margin-top:20px;">API: <code style="color:#f58a00;">/api/test</code></p>
+          </div>
         </body>
         </html>
       `);
@@ -185,12 +209,26 @@ app.get('*', (req, res) => {
 
 // ─── Error handler ─────────────────────────────────────
 app.use((err, req, res, next) => {
-  console.error('Server error:', err);
+  console.error('❌ Server error:', err.message);
   res.status(500).json({ status: 'error', message: 'Internal server error' });
 });
 
-// ─── Start ────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
+// START AUTO-BOUNTY SYSTEM
+// ═══════════════════════════════════════════════════════
+blockchain.startAutoBounty();
+
+// ═══════════════════════════════════════════════════════
+// START SERVER
+// ═══════════════════════════════════════════════════════
 app.listen(PORT, () => {
-  console.log(`🍫 ChocoHub running on port ${PORT}`);
-  console.log(`   Dashboard: http://localhost:${PORT}`);
+  console.log('');
+  console.log('╔══════════════════════════════════════╗');
+  console.log('║        🍫 CHOCO HUB READY 🍫        ║');
+  console.log('╠══════════════════════════════════════╣');
+  console.log(`║  Dashboard: http://localhost:${PORT}    ║`);
+  console.log('║  API Test:  /api/test               ║');
+  console.log('║  Auto-Bounty: 0.005-0.1 CC          ║');
+  console.log('╚══════════════════════════════════════╝');
+  console.log('');
 });
