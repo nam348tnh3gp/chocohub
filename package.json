@@ -1,0 +1,46 @@
+{
+  "name": "chocohub",
+  "version": "1.0.0",
+  "description": "ChocoHub - Integrated gaming & mining platform with Snake Faucet, Block Hunt, and Web Miner",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "init-db": "node -e \"require('./db')\"",
+    "test": "echo \"No tests yet\" && exit 0"
+  },
+  "keywords": [
+    "blockchain",
+    "mining",
+    "snake-game",
+    "faucet",
+    "crypto",
+    "choco",
+    "web-miner"
+  ],
+  "author": "ChocoHub Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nam348tnh3gp/chocohub.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nam348tnh3gp/chocohub/issues"
+  },
+  "homepage": "https://github.com/nam348tnh3gp/chocohub#readme"
+}
