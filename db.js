@@ -1,4 +1,4 @@
-// db.js
+// db.js – Full fix (gộp module.exports)
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -48,13 +48,12 @@ db.exec(`
 
 console.log('✅ Database ready (better-sqlite3)');
 
-// Helper functions
+// ─── Helper functions ─────────────────────────────
 function authenticate(username, pin) {
   username = username.toLowerCase().trim();
   let user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
   
   if (!user) {
-    // Tạo mới
     const hash = bcrypt.hashSync(pin, 10);
     db.prepare('INSERT INTO users (username, pin_hash, balance) VALUES (?, ?, 0)').run(username, hash);
     user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
@@ -84,8 +83,6 @@ function getActiveMiners(limit = 5) {
   return db.prepare('SELECT DISTINCT username, "web" as device FROM blocks_mined ORDER BY mined_at DESC LIMIT ?').all(limit);
 }
 
-// Thêm vào cuối file db.js, trước module.exports
-
 function getLastSnakeClaim(username) {
   return db.prepare(
     'SELECT claimed_at FROM snake_claims WHERE username=? ORDER BY claimed_at DESC LIMIT 1'
@@ -98,14 +95,13 @@ function insertSnakeClaim(username, apples, mode, reward) {
   ).run(username.toLowerCase().trim(), apples, mode || 'normal', reward);
 }
 
-// Đừng quên thêm 2 hàm này vào danh sách module.exports ở cuối file
+// ─── CHỈ MỘT DÒNG MODULE.EXPORTS DUY NHẤT ─────────
 module.exports = {
   authenticate,
   getUser,
   updateBalance,
   getRecentBlocks,
   getActiveMiners,
-  getLastSnakeClaim, // <-- Thêm dòng này
-  insertSnakeClaim  // <-- Thêm dòng này
+  getLastSnakeClaim,
+  insertSnakeClaim
 };
-module.exports = { authenticate, getUser, updateBalance, getRecentBlocks, getActiveMiners };
