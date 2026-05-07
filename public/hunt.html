@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Choco Hub | Block Hunt · CPU Native</title>
+    <title>Choco Hub | Block Hunt · SHA-256</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -137,7 +137,7 @@
 <div class="container">
     <div class="header">
         <h1>⛏️ Block Hunt</h1>
-        <p>SHA-1 Miner · Direct CPU (no workers)</p>
+        <p>SHA-256 Miner · Direct CPU</p>
     </div>
 
     <div class="stats-row">
@@ -170,8 +170,8 @@
         </div>
         <div id="cost-display" style="margin:15px 0; padding:12px; background:rgba(245,138,0,0.05); border-radius:10px; text-align:center;">
             <div style="font-size:0.8rem;">💰 Total Cost</div>
-            <div style="font-size:1.2rem; font-weight:bold; color:var(--gold);"><span id="cost-amount">1.1</span> CC</div>
-            <div style="font-size:0.65rem;"><span id="fee-breakdown">Reward: 1.0 CC + Fee: 0.1 CC</span></div>
+            <div style="font-size:1.2rem; font-weight:bold; color:var(--gold);"><span id="cost-amount">8.0</span> CC</div>
+            <div style="font-size:0.65rem;"><span id="fee-breakdown">8 CC paid (reward + burned)</span></div>
         </div>
         <button id="create-btn" class="btn-create" onclick="createBlock()">🚀 CREATE BLOCK</button>
     </div>
@@ -181,10 +181,6 @@
     <div class="control-panel">
         <div class="control-row"><span class="control-label">CPU THREADS</span><span class="control-val" id="thread-val">—</span></div>
         <input type="range" id="thread-slider" min="1" max="16" value="1">
-        <div class="toggle-info">
-            <div style="display:flex;align-items:center;gap:8px;">WebGPU (experimental) <label class="toggle-switch"><input type="checkbox" id="gpu-toggle"><div class="toggle-track"></div></label></div>
-            <div class="toggle-desc" id="gpu-status">WebGPU not supported (CPU only)</div>
-        </div>
         <button id="stop-btn" class="btn-stop" disabled onclick="stopMining(true)">■ TERMINATE MINER</button>
         <button id="auto-btn" class="btn-auto" onclick="toggleAutoMine()">🤖 AUTO HUNT: OFF</button>
         <div id="console" class="console"></div>
@@ -193,13 +189,12 @@
 <div id="toast"></div>
 
 <script>
-    // ======================== NO WORKER.JS: CPU MINER DIRECT ========================
+    // ======================== SHA-256 CPU MINER ========================
     const API_URL = window.location.origin;
     const POLL_MS = 30000;
 
-    // Mining state
     let miningActive = false;
-    let miningIntervals = [];      // store setInterval per thread
+    let miningIntervals = [];
     let currentBountyId = null;
     let currentJob = null;
     let totalHashesAcc = 0;
@@ -207,10 +202,28 @@
     let hashrateInterval = null;
     let lastKnownBounties = {};
     let autoMine = false;
-    let activeThreadCount = 0;
-    let nonceRangeStart = 0;      // dynamic nonce split across threads
 
-    // Helper
+    // ── SHA-256 (Web Crypto API) ──────────────────────
+    async function sha256(str) {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(str);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    function meetsTarget(hashHex, targetBinStr) {
+        const bitsRequired = targetBinStr.length;
+        const hexLen = Math.ceil(bitsRequired / 4);
+        const prefixHex = hashHex.substring(0, hexLen);
+        let binFull = '';
+        for (const ch of prefixHex) {
+            binFull += parseInt(ch, 16).toString(2).padStart(4, '0');
+        }
+        return binFull.startsWith(targetBinStr);
+    }
+
+    // ── Helpers ──────────────────────────────────────
     function getWorkerName() { return (localStorage.getItem('choco_user') || 'anonymous').toLowerCase(); }
     function fmtHashrate(hps) { if (hps >= 1e6) return (hps/1e6).toFixed(2)+' MH/s'; if (hps>=1e3) return (hps/1e3).toFixed(2)+' kH/s'; return hps.toFixed(1)+' H/s'; }
     function fmtNum(n) { if (n>=1e9) return (n/1e9).toFixed(1)+'B'; if (n>=1e6) return (n/1e6).toFixed(1)+'M'; if (n>=1e3) return (n/1e3).toFixed(1)+'k'; return n.toString(); }
@@ -221,66 +234,19 @@
         while(con.children.length>80) con.removeChild(con.firstChild);
     }
     function toast(msg, type='') { const t = document.getElementById('toast'); t.textContent=msg; t.className='show '+type; setTimeout(()=> t.className='', 3500); }
-    async function requestNotifPermission() { if('Notification' in window && Notification.permission === 'default') await Notification.requestPermission(); }
-    function notify(title, body) { if('Notification' in window && Notification.permission === 'granted') new Notification(title,{body,icon:'/favicon.ico'}); }
 
-    // SHA-1 (pure JS, fast enough for demo)
-    function sha1(str) {
-        function rotateLeft(n, b) { return (n << b) | (n >>> (32 - b)); }
-        function toHexStr(n) { let s = '', v; for(let i=7; i>=0; i--) { v = (n >>> (i*4)) & 0x0f; s += v.toString(16); } return s; }
-        let block = [];
-        let i, j;
-        let h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE, h3 = 0x10325476, h4 = 0xC3D2E1F0;
-        let msg = unescape(encodeURIComponent(str));
-        let msgLen = msg.length;
-        let ml = msgLen << 3;
-        for (i=0; i<msgLen; i++) { block[i>>2] |= (msg.charCodeAt(i) & 0xff) << (24 - (i%4)*8); }
-        block[msgLen>>2] |= 0x80 << (24 - (msgLen%4)*8);
-        let wordCount = (((msgLen + 8) >> 6) + 1) << 4;
-        let w = new Array(80);
-        for (i=0; i<wordCount; i++) w[i] = block[i] | 0;
-        w[wordCount-1] = ml;
-        for (let chunk=0; chunk<wordCount; chunk+=16) {
-            let a = h0, b = h1, c = h2, d = h3, e = h4;
-            for (let t=0; t<80; t++) {
-                if (t < 16) w[t] = w[chunk + t];
-                else w[t] = rotateLeft(w[t-3] ^ w[t-8] ^ w[t-14] ^ w[t-16], 1);
-                let f, k;
-                if (t < 20) { f = (b & c) | (~b & d); k = 0x5A827999; }
-                else if (t < 40) { f = b ^ c ^ d; k = 0x6ED9EBA1; }
-                else if (t < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8F1BBCDC; }
-                else { f = b ^ c ^ d; k = 0xCA62C1D6; }
-                let temp = (rotateLeft(a,5) + f + e + k + w[t]) | 0;
-                e = d; d = c; c = rotateLeft(b,30); b = a; a = temp;
-            }
-            h0 = (h0 + a) | 0; h1 = (h1 + b) | 0; h2 = (h2 + c) | 0; h3 = (h3 + d) | 0; h4 = (h4 + e) | 0;
-        }
-        return toHexStr(h0) + toHexStr(h1) + toHexStr(h2) + toHexStr(h3) + toHexStr(h4);
-    }
-
-    // check if hash meets target bits (binary target string like "0000...")
-    function meetsTarget(hashHex, targetBinStr) {
-        // targetBinStr is binary string of required leading zeros (e.g., "00000000" for 8 bits)
-        let bitsRequired = targetBinStr.length;
-        let hexLen = Math.ceil(bitsRequired/4);
-        let prefixHex = hashHex.substring(0, hexLen);
-        let binFull = '';
-        for(let ch of prefixHex) binFull += parseInt(ch,16).toString(2).padStart(4,'0');
-        let requiredBits = targetBinStr;
-        return binFull.startsWith(requiredBits);
-    }
-
-    // Core mining function for a single thread range
-    function mineRange(threadId, startNonce, endNonce, bountyId, targetBin, lastHash, username, serverUrl, onProgress, onFound) {
+    // ── Mining thread ────────────────────────────────
+    function mineRange(threadId, startNonce, endNonce, bountyId, targetBin, lastHash, username, onProgress, onFound) {
         let localNonce = startNonce;
         let localHashes = 0;
-        function step() {
+
+        async function step() {
             if (!miningActive || currentBountyId !== bountyId) return;
-            const batch = 500;
-            for(let i=0; i<batch && localNonce < endNonce; i++) {
-                let candidate = lastHash + username + bountyId + localNonce.toString();
-                let hashed = sha1(candidate);
-                if(meetsTarget(hashed, targetBin)) {
+            const batch = 300;
+            for (let i = 0; i < batch && localNonce < endNonce; i++) {
+                const candidate = lastHash + username + bountyId + localNonce.toString();
+                const hashed = await sha256(candidate);           // ← SHA-256
+                if (meetsTarget(hashed, targetBin)) {
                     onFound(localNonce);
                     return;
                 }
@@ -288,28 +254,28 @@
                 localHashes++;
             }
             onProgress(localHashes);
-            if(localNonce >= endNonce) { /* finished range */ return; }
-            if(miningActive && currentBountyId === bountyId) setTimeout(step, 0);
+            if (localNonce >= endNonce) return;
+            if (miningActive && currentBountyId === bountyId) setTimeout(step, 0);
         }
         step();
     }
 
-    function stopMining(resetAutoFlag=false) {
-        if(!miningActive) return;
+    // ── Stop ─────────────────────────────────────────
+    function stopMining(resetAutoFlag = false) {
+        if (!miningActive) return;
         miningActive = false;
-        for(let tid of miningIntervals) { if(tid) clearInterval(tid); }
+        for (const tid of miningIntervals) { if (tid) clearInterval(tid); }
         miningIntervals = [];
-        if(hashrateInterval) { clearInterval(hashrateInterval); hashrateInterval = null; }
-        activeThreadCount = 0;
+        if (hashrateInterval) { clearInterval(hashrateInterval); hashrateInterval = null; }
         document.getElementById('stop-btn').disabled = true;
         document.getElementById('progress-bar').style.width = '0%';
-        if(resetAutoFlag && autoMine) {
+        if (resetAutoFlag && autoMine) {
             autoMine = false;
             document.getElementById('auto-btn').textContent = '🤖 AUTO HUNT: OFF';
             document.getElementById('auto-btn').classList.remove('active');
             log('🤖 Auto Hunt disabled.');
         }
-        if(currentBountyId) {
+        if (currentBountyId) {
             log(`⏹️ Stopped mining block #${currentBountyId}`);
             currentBountyId = null;
             currentJob = null;
@@ -319,17 +285,18 @@
         document.getElementById('stat-hashrate').textContent = '0 H/s';
     }
 
+    // ── Start ────────────────────────────────────────
     async function startMining(bountyId, cachedData) {
-        if(miningActive) stopMining(false);
+        if (miningActive) stopMining(false);
         let job = cachedData;
-        if(!job || !job.target_bin) {
+        if (!job || !job.target_bin) {
             try {
                 const res = await fetch(`${API_URL}/get_job/${bountyId}`);
-                if(!res.ok) { log(`Block #${bountyId} not found.`,'log-err'); return; }
+                if (!res.ok) { log(`Block #${bountyId} not found.`, 'log-err'); return; }
                 job = await res.json();
-            } catch(e) { log('Error fetching job: '+e.message,'log-err'); return; }
+            } catch (e) { log('Error fetching job: ' + e.message, 'log-err'); return; }
         }
-        if(!lastKnownBounties[bountyId]) { log(`Block #${bountyId} no longer available.`,'log-warn'); return; }
+        if (!lastKnownBounties[bountyId]) { log(`Block #${bountyId} no longer available.`, 'log-warn'); return; }
 
         miningActive = true;
         currentBountyId = bountyId;
@@ -344,17 +311,17 @@
         const lastHash = job.last_hash || job.block_hash;
         const diffBits = job.difficulty_bits ?? targetBin.length;
 
-        log(`🚀 Starting CPU mining: ${numThreads} thread(s) on block #${bountyId} (${diffBits} bits)`);
+        log(`🚀 Starting SHA-256 mining: ${numThreads} thread(s) on block #${bountyId} (${diffBits} bits)`);
         renderBountyList(lastKnownBounties);
 
-        // split nonce space: each thread gets ~2^32 / threads range
         const maxNonce = 0xffffffff;
         const rangeStep = Math.floor(maxNonce / numThreads);
-        let threadRanges = [];
-        for(let i=0; i<numThreads; i++) {
-            let start = i * rangeStep;
-            let end = (i === numThreads-1) ? maxNonce : start + rangeStep;
-            threadRanges.push({start, end});
+        const threadRanges = [];
+        for (let i = 0; i < numThreads; i++) {
+            threadRanges.push({
+                start: i * rangeStep,
+                end: (i === numThreads - 1) ? maxNonce : (i + 1) * rangeStep
+            });
         }
 
         let hashesThisSecond = 0;
@@ -364,38 +331,35 @@
             totalHashesAcc += hashesDone;
             document.getElementById('stat-hashes').textContent = fmtNum(totalHashesAcc);
             hashesThisSecond += hashesDone;
-            let now = Date.now();
-            if(now - lastSecondStamp >= 1000) {
-                let hashPerSec = hashesThisSecond;
-                document.getElementById('stat-hashrate').textContent = fmtHashrate(hashPerSec);
+            const now = Date.now();
+            if (now - lastSecondStamp >= 1000) {
+                document.getElementById('stat-hashrate').textContent = fmtHashrate(hashesThisSecond);
                 hashesThisSecond = 0;
                 lastSecondStamp = now;
-                let progress = Math.min(90, 20 + (totalHashesAcc / 500000) * 60);
-                document.getElementById('progress-bar').style.width = progress + '%';
+                document.getElementById('progress-bar').style.width = Math.min(90, 20 + (totalHashesAcc / 500000) * 60) + '%';
             }
         };
 
         const foundCallback = (nonce) => {
-            if(!miningActive) return;
+            if (!miningActive) return;
             log(`🎯 Nonce found: ${nonce}`, 'log-win');
             const solvedId = currentBountyId;
             stopMining(false);
             submitSolution(solvedId, nonce, workerName);
         };
 
-        // launch threads: each uses setInterval for non-blocking yield
-        for(let t=0; t<numThreads; t++) {
-            let range = threadRanges[t];
-            let threadActive = true;
+        // Launch threads
+        for (let t = 0; t < numThreads; t++) {
+            const range = threadRanges[t];
             let currentNonce = range.start;
-            const intervalId = setInterval(() => {
-                if(!miningActive || currentBountyId !== bountyId) { clearInterval(intervalId); return; }
-                const BATCH = 800;
+            const intervalId = setInterval(async () => {
+                if (!miningActive || currentBountyId !== bountyId) { clearInterval(intervalId); return; }
+                const BATCH = 500;
                 let batchHashes = 0;
-                for(let i=0; i<BATCH && currentNonce < range.end; i++) {
-                    let candidate = lastHash + workerName + bountyId + currentNonce.toString();
-                    let hashed = sha1(candidate);
-                    if(meetsTarget(hashed, targetBin)) {
+                for (let i = 0; i < BATCH && currentNonce < range.end; i++) {
+                    const candidate = lastHash + workerName + bountyId + currentNonce.toString();
+                    const hashed = await sha256(candidate);
+                    if (meetsTarget(hashed, targetBin)) {
                         foundCallback(currentNonce);
                         clearInterval(intervalId);
                         return;
@@ -403,72 +367,74 @@
                     currentNonce++;
                     batchHashes++;
                 }
-                if(batchHashes > 0) progressCallback(t, batchHashes);
-                if(currentNonce >= range.end) clearInterval(intervalId);
+                if (batchHashes > 0) progressCallback(t, batchHashes);
+                if (currentNonce >= range.end) clearInterval(intervalId);
             }, 0);
             miningIntervals.push(intervalId);
         }
-        activeThreadCount = numThreads;
 
         hashrateInterval = setInterval(() => {
-            if(!miningActive) return;
+            if (!miningActive) return;
             const elapsed = (Date.now() - miningStartTime) / 1000;
-            if(elapsed>0) document.getElementById('stat-hashrate').textContent = fmtHashrate(totalHashesAcc / elapsed);
+            if (elapsed > 0) document.getElementById('stat-hashrate').textContent = fmtHashrate(totalHashesAcc / elapsed);
         }, 1000);
     }
 
+    // ── Submit ───────────────────────────────────────
     async function submitSolution(id, nonce, workerName) {
         log(`📡 Submitting nonce ${nonce} for block #${id}...`);
         try {
-            const params = new URLSearchParams({ bounty_id: id, nonce: nonce, worker_name: workerName, device_type: 'web_cpu' });
-            const res = await fetch(`${API_URL}/submit_solution?${params}`, { method: 'POST' });
+            const res = await fetch(`${API_URL}/submit_solution`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bounty_id: id, nonce: nonce, worker_name: workerName, device_type: 'web_cpu' })
+            });
             const result = await res.json();
-            if(res.ok && result.status === 'success') {
+            if (res.ok && result.status === 'success') {
                 log('🏆 ' + (result.message || 'Block accepted!'), 'log-win');
-                toast('🏆 Block solved!', 'win');
-                notify('⛏️ Block Solved!', result.message || 'Block accepted');
+                toast('🏆 Block solved! ' + (result.reward || '') + ' CC', 'win');
             } else {
                 const errMsg = result.reason || result.detail || 'Rejected';
                 log('❌ ' + errMsg, 'log-err');
-                toast('❌ '+errMsg, 'err');
+                toast('❌ ' + errMsg, 'err');
             }
             await refreshBounties();
-            if(autoMine) {
+            if (autoMine) {
                 const ids = Object.keys(lastKnownBounties);
-                if(ids.length>0 && !miningActive) startMining(ids[0], lastKnownBounties[ids[0]]);
+                if (ids.length > 0 && !miningActive) startMining(ids[0], lastKnownBounties[ids[0]]);
             }
-        } catch(e) { log('Connection error: '+e.message, 'log-err'); }
+        } catch (e) { log('Connection error: ' + e.message, 'log-err'); }
     }
 
-    // UI: refresh bounties
+    // ── Refresh bounties ─────────────────────────────
     async function refreshBounties() {
         try {
             const res = await fetch(`${API_URL}/active_bounties_list`);
-            if(!res.ok) throw new Error('HTTP '+res.status);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
             lastKnownBounties = data;
             document.getElementById('stat-blocks').textContent = Object.keys(data).length;
-            if(currentBountyId && !data[currentBountyId]) {
-                log(`⚠️ Block #${currentBountyId} solved externally. Stopping miner.`,'log-warn');
+            if (currentBountyId && !data[currentBountyId]) {
+                log('⚠️ Block #' + currentBountyId + ' solved externally. Stopping miner.', 'log-warn');
                 stopMining(false);
-                if(autoMine) {
-                    let ids = Object.keys(lastKnownBounties);
-                    if(ids.length) startMining(ids[0], lastKnownBounties[ids[0]]);
+                if (autoMine) {
+                    const ids = Object.keys(lastKnownBounties);
+                    if (ids.length) startMining(ids[0], lastKnownBounties[ids[0]]);
                 }
             }
-            if(autoMine && !miningActive && Object.keys(data).length>0) {
-                let ids = Object.keys(data);
+            if (autoMine && !miningActive && Object.keys(data).length > 0) {
+                const ids = Object.keys(data);
                 startMining(ids[0], data[ids[0]]);
             }
             renderBountyList(data);
-        } catch(e) { log('⚠️ Server error: '+e.message,'log-warn'); }
+        } catch (e) { log('⚠️ Server error: ' + e.message, 'log-warn'); }
     }
 
     function renderBountyList(data) {
         const container = document.getElementById('block-list');
-        let bounties = Object.values(data).filter(b => (b.difficulty_bits ?? (b.binary_target?.length || 0)) > 16);
-        if(bounties.length === 0) {
-            container.innerHTML = `<div class="empty-state"><div class="icon">🚀</div>No challenging blocks (difficulty >16 bits) available.</div>`;
+        let bounties = Object.values(data);
+        if (bounties.length === 0) {
+            container.innerHTML = '<div class="empty-state"><div class="icon">📭</div>No blocks available</div>';
             return;
         }
         container.innerHTML = '';
@@ -477,7 +443,8 @@
             const diffBits = b.difficulty_bits ?? (b.binary_target ? b.binary_target.length : '?');
             const reward = typeof b.reward === 'number' ? b.reward.toFixed(4) : b.reward;
             const device = b.target_device || 'any';
-            const div = document.createElement('div'); div.className = 'block-card' + (isMining ? ' mining' : '');
+            const div = document.createElement('div');
+            div.className = 'block-card' + (isMining ? ' mining' : '');
             div.innerHTML = `
                 <div class="block-info">
                     <div class="block-id">Block #${b.id}</div>
@@ -498,40 +465,39 @@
     function toggleAutoMine() {
         autoMine = !autoMine;
         const btn = document.getElementById('auto-btn');
-        btn.textContent = `🤖 AUTO HUNT: ${autoMine ? 'ON' : 'OFF'}`;
+        btn.textContent = '🤖 AUTO HUNT: ' + (autoMine ? 'ON' : 'OFF');
         btn.classList.toggle('active', autoMine);
         log(autoMine ? '🤖 Auto Hunt enabled.' : '🤖 Auto Hunt disabled.');
-        if(autoMine && !miningActive) {
-            let ids = Object.keys(lastKnownBounties);
-            if(ids.length>0) startMining(ids[0], lastKnownBounties[ids[0]]);
+        if (autoMine && !miningActive) {
+            const ids = Object.keys(lastKnownBounties);
+            if (ids.length > 0) startMining(ids[0], lastKnownBounties[ids[0]]);
         }
     }
 
-    // Create block logic
+    // ── Create block ─────────────────────────────────
     function updateDeviceType() {
         const device = document.getElementById('device-select').value;
         const slider = document.getElementById('diff-slider');
-        if(device === 'arduino') { slider.min=8; slider.max=16; slider.value=8; document.getElementById('min-diff').innerText='8'; document.getElementById('max-diff').innerText='16'; }
-        else { slider.min=17; slider.max=32; slider.value=17; document.getElementById('min-diff').innerText='17'; document.getElementById('max-diff').innerText='32'; }
+        if (device === 'arduino') { slider.min = 8; slider.max = 16; slider.value = 8; document.getElementById('min-diff').innerText = '8'; document.getElementById('max-diff').innerText = '16'; }
+        else { slider.min = 17; slider.max = 32; slider.value = 17; document.getElementById('min-diff').innerText = '17'; document.getElementById('max-diff').innerText = '32'; }
         updateDifficulty();
         updateCost();
     }
     function updateDifficulty() {
-        let diff = parseInt(document.getElementById('diff-slider').value);
-        document.getElementById('diff-val').innerText = `${diff} bits`;
-        let percent = ((diff-8)/(32-8))*100;
-        document.getElementById('difficulty-bar').style.width = `${percent}%`;
-        let desc = document.getElementById('difficulty-desc');
-        if(diff<=16) { desc.innerHTML = '🖥️ Arduino friendly block'; desc.style.color='#6be5ff'; }
-        else if(diff<=24) { desc.innerHTML = '💻 Web optimized'; desc.style.color='#ffb86c'; }
-        else { desc.innerHTML = '🚀 Hard web block'; desc.style.color='#ff5555'; }
+        const diff = parseInt(document.getElementById('diff-slider').value);
+        document.getElementById('diff-val').innerText = diff + ' bits';
+        document.getElementById('difficulty-bar').style.width = ((diff - 8) / (32 - 8)) * 100 + '%';
+        const desc = document.getElementById('difficulty-desc');
+        if (diff <= 16) { desc.innerHTML = '🖥️ Easy block'; desc.style.color = '#6be5ff'; }
+        else if (diff <= 24) { desc.innerHTML = '💻 Medium block'; desc.style.color = '#ffb86c'; }
+        else { desc.innerHTML = '🚀 Hard block'; desc.style.color = '#ff5555'; }
         updateCost();
     }
     function updateCost() {
-        let reward = parseFloat(document.getElementById('reward-input').value);
-        let fee = reward*0.1;
-        document.getElementById('cost-amount').innerText = (reward+fee).toFixed(2);
-        document.getElementById('fee-breakdown').innerHTML = `Reward: ${reward.toFixed(1)} CC + Fee: ${fee.toFixed(1)} CC`;
+        const cost = 8.0;
+        const reward = parseFloat(document.getElementById('reward-input').value) || 1.0;
+        document.getElementById('cost-amount').innerText = cost.toFixed(1);
+        document.getElementById('fee-breakdown').innerHTML = `${cost} CC paid (${reward.toFixed(1)} CC reward + ${(cost - reward).toFixed(1)} CC burned)`;
     }
     async function createBlock() {
         const diff = parseInt(document.getElementById('diff-slider').value);
@@ -539,39 +505,43 @@
         const reward = parseFloat(document.getElementById('reward-input').value);
         const pin = localStorage.getItem('choco_pin');
         const username = localStorage.getItem('choco_user');
-        if(!username || !pin) { toast('Login required', 'err'); return; }
-        if(reward<0.1 || reward>1000) { toast('Reward invalid', 'err'); return; }
-        const btn = document.getElementById('create-btn'); const orig = btn.innerText; btn.innerText='⏳ CREATING...'; btn.disabled=true;
+        if (!username || !pin) { toast('Login required', 'err'); return; }
+        if (reward < 0.1 || reward > 1000) { toast('Reward invalid', 'err'); return; }
+        const btn = document.getElementById('create-btn');
+        const orig = btn.innerText;
+        btn.innerText = '⏳ CREATING...';
+        btn.disabled = true;
         try {
             const res = await fetch(`${API_URL}/create_bounty`, {
-                method:'POST', headers:{'Content-Type':'application/json'},
-                body: JSON.stringify({ username, pin, difficulty:diff, reward, target_device:device })
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, pin, difficulty: diff, reward, target_device: device })
             });
             const data = await res.json();
-            if(res.ok && data.status==='success') {
-                log(`💰 Block created: ${diff} bits, ${reward} CC — new balance: ${data.new_balance?.toFixed(4)} CC`,'log-win');
-                toast('Block created!','win');
+            if (res.ok && data.status === 'success') {
+                log('💰 Block created: ' + diff + ' bits, ' + reward + ' CC — new balance: ' + (data.new_balance?.toFixed(4) || '?') + ' CC', 'log-win');
+                toast('Block created!', 'win');
                 refreshBounties();
-                document.getElementById('reward-input').value='1.0'; updateCost();
-            } else { toast(data.detail||'Creation failed','err'); }
-        } catch(e) { toast('Connection error','err'); } finally { btn.innerText=orig; btn.disabled=false; }
+            } else { toast(data.detail || 'Creation failed', 'err'); }
+        } catch (e) { toast('Connection error', 'err'); } finally { btn.innerText = orig; btn.disabled = false; }
     }
 
+    // ── Init ─────────────────────────────────────────
     window.onload = () => {
-        requestNotifPermission();
         const slider = document.getElementById('thread-slider');
         const maxCore = navigator.hardwareConcurrency || 4;
-        slider.max = maxCore; slider.value = Math.min(4, maxCore);
-        document.getElementById('thread-val').innerText = slider.value + ' thread'+(slider.value>1?'s':'');
-        slider.oninput = () => { document.getElementById('thread-val').innerText = slider.value+' thread'+(slider.value>1?'s':''); };
-        const gpuToggle = document.getElementById('gpu-toggle');
-        if(!navigator.gpu) { gpuToggle.disabled=true; document.getElementById('gpu-status').innerText='WebGPU unavailable (CPU only)'; }
-        else document.getElementById('gpu-status').innerText='GPU toggle (fallback CPU)';
+        slider.max = maxCore;
+        slider.value = Math.min(4, maxCore);
+        document.getElementById('thread-val').innerText = slider.value + ' thread' + (slider.value > 1 ? 's' : '');
+        slider.oninput = () => {
+            document.getElementById('thread-val').innerText = slider.value + ' thread' + (slider.value > 1 ? 's' : '');
+        };
+        document.getElementById('gpu-toggle').disabled = true;
+        document.getElementById('gpu-status').innerText = 'CPU SHA-256 only';
         refreshBounties();
         setInterval(refreshBounties, POLL_MS);
-        document.getElementById('device-select').addEventListener('change',updateDeviceType);
-        document.getElementById('diff-slider').addEventListener('input',updateDifficulty);
-        document.getElementById('reward-input').addEventListener('input',updateCost);
+        document.getElementById('device-select').addEventListener('change', updateDeviceType);
+        document.getElementById('diff-slider').addEventListener('input', updateDifficulty);
+        document.getElementById('reward-input').addEventListener('input', updateCost);
         updateDeviceType();
     };
     window.createBlock = createBlock;
