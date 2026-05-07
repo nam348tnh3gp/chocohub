@@ -1,4 +1,4 @@
-// cpu.js - Web Worker dùng SHA-256
+// cpu.js - Web Worker tối ưu SHA-256
 let running = false;
 let jobData = null;
 
@@ -7,7 +7,6 @@ self.onmessage = function(e) {
         running = false;
         return;
     }
-    
     jobData = e.data;
     running = true;
     mine();
@@ -22,27 +21,32 @@ async function sha256(str) {
 }
 
 function meetsTarget(hashHex, targetBinStr) {
-    let bitsRequired = targetBinStr.length;
-    let hexLen = Math.ceil(bitsRequired / 4);
-    let prefixHex = hashHex.substring(0, hexLen);
+    const bitsRequired = targetBinStr.length;
+    const hexLen = Math.ceil(bitsRequired / 4);
+    const prefixHex = hashHex.substring(0, hexLen);
     let binFull = '';
-    for (let ch of prefixHex) binFull += parseInt(ch, 16).toString(2).padStart(4, '0');
+    for (let i = 0; i < prefixHex.length; i++) {
+        binFull += parseInt(prefixHex[i], 16).toString(2).padStart(4, '0');
+    }
     return binFull.startsWith(targetBinStr);
 }
 
 async function mine() {
+    const { last_hash, username, target_bin, bounty_id } = jobData;
     let nonce = jobData.startNonce || 0;
-    const { last_hash, username, target_bin, bounty_id, server_url } = jobData;
+    
+    // Tăng BATCH để giảm overhead async
+    const BATCH = 2000;
     
     while (running) {
-        const BATCH = 500;
         let batchHashes = 0;
         
         for (let i = 0; i < BATCH; i++) {
             if (!running) return;
             
-            const candidate = last_hash + username + bounty_id + nonce.toString();
-            const hashed = await sha256(candidate);
+            // Chuẩn: last_hash + nonce + workerName
+            const input = last_hash + nonce + username;
+            const hashed = await sha256(input);
             
             if (meetsTarget(hashed, target_bin)) {
                 self.postMessage({ status: 'found', nonce: nonce, bounty_id: bounty_id });
@@ -54,6 +58,9 @@ async function mine() {
             batchHashes++;
         }
         
-        self.postMessage({ status: 'progress', hashesDone: batchHashes });
+        self.postMessage({ status: 'progress', hashesDone: batchHashes, nonce: nonce });
+        
+        // Yield mỗi 2000 hash (thay vì 500)
+        await new Promise(r => setTimeout(r, 0));
     }
 }
