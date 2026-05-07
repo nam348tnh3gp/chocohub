@@ -2,46 +2,114 @@
 const crypto = require('crypto');
 const db = require('./db');
 
-// Kết nối DB nội bộ (không export)
+// Kết nối DB nội bộ
 const Database = require('better-sqlite3');
 const path = require('path');
 const sqlite = new Database(path.join(__dirname, 'chocohub.db'));
+sqlite.pragma('journal_mode = WAL');
+
+// ═══════════════════════════════════════════════════
+// AUTO-BOUNTY: Server tạo block miễn phí
+// ═══════════════════════════════════════════════════
+const AUTO_BOUNTY_MIN = 0.005;
+const AUTO_BOUNTY_MAX = 0.1;
+const MIN_ACTIVE_BOUNTIES = 3;
+const AUTO_BOUNTY_INTERVAL = 30000; // 30 giây
+const AUTO_DIFFICULTIES = [8, 10, 12, 14, 16];
+
+function createAutoBounty() {
+  const difficulty = AUTO_DIFFICULTIES[Math.floor(Math.random() * AUTO_DIFFICULTIES.length)];
+  const reward = parseFloat((AUTO_BOUNTY_MIN + Math.random() * (AUTO_BOUNTY_MAX - AUTO_BOUNTY_MIN)).toFixed(3));
+  
+  const bountyId = 'auto_' + crypto.randomBytes(6).toString('hex');
+  const binaryTarget = '0'.repeat(difficulty);
+  const lastHash = crypto.randomBytes(32).toString('hex');
+  
+  sqlite.prepare(`
+    INSERT INTO bounties (id, creator_username, target_device, difficulty, reward, cost, binary_target, last_hash, status)
+    VALUES (?, ?, ?, ?, ?, 0, ?, ?, 'active')
+  `).run(bountyId, 'server', 'all', difficulty, reward, binaryTarget, lastHash);
+  
+  console.log(`🤖 Auto-bounty: #${bountyId.substring(0,12)} | ${difficulty}bits | ${reward} CC`);
+}
+
+function checkAndRefillBounties() {
+  try {
+    const activeCount = sqlite.prepare(
+      'SELECT COUNT(*) as count FROM bounties WHERE status=?'
+    ).get('active').count;
+    
+    if (activeCount < MIN_ACTIVE_BOUNTIES) {
+      const needed = MIN_ACTIVE_BOUNTIES - activeCount;
+      for (let i = 0; i < needed; i++) {
+        createAutoBounty();
+      }
+      console.log(`📊 Bounties refilled: ${activeCount} → ${MIN_ACTIVE_BOUNTIES}`);
+    }
+
+    // Dọn dẹp auto-bounty cũ (giữ tối đa 10)
+    const autoCount = sqlite.prepare(
+      'SELECT COUNT(*) as count FROM bounties WHERE status=? AND creator_username=?'
+    ).get('active', 'server').count;
+    
+    if (autoCount > 10) {
+      const toRemove = sqlite.prepare(
+        'SELECT id FROM bounties WHERE status=? AND creator_username=? ORDER BY created_at ASC LIMIT ?'
+      ).all('active', 'server', autoCount - 10);
+      toRemove.forEach(b => {
+        sqlite.prepare('UPDATE bounties SET status=? WHERE id=?').run('expired', b.id);
+      });
+    }
+  } catch (e) {
+    console.error('Auto-bounty error:', e.message);
+  }
+}
+
+function startAutoBounty() {
+  checkAndRefillBounties();
+  setInterval(checkAndRefillBounties, AUTO_BOUNTY_INTERVAL);
+  console.log(`🤖 Auto-bounty started (${AUTO_BOUNTY_MIN}-${AUTO_BOUNTY_MAX} CC, min ${MIN_ACTIVE_BOUNTIES} blocks)`);
+}
+
+// ═══════════════════════════════════════════════════
+// BOUNTY MANAGEMENT
+// ═══════════════════════════════════════════════════
 
 function createBounty(username, pin, difficulty, reward, targetDevice) {
   username = username.toLowerCase().trim();
-
   db.authenticate(username, pin);
 
   const user = db.getUser(username);
   if (!user) throw new Error('User not found');
 
   const cost = 8.0;
-  if (user.balance < cost) throw new Error(`Insufficient balance (need ${cost} CC)`);
+  if (user.balance < cost) throw new Error(`Insufficient balance (need ${cost} CC, have ${user.balance.toFixed(2)} CC)`);
 
   const bountyId = crypto.randomBytes(8).toString('hex');
   const difficultyBits = parseInt(difficulty) || 8;
   const binaryTarget = '0'.repeat(difficultyBits);
   const lastHash = crypto.randomBytes(32).toString('hex');
+  const actualReward = reward ? parseFloat(reward) : 1.0;
 
   db.updateBalance(username, -cost);
 
   sqlite.prepare(`
     INSERT INTO bounties (id, creator_username, target_device, difficulty, reward, cost, binary_target, last_hash, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
-  `).run(bountyId, username, targetDevice || 'any', difficultyBits, reward || 1.0, cost, binaryTarget, lastHash);
+  `).run(bountyId, username, targetDevice || 'any', difficultyBits, actualReward, cost, binaryTarget, lastHash);
 
-  const burned = cost - (reward || 1.0);
+  const burned = cost - actualReward;
   return {
     status: 'success',
     bounty_id: bountyId,
-    message: `Bounty created! ${cost} CC deducted (${reward || 1.0} CC reward, ${burned.toFixed(1)} CC burned)`,
+    message: `Bounty created! ${cost} CC deducted (${actualReward.toFixed(1)} CC reward, ${burned.toFixed(1)} CC burned)`,
     new_balance: db.getUser(username).balance
   };
 }
 
 function getActiveBounties() {
   const rows = sqlite.prepare(
-    'SELECT id, creator_username, target_device, difficulty, reward, binary_target, last_hash FROM bounties WHERE status=?'
+    'SELECT id, creator_username, target_device, difficulty, reward, binary_target, last_hash FROM bounties WHERE status=? ORDER BY created_at DESC'
   ).all('active');
 
   const result = {};
@@ -81,27 +149,46 @@ function submitSolution(bountyId, nonce, workerName, deviceType) {
 
   if (!bounty) throw new Error('Bounty not found or already solved');
 
+  // Verify hash
   const input = bounty.last_hash + nonce + workerName;
   const hash = crypto.createHash('sha256').update(input).digest('hex');
   const binary = hexToBinary(hash);
 
   if (!binary.startsWith(bounty.binary_target)) {
-    return { status: 'error', reason: `Invalid nonce: hash ${binary.substring(0, 10)}... does not meet target` };
+    return { 
+      status: 'error', 
+      reason: `Invalid nonce: hash ${binary.substring(0, 12)}... does not meet target` 
+    };
   }
 
+  // Đánh dấu đã giải
   sqlite.prepare('UPDATE bounties SET status=?, nonce=?, solver_username=? WHERE id=?')
-    .run('solved', nonce, workerName, bountyId);
+    .run('solved', String(nonce), workerName, bountyId);
 
-  db.updateBalance(workerName, 1.0);
+  // Thưởng miner theo reward của bounty (không cứng 1.0)
+  const reward = bounty.reward || 1.0;
+  db.updateBalance(workerName, reward);
 
-  sqlite.prepare('INSERT INTO blocks_mined (username, bounty_id, reward) VALUES (?, ?, 1.0)')
-    .run(workerName, bountyId);
+  // Log block đã đào
+  sqlite.prepare('INSERT INTO blocks_mined (username, bounty_id, reward) VALUES (?, ?, ?)')
+    .run(workerName, bountyId, reward);
 
-  return { status: 'success', message: 'Block solved! You earned 1 CC.' };
+  return { 
+    status: 'success', 
+    message: `Block solved! You earned ${reward} CC.`,
+    reward: reward
+  };
 }
 
 function hexToBinary(hex) {
   return hex.split('').map(c => parseInt(c, 16).toString(2).padStart(4, '0')).join('');
 }
 
-module.exports = { createBounty, getActiveBounties, getJob, submitSolution };
+module.exports = { 
+  createBounty, 
+  getActiveBounties, 
+  getJob, 
+  submitSolution,
+  startAutoBounty,
+  checkAndRefillBounties
+};
