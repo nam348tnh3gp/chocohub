@@ -46,10 +46,13 @@ db.exec(`
   );
 `);
 
+console.log('✅ Database ready (better-sqlite3)');
+
 // Helper functions
 function authenticate(username, pin) {
   username = username.toLowerCase().trim();
   let user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  
   if (!user) {
     // Tạo mới
     const hash = bcrypt.hashSync(pin, 10);
@@ -60,8 +63,9 @@ function authenticate(username, pin) {
       throw new Error('Invalid PIN');
     }
   }
+  
   const token = jwt.sign({ username: user.username }, process.env.JWT_SECRET || 'secret', { expiresIn: '24h' });
-  return { status: 'success', message: 'Authenticated', token, balance: user.balance };
+  return { status: 'success', message: user ? 'Authenticated' : 'Account created', token, balance: user.balance };
 }
 
 function getUser(username) {
@@ -77,8 +81,7 @@ function getRecentBlocks(limit = 10) {
 }
 
 function getActiveMiners(limit = 5) {
-  // Đơn giản: trả về các solver gần đây
   return db.prepare('SELECT DISTINCT username, "web" as device FROM blocks_mined ORDER BY mined_at DESC LIMIT ?').all(limit);
 }
 
-module.exports = { db, authenticate, getUser, updateBalance, getRecentBlocks, getActiveMiners };
+module.exports = { authenticate, getUser, updateBalance, getRecentBlocks, getActiveMiners };
