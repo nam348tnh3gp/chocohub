@@ -97,7 +97,7 @@
 <div class="container">
     <div class="header">
         <h1>💻 Web Miner</h1>
-        <p>SHA-256 · Auto-mine best block</p>
+        <p>SHA-256 · 1-Click Auto Mine</p>
     </div>
 
     <div class="stats-row">
@@ -119,7 +119,7 @@
     <div class="progress-bar-bg"><div class="progress-bar" id="progress-bar"></div></div>
 
     <div class="control-panel">
-        <button id="btn-start" class="btn-start" onclick="startMining()">▶ START MINING</button>
+        <button id="btn-start" class="btn-start" onclick="toggleMining()">▶ START MINING</button>
         <button id="btn-stop" class="btn-stop" disabled onclick="stopMining()">■ STOP MINING</button>
         <div id="console" class="console"></div>
     </div>
@@ -130,6 +130,7 @@
 <script>
 const API = window.location.origin;
 let miningActive = false;
+let autoMineEnabled = false;  // ← KHÓA AUTO: khi true thì luôn tự đào
 let currentBountyId = null;
 let currentJob = null;
 let totalHashes = 0;
@@ -200,13 +201,11 @@ function updateBlockDisplay() {
         return;
     }
     
-    // Nếu đang mining, giữ block hiện tại
     if (miningActive && currentBountyId && allBounties[currentBountyId]) {
         displayBlockInfo(currentBountyId);
         return;
     }
     
-    // Chọn block đầu tiên (mới nhất)
     if (!miningActive) {
         currentBountyId = ids[0];
         displayBlockInfo(currentBountyId);
@@ -221,28 +220,46 @@ function displayBlockInfo(bountyId) {
     document.getElementById('current-block-reward').textContent = (b.reward || 0) + ' CC';
 }
 
-// ── Mining ─────────────────────────────────────────
-async function startMining() {
-    if (miningActive) return;
+// ── Toggle Mining (1 nút) ──────────────────────────
+async function toggleMining() {
+    if (miningActive) {
+        // Đang chạy → STOP
+        autoMineEnabled = false;
+        stopMining();
+        log('⏹️ Mining stopped.', 'log-info');
+    } else {
+        // Đang dừng → START
+        autoMineEnabled = true;
+        log('🚀 Auto-mining enabled. Press STOP to pause.', 'log-info');
+        await startMiningLoop();
+    }
+}
+
+async function startMiningLoop() {
+    if (!autoMineEnabled) return;
     if (!currentBountyId || !allBounties[currentBountyId]) {
-        log('No block available. Waiting for server...', 'log-warn');
         await fetchBlocks();
-        if (!currentBountyId) return;
+        if (!currentBountyId) {
+            log('⏳ No blocks available. Retrying...', 'log-warn');
+            setTimeout(startMiningLoop, 5000);
+            return;
+        }
     }
     
-    stopMining();
+    stopMiningInternal();
     
-    // Get job
     try {
         const res = await fetch(`${API}/get_job/${currentBountyId}`);
         if (!res.ok) {
-            log('Block expired, fetching new...', 'log-warn');
+            log('Block expired, switching...', 'log-warn');
             await fetchBlocks();
-            return startMining();
+            setTimeout(startMiningLoop, 1000);
+            return;
         }
         currentJob = await res.json();
     } catch (e) {
         log('Error: ' + e.message, 'log-err');
+        setTimeout(startMiningLoop, 5000);
         return;
     }
     
@@ -251,17 +268,19 @@ async function startMining() {
     currentNonce = Math.floor(Math.random() * 1000000);
     startTime = Date.now();
     
-    document.getElementById('btn-start').disabled = true;
+    document.getElementById('btn-start').textContent = '⏸ PAUSE MINING';
+    document.getElementById('btn-start').disabled = false;
     document.getElementById('btn-stop').disabled = false;
     
     const workerName = getWorkerName();
     const targetBin = currentJob.target_bin;
     const lastHash = currentJob.last_hash;
     const bountyId = currentBountyId;
+    const diffBits = currentJob.difficulty_bits;
+    const reward = allBounties[bountyId]?.reward || '?';
     
-    log(`⛏️ Mining #${bountyId.substring(0,10)}... (${currentJob.difficulty_bits} bits, ${allBounties[bountyId]?.reward} CC)`, 'log-info');
+    log(`⛏️ Mining #${bountyId.substring(0,10)}... (${diffBits} bits, ${reward} CC)`, 'log-info');
     
-    // Update progress bar
     hashrateInterval = setInterval(() => {
         if (!miningActive) return;
         const elapsed = (Date.now() - startTime) / 1000;
@@ -271,20 +290,15 @@ async function startMining() {
         document.getElementById('progress-bar').style.width = Math.min(90, 10 + (totalHashes / 300000) * 70) + '%';
     }, 1000);
     
-    // ═══════════════════════════════════════════════
-    // MINING LOOP - ĐÚNG THỨ TỰ INPUT
-    // Server: last_hash + nonce + workerName
-    // ═══════════════════════════════════════════════
+    const BATCH = 2000;
+    
     async function mine() {
         if (!miningActive) return;
         
-        const BATCH = 500;
         let batchHashes = 0;
-        
         for (let i = 0; i < BATCH; i++) {
             if (!miningActive) return;
             
-            // ⚠️ QUAN TRỌNG: Server dùng last_hash + nonce + workerName
             const input = lastHash + currentNonce + workerName;
             const hashed = await sha256(input);
             
@@ -293,6 +307,11 @@ async function startMining() {
                 document.getElementById('progress-bar').style.width = '100%';
                 miningActive = false;
                 await submitSolution(bountyId, currentNonce, workerName);
+                // Tự động đào block tiếp theo
+                if (autoMineEnabled) {
+                    await fetchBlocks();
+                    setTimeout(startMiningLoop, 2000);
+                }
                 return;
             }
             
@@ -303,34 +322,36 @@ async function startMining() {
         totalHashes += batchHashes;
         document.getElementById('stat-hashes').textContent = fmtNum(totalHashes);
         
-        if (miningActive) setTimeout(mine, 0);
+        if (miningActive) await new Promise(r => setTimeout(r, 0));
+        if (miningActive) mine();
     }
     
     mine();
 }
 
-function stopMining() {
+function stopMiningInternal() {
     miningActive = false;
     if (hashrateInterval) { clearInterval(hashrateInterval); hashrateInterval = null; }
+}
+
+function stopMining() {
+    autoMineEnabled = false;
+    stopMiningInternal();
+    document.getElementById('btn-start').textContent = '▶ START MINING';
     document.getElementById('btn-start').disabled = false;
     document.getElementById('btn-stop').disabled = true;
     document.getElementById('progress-bar').style.width = '0%';
     document.getElementById('stat-hashrate').textContent = '0 H/s';
+    log('⏹️ Miner stopped.', 'log-info');
 }
 
-// ── Submit ─────────────────────────────────────────
 async function submitSolution(id, nonce, workerName) {
     log(`📡 Submitting nonce ${nonce}...`, 'log-info');
     try {
         const res = await fetch(`${API}/submit_solution`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                bounty_id: id,
-                nonce: nonce,
-                worker_name: workerName,
-                device_type: 'web_miner'
-            })
+            body: JSON.stringify({ bounty_id: id, nonce: nonce, worker_name: workerName, device_type: 'web_miner' })
         });
         const result = await res.json();
         
@@ -344,40 +365,32 @@ async function submitSolution(id, nonce, workerName) {
     } catch (e) {
         log('Connection error: ' + e.message, 'log-err');
     }
-    
-    stopMining();
-    await fetchBlocks();
-    
-    // Auto-restart sau 3 giây
-    setTimeout(async () => {
-        if (!miningActive) {
-            log('🔄 Auto-restarting miner...', 'log-info');
-            await startMining();
-        }
-    }, 3000);
 }
 
 // ── Init ───────────────────────────────────────────
 window.onload = async () => {
     await fetchBlocks();
     
-    // Auto-start sau 2 giây
-    setTimeout(() => {
+    // Tự động start sau 1 giây
+    setTimeout(async () => {
         if (!miningActive && currentBountyId) {
-            startMining();
+            autoMineEnabled = true;
+            log('🚀 Auto-starting miner...', 'log-info');
+            await startMiningLoop();
         }
-    }, 2000);
+    }, 1000);
     
-    // Refresh blocks mỗi 30s
     setInterval(fetchBlocks, 30000);
     
-    // Nếu block hiện tại bị solve, tự chuyển block mới
+    // Kiểm tra block bị solve bởi người khác
     setInterval(async () => {
         if (miningActive && currentBountyId && !allBounties[currentBountyId]) {
             log('⚠️ Block solved by another miner. Switching...', 'log-warn');
-            stopMining();
+            stopMiningInternal();
             await fetchBlocks();
-            if (currentBountyId) startMining();
+            if (autoMineEnabled && currentBountyId) {
+                setTimeout(startMiningLoop, 1000);
+            }
         }
     }, 5000);
 };
