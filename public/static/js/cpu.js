@@ -1,53 +1,59 @@
-// cpu.js
-let running = true;
-let nonce = 0;
-let lastHash, targetBin, workerName, bountyId, serverUrl, workerId;
+// cpu.js - Web Worker dùng SHA-256
+let running = false;
+let jobData = null;
 
 self.onmessage = function(e) {
-  if (e.data.type === 'stop') {
-    running = false;
-    return;
-  }
-  // Khởi tạo job
-  const { last_hash, username, startNonce, target_bin, bounty_id, server_url, use_gpu, workerId: wid } = e.data;
-  lastHash = last_hash;
-  targetBin = target_bin;
-  workerName = username;
-  bountyId = bounty_id;
-  serverUrl = server_url;
-  workerId = wid || 0;
-  nonce = startNonce || 0;
-  running = true;
-  mine();
+    if (e.data.type === 'stop') {
+        running = false;
+        return;
+    }
+    
+    jobData = e.data;
+    running = true;
+    mine();
 };
 
-async function mine() {
-  while (running) {
-    const input = lastHash + nonce + workerName;
-    const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+async function sha256(str) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(str);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    const binary = hexToBinary(hashHex);
-    if (binary.startsWith(targetBin)) {
-      // Found!
-      self.postMessage({ status: 'found', nonce, bounty_id: bountyId });
-      running = false;
-      return;
-    }
-    // Báo cáo tiến độ mỗi 1000 lần
-    if (nonce % 1000 === 0) {
-      self.postMessage({ status: 'progress', hashesDone: 1000, nonce });
-      // Heartbeat để server không timeout (tuỳ chọn)
-      if (serverUrl) {
-        try {
-          fetch(`${serverUrl}/miner_heartbeat?worker=${workerName}&bounty=${bountyId}`, { mode: 'no-cors' });
-        } catch(e){}
-      }
-    }
-    nonce++;
-  }
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-function hexToBinary(hex) {
-  return hex.split('').map(c => parseInt(c, 16).toString(2).padStart(4, '0')).join('');
+function meetsTarget(hashHex, targetBinStr) {
+    let bitsRequired = targetBinStr.length;
+    let hexLen = Math.ceil(bitsRequired / 4);
+    let prefixHex = hashHex.substring(0, hexLen);
+    let binFull = '';
+    for (let ch of prefixHex) binFull += parseInt(ch, 16).toString(2).padStart(4, '0');
+    return binFull.startsWith(targetBinStr);
+}
+
+async function mine() {
+    let nonce = jobData.startNonce || 0;
+    const { last_hash, username, target_bin, bounty_id, server_url } = jobData;
+    
+    while (running) {
+        const BATCH = 500;
+        let batchHashes = 0;
+        
+        for (let i = 0; i < BATCH; i++) {
+            if (!running) return;
+            
+            const candidate = last_hash + username + bounty_id + nonce.toString();
+            const hashed = await sha256(candidate);
+            
+            if (meetsTarget(hashed, target_bin)) {
+                self.postMessage({ status: 'found', nonce: nonce, bounty_id: bounty_id });
+                running = false;
+                return;
+            }
+            
+            nonce++;
+            batchHashes++;
+        }
+        
+        self.postMessage({ status: 'progress', hashesDone: batchHashes });
+    }
 }
