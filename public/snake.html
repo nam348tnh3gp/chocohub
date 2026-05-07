@@ -431,18 +431,18 @@
                 <div class="game-title">Snake Faucet</div>
                 <p class="game-sub">Play and earn CC Points directly to your account.</p>
              
-                <!-- Reward Info Cards -->
+                <!-- Reward Info Cards (đồng bộ với backend: 0.5 CC/táo Normal, 2.0 CC/táo Hardcore) -->
                 <div class="reward-row">
                     <div class="rcard">
-                        <div class="rcard-val" id="val-apple">10 CC</div>
+                        <div class="rcard-val" id="val-apple">0.5 CC</div>
                         <div class="rcard-lbl">Per Apple</div>
                     </div>
                     <div class="rcard">
-                        <div class="rcard-val" id="val-max">500 CC</div>
+                        <div class="rcard-val" id="val-max">100 CC</div>
                         <div class="rcard-lbl">Max Payment</div>
                     </div>
                     <div class="rcard">
-                        <div class="rcard-val">1h</div>
+                        <div class="rcard-val">15m</div>
                         <div class="rcard-lbl">Cooldown</div>
                     </div>
                 </div>
@@ -454,9 +454,9 @@
                         <div class="sw" id="hardcore-switch"></div>
                     </div>
                     <div class="hc-badges" id="hc-badges" style="display:none">
-                        <span class="hc-badge">5× REWARD</span>
+                        <span class="hc-badge">4× REWARD</span>
                         <span class="hc-badge">VISUAL CHAOS</span>
-                        <span class="hc-badge">MAX 2500 CC</span>
+                        <span class="hc-badge">MAX 150 CC</span>
                     </div>
                 </div>
 
@@ -579,8 +579,8 @@
     <audio id="normalMusic" src="OSTS/High_Score_Chase.mp3" loop></audio>
     <audio id="hardcoreMusic" src="OSTS/High_Score_Overdrive_Hardcore.mp3"></audio>
 
-    <!-- Game Scripts -->
-    <script src="static/js/hardcore.js"></script>
-    <script src="static/js/game.js"></script>
+    <!-- Game Scripts (defer để đảm bảo DOM sẵn sàng) -->
+    <script src="static/js/hardcore.js" defer></script>
+    <script src="static/js/game.js" defer></script>
 </body>
 </html>
