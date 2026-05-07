@@ -84,4 +84,28 @@ function getActiveMiners(limit = 5) {
   return db.prepare('SELECT DISTINCT username, "web" as device FROM blocks_mined ORDER BY mined_at DESC LIMIT ?').all(limit);
 }
 
+// Thêm vào cuối file db.js, trước module.exports
+
+function getLastSnakeClaim(username) {
+  return db.prepare(
+    'SELECT claimed_at FROM snake_claims WHERE username=? ORDER BY claimed_at DESC LIMIT 1'
+  ).get(username.toLowerCase().trim());
+}
+
+function insertSnakeClaim(username, apples, mode, reward) {
+  return db.prepare(
+    'INSERT INTO snake_claims (username, apples, mode, reward) VALUES (?, ?, ?, ?)'
+  ).run(username.toLowerCase().trim(), apples, mode || 'normal', reward);
+}
+
+// Đừng quên thêm 2 hàm này vào danh sách module.exports ở cuối file
+module.exports = {
+  authenticate,
+  getUser,
+  updateBalance,
+  getRecentBlocks,
+  getActiveMiners,
+  getLastSnakeClaim, // <-- Thêm dòng này
+  insertSnakeClaim  // <-- Thêm dòng này
+};
 module.exports = { authenticate, getUser, updateBalance, getRecentBlocks, getActiveMiners };
