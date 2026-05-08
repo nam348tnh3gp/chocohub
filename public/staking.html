@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>CHOCO HUB · Staking Vault (PoS)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --void: #0a0a12;
+            --surface: rgba(20, 20, 35, 0.7);
+            --border: rgba(255, 149, 0, 0.08);
+            --border-mid: rgba(255, 149, 0, 0.18);
+            --border-hi: rgba(255, 149, 0, 0.35);
+            --text: #eee4d8;
+            --mid: #8b8296;
+            --dim: #4a4458;
+            --amber: #f58a00;
+            --amber-soft: #ffb347;
+            --amber-glow: rgba(245, 138, 0, 0.25);
+            --green: #40c057;
+            --red: #fa5252;
+            --pink: #f06292;
+            --radius-sm: 12px;
+            --radius-md: 20px;
+            --radius-lg: 28px;
+            --radius-full: 99px;
+            --shadow-card: 0 8px 32px rgba(0,0,0,0.4);
+            --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #0a0807;
+            background-image: radial-gradient(circle at 50% 30%, rgba(255,120,0,0.1) 0%, transparent 65%),
+                              radial-gradient(circle at 50% 80%, #140d0a 0%, #0a0807 100%);
+            font-family: 'Outfit', sans-serif;
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            width: 100%;
+            max-width: 580px;
+            background: var(--surface);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 32px 28px;
+            box-shadow: var(--shadow-card);
+        }
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--amber);
+            margin-bottom: 24px;
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: var(--mid);
+            font-size: 0.8rem;
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.2s;
+        }
+        .back-link:hover { color: var(--amber); }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.9rem;
+        }
+        .info-row .label { color: var(--mid); }
+        .info-row .value { font-weight: 700; font-family: 'Space Mono', monospace; }
+        .balance-row .value { color: var(--amber); }
+        .field-lbl {
+            font-family: 'Space Mono', monospace;
+            font-size: .65rem;
+            color: var(--dim);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+            display: block;
+        }
+        .field-inp {
+            width: 100%;
+            padding: 14px 18px;
+            background: rgba(10,10,20,0.6);
+            border: 1px solid var(--border-mid);
+            border-radius: 10px;
+            color: var(--amber);
+            font-family: 'Space Mono';
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .field-inp:focus { border-color: var(--border-hi); }
+        .btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-weight: 800;
+            font-size: 0.95rem;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: 0.2s;
+            margin-top: 16px;
+        }
+        .btn-stake {
+            background: var(--amber);
+            color: #000;
+            box-shadow: 0 4px 20px rgba(255,149,0,0.3);
+        }
+        .btn-stake:hover { background: var(--amber-soft); transform: translateY(-2px); }
+        .btn-unstake {
+            background: transparent;
+            color: var(--pink);
+            border: 1px solid rgba(255,45,120,0.4);
+            box-shadow: 0 2px 12px rgba(255,45,120,0.1);
+        }
+        .btn-unstake:hover {
+            background: rgba(255,45,120,0.15);
+            border-color: var(--pink);
+            transform: translateY(-2px);
+        }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 4px 12px;
+            border-radius: var(--radius-full);
+            background: rgba(64,192,87,0.1);
+            color: var(--green);
+            border: 1px solid rgba(64,192,87,0.2);
+        }
+        .status-badge.inactive { background: rgba(255,45,120,0.1); color: var(--pink); border-color: rgba(255,45,120,0.2); }
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            box-shadow: 0 0 8px rgba(64,192,87,0.4);
+            animation: pulseDot 2s infinite;
+        }
+        .inactive .pulse-dot { background: var(--red); box-shadow: 0 0 8px rgba(250,82,82,0.4); }
+        @keyframes pulseDot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        #toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #111;
+            border: 1px solid var(--amber);
+            padding: 10px 20px;
+            border-radius: 50px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 999;
+        }
+        #toast.show { opacity: 1; }
+        #toast.error { border-color: var(--red); color: var(--red); }
+        @media (max-width: 480px) {
+            .container { padding: 20px 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="index.html" class="back-link">← Dashboard</a>
+        <h1>🏦 STAKING VAULT</h1>
+
+        <div class="info-row balance-row">
+            <span class="label">Your balance</span>
+            <span class="value" id="user-balance">-- CC</span>
+        </div>
+        <div class="info-row">
+            <span class="label">Staked amount</span>
+            <span class="value" id="staked-amount">-- CC</span>
+        </div>
+        <div class="info-row">
+            <span class="label">Validator status</span>
+            <span id="validator-status" class="status-badge inactive"><span class="pulse-dot"></span> INACTIVE</span>
+        </div>
+        <div class="info-row">
+            <span class="label">Pending reward</span>
+            <span class="value" id="pending-reward">0.0 CC</span>
+        </div>
+
+        <div style="margin-top: 18px;">
+            <label class="field-lbl">Stake amount</label>
+            <input type="number" id="stake-input" class="field-inp" placeholder="Min 10 CC" min="10" step="1">
+            <button class="btn btn-stake" id="stake-btn">STAKE</button>
+            <button class="btn btn-unstake" id="unstake-btn">UNSTAKE ALL</button>
+        </div>
+
+        <div style="margin-top: 20px; font-size: 0.7rem; color: var(--dim); text-align: center;">
+            Staking rewards are distributed when you are chosen as the block proposer (PoS).
+        </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script>
+        const API = '/pos'; // PoS API prefix
+        let user = localStorage.getItem('choco_user');
+        const token = localStorage.getItem('choco_token');
+
+        function showToast(msg, type='') {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = `show ${type}`;
+            clearTimeout(t._timeout);
+            t._timeout = setTimeout(() => t.className = '', 3000);
+        }
+
+        async function apiCall(method, path, body) {
+            const res = await fetch(API + path, {
+                method,
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: body ? JSON.stringify(body) : undefined
+            });
+            return res.json();
+        }
+
+        async function refreshUI() {
+            if (!user || !token) return;
+            try {
+                const data = await apiCall('GET', `/info?username=${encodeURIComponent(user)}`);
+                if (data.status === 'success') {
+                    document.getElementById('user-balance').textContent = data.balance.toFixed(4) + ' CC';
+                    document.getElementById('staked-amount').textContent = (data.staked || 0).toFixed(4) + ' CC';
+                    const isValidator = data.is_validator;
+                    const badge = document.getElementById('validator-status');
+                    if (isValidator) {
+                        badge.innerHTML = '<span class="pulse-dot"></span> VALIDATOR';
+                        badge.className = 'status-badge';
+                    } else {
+                        badge.innerHTML = '<span class="pulse-dot"></span> INACTIVE';
+                        badge.className = 'status-badge inactive';
+                    }
+                    document.getElementById('pending-reward').textContent = (data.pending_reward || 0).toFixed(4) + ' CC';
+                } else {
+                    showToast(data.message || 'Failed to load data', 'error');
+                }
+            } catch (e) {
+                showToast('Network error', 'error');
+            }
+        }
+
+        document.getElementById('stake-btn').addEventListener('click', async () => {
+            const amount = parseFloat(document.getElementById('stake-input').value);
+            if (isNaN(amount) || amount < 10) return showToast('Minimum stake is 10 CC', 'error');
+            if (!user || !token) return showToast('Please login first', 'error');
+            const pin = sessionStorage.getItem('choco_pin_temp');
+            if (!pin) return showToast('Session expired, please login again', 'error');
+
+            const result = await apiCall('POST', '/stake', { username: user, pin, amount });
+            if (result.status === 'success') {
+                showToast(result.message, 'success');
+                document.getElementById('stake-input').value = '';
+                refreshUI();
+            } else {
+                showToast(result.message, 'error');
+            }
+        });
+
+        document.getElementById('unstake-btn').addEventListener('click', async () => {
+            if (!user || !token) return showToast('Please login first', 'error');
+            const pin = sessionStorage.getItem('choco_pin_temp');
+            if (!pin) return showToast('Session expired, please login again', 'error');
+
+            const result = await apiCall('POST', '/unstake', { username: user, pin });
+            if (result.status === 'success') {
+                showToast(result.message, 'success');
+                refreshUI();
+            } else {
+                showToast(result.message, 'error');
+            }
+        });
+
+        refreshUI();
+        setInterval(refreshUI, 8000);
+    </script>
+</body>
+</html>
