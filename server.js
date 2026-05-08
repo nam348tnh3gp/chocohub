@@ -1,4 +1,4 @@
-// server.js - Full fix + Auto-Bounty
+// server.js - Hybrid PoW + PoS (no hunt)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -62,8 +62,9 @@ app.get('/get_balance', (req, res) => {
 app.get('/network_status', (req, res) => {
   try {
     const recent = db.getRecentBlocks(10);
-    const miners = db.getActiveMiners(5);
-    res.json({ recent_blocks: recent, active_miners: miners });
+    // PoS: active validators > 10 CC staked
+    const validators = db.getValidators(10);
+    res.json({ recent_blocks: recent, active_validators: validators });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
   }
@@ -93,7 +94,57 @@ app.get('/snake/cooldown', (req, res) => {
   }
 });
 
-// ─── Bounty endpoints ─────────────────────────────────
+// ═══════════════════════════════════════════════════════
+// PROOF OF STAKE (PoS) ROUTES
+// ═══════════════════════════════════════════════════════
+app.get('/pos/info', (req, res) => {
+  try {
+    const username = (req.query.username || '').toLowerCase().trim();
+    if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
+    const user = db.getUser(username);
+    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+    const stake = db.getStake(username);
+    res.json({
+      status: 'success',
+      balance: user.balance,
+      staked: stake.amount,
+      is_validator: stake.amount >= 10,
+      pending_reward: stake.pending_reward
+    });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+app.post('/pos/stake', (req, res) => {
+  try {
+    const { username, pin, amount } = req.body;
+    if (!username || !pin || !amount) return res.status(400).json({ status: 'error', message: 'Missing fields' });
+    // Verify PIN
+    db.authenticate(username, pin); // sẽ throw nếu sai
+    const stakeAmount = parseFloat(amount);
+    if (isNaN(stakeAmount) || stakeAmount < 10) throw new Error('Minimum stake is 10 CC');
+    const result = db.stake(username, stakeAmount);
+    res.json({ status: 'success', message: `Staked ${stakeAmount} CC`, staked: result.amount });
+  } catch (e) {
+    res.status(400).json({ status: 'error', message: e.message });
+  }
+});
+
+app.post('/pos/unstake', (req, res) => {
+  try {
+    const { username, pin } = req.body;
+    if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing fields' });
+    db.authenticate(username, pin);
+    const result = db.unstake(username);
+    const total = result.amount + result.pending_reward; // Trong unstake đã hoàn trả rồi, nhưng ta chỉ cần thông báo
+    res.json({ status: 'success', message: 'Unstaked successfully', staked: 0 });
+  } catch (e) {
+    res.status(400).json({ status: 'error', message: e.message });
+  }
+});
+
+// ─── Bounty endpoints (PoW) ──────────────────────────
 app.post('/create_bounty', (req, res) => {
   const { username, pin, difficulty, reward, target_device } = req.body;
   if (!username || !pin || !difficulty) return res.status(400).json({ status: 'error', message: 'Missing fields' });
@@ -126,13 +177,11 @@ app.get('/get_job/:id', (req, res) => {
 
 app.post('/submit_solution', (req, res) => {
   try {
-    // Đọc từ cả query params và body
     const bounty_id = req.query.bounty_id || req.body.bounty_id;
     const nonce = req.query.nonce || req.body.nonce;
     const worker_name = req.query.worker_name || req.body.worker_name;
     const device_type = req.query.device_type || req.body.device_type || 'web';
 
-    // Validate
     if (!bounty_id || !nonce || !worker_name) {
       return res.status(400).json({ 
         status: 'error', 
@@ -214,9 +263,10 @@ app.use((err, req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// START AUTO-BOUNTY SYSTEM
+// START AUTO-BOUNTY (PoW) + PoS MINTING
 // ═══════════════════════════════════════════════════════
 blockchain.startAutoBounty();
+blockchain.startPoSMinting();
 
 // ═══════════════════════════════════════════════════════
 // START SERVER
@@ -224,11 +274,12 @@ blockchain.startAutoBounty();
 app.listen(PORT, () => {
   console.log('');
   console.log('╔══════════════════════════════════════╗');
-  console.log('║        🍫 CHOCO HUB READY 🍫        ║');
+  console.log('║     🍫 CHOCO HUB · PoW+PoS 🍫      ║');
   console.log('╠══════════════════════════════════════╣');
   console.log(`║  Dashboard: http://localhost:${PORT}    ║`);
   console.log('║  API Test:  /api/test               ║');
-  console.log('║  Auto-Bounty: 0.005-0.1 CC          ║');
+  console.log('║  PoW Auto-Bounty: active            ║');
+  console.log('║  PoS Minting: active (30s blocks)   ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
 });
