@@ -368,11 +368,13 @@ function toggleHardcoreMode() {
     if (hardcoreMode) {
         wrap.classList.add("hc-on"); sw.classList.add("on");
         badges.style.display = "flex"; warn.style.display = "block";
-        vApple.textContent = "50 CC"; vMax.textContent = "2500 CC";
+        vApple.textContent = "2.0 CC"; // Sửa từ "50 CC"
+        vMax.textContent = "150 CC";   // Sửa từ "2500 CC"
     } else {
         wrap.classList.remove("hc-on"); sw.classList.remove("on");
         badges.style.display = "none"; warn.style.display = "none";
-        vApple.textContent = "10 CC"; vMax.textContent = "500 CC";
+        vApple.textContent = "0.5 CC"; // Sửa từ "10 CC"
+        vMax.textContent = "100 CC";   // Sửa từ "500 CC"
     }
 }
 
@@ -396,7 +398,7 @@ async function claimReward() {
             body: JSON.stringify({
                 username: window.currentUser,
                 pin:      window.currentPin,
-                apples:   score,        // backend cần "apples" không phải "score"
+                apples:   score,
                 mode:     mode
             })
         });
