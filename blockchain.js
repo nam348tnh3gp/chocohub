@@ -1,4 +1,4 @@
-// blockchain.js - PoW + PoS hybrid
+// blockchain.js - PoW + PoS hybrid (cleaned + validator status fix)
 const crypto = require('crypto');
 const db = require('./db');
 
@@ -74,9 +74,11 @@ function startAutoBounty() {
 // ═══════════════════════════════════════════════════
 // PROOF OF STAKE (PoS) MINTING
 // ═══════════════════════════════════════════════════
-const POS_BLOCK_INTERVAL = 30000; // mỗi 30 giây tạo 1 block PoS
-const MIN_STAKE = 10; // Tối thiểu 10 CC để làm validator
-const POS_BLOCK_REWARD = 0.1; // Thưởng cố định mỗi block PoS
+const POS_BLOCK_INTERVAL = 30000; // 30 giây
+const MIN_STAKE = 10;
+const POS_BLOCK_REWARD = 0.1; // Thưởng cố định
+
+let currentValidator = null; // 🟢 Lưu validator vừa được chọn
 
 function selectValidator() {
   const validators = db.getValidators(MIN_STAKE);
@@ -97,6 +99,7 @@ function mintPoSBlock() {
   const validator = selectValidator();
   if (!validator) {
     console.log('🔒 No validator available for PoS block');
+    currentValidator = null; // Không có ai
     return;
   }
   
@@ -110,7 +113,14 @@ function mintPoSBlock() {
   // Cộng pending reward vào stake
   db.addStakeReward(validator.username, reward);
   
+  // 🟢 Cập nhật validator hiện tại
+  currentValidator = validator.username;
+  
   console.log(`🏦 PoS Block forged by ${validator.username} | +${reward} CC | Stake: ${validator.amount} CC`);
+}
+
+function getCurrentValidator() {
+  return currentValidator;
 }
 
 function startPoSMinting() {
@@ -120,40 +130,8 @@ function startPoSMinting() {
 }
 
 // ═══════════════════════════════════════════════════
-// BOUNTY MANAGEMENT (PoW)
+// BOUNTY MANAGEMENT (PoW) – đã xóa createBounty
 // ═══════════════════════════════════════════════════
-
-function createBounty(username, pin, difficulty, reward, targetDevice) {
-  username = username.toLowerCase().trim();
-  db.authenticate(username, pin);
-
-  const user = db.getUser(username);
-  if (!user) throw new Error('User not found');
-
-  const cost = 8.0;
-  if (user.balance < cost) throw new Error(`Insufficient balance (need ${cost} CC, have ${user.balance.toFixed(2)} CC)`);
-
-  const bountyId = crypto.randomBytes(8).toString('hex');
-  const difficultyBits = parseInt(difficulty) || 8;
-  const binaryTarget = '0'.repeat(difficultyBits);
-  const lastHash = crypto.randomBytes(32).toString('hex');
-  const actualReward = reward ? parseFloat(reward) : 1.0;
-
-  db.updateBalance(username, -cost);
-
-  sqlite.prepare(`
-    INSERT INTO bounties (id, creator_username, target_device, difficulty, reward, cost, binary_target, last_hash, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
-  `).run(bountyId, username, targetDevice || 'any', difficultyBits, actualReward, cost, binaryTarget, lastHash);
-
-  const burned = cost - actualReward;
-  return {
-    status: 'success',
-    bounty_id: bountyId,
-    message: `Bounty created! ${cost} CC deducted (${actualReward.toFixed(1)} CC reward, ${burned.toFixed(1)} CC burned)`,
-    new_balance: db.getUser(username).balance
-  };
-}
 
 function getActiveBounties() {
   const rows = sqlite.prepare(
@@ -213,7 +191,7 @@ function submitSolution(bountyId, nonce, workerName, deviceType) {
   sqlite.prepare('UPDATE bounties SET status=?, nonce=?, solver_username=? WHERE id=?')
     .run('solved', String(nonce), workerName, bountyId);
 
-  // Thưởng miner theo reward của bounty (không cứng 1.0)
+  // Thưởng miner theo reward của bounty
   const reward = bounty.reward || 1.0;
   db.updateBalance(workerName, reward);
 
@@ -233,7 +211,6 @@ function hexToBinary(hex) {
 }
 
 module.exports = { 
-  createBounty, 
   getActiveBounties, 
   getJob, 
   submitSolution,
@@ -241,5 +218,6 @@ module.exports = {
   checkAndRefillBounties,
   // PoS exports
   startPoSMinting,
-  mintPoSBlock
+  mintPoSBlock,
+  getCurrentValidator
 };
