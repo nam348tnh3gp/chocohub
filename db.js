@@ -1,4 +1,4 @@
-// db.js – Full fix + PoS Staking support (Case-Sensitive Username)
+// db.js – Full fix + PoS Staking support + Leaderboard (Case-Sensitive Username)
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -167,6 +167,18 @@ function insertSnakeClaim(username, apples, mode, reward) {
   ).run(username.trim(), apples, mode || 'normal', reward);
 }
 
+// ─── Leaderboard ─────────────────────────────────
+function getLeaderboard(mode, limit = 10) {
+  return db.prepare(`
+    SELECT username, MAX(apples) as score, MAX(reward) as reward 
+    FROM snake_claims 
+    WHERE mode = ? 
+    GROUP BY username 
+    ORDER BY score DESC 
+    LIMIT ?
+  `).all(mode, limit);
+}
+
 // ─── CHỈ MỘT DÒNG MODULE.EXPORTS DUY NHẤT ─────────
 module.exports = {
   authenticate,
@@ -181,5 +193,7 @@ module.exports = {
   stake,
   unstake,
   getValidators,
-  addStakeReward
+  addStakeReward,
+  // Leaderboard
+  getLeaderboard
 };
