@@ -127,6 +127,7 @@
             box-shadow: 0 4px 22px rgba(255,149,0,.3); transition: 0.2s; margin-top: 15px;
         }
         .btn-start:hover { background: var(--amber-soft); transform: translateY(-2px); }
+        .btn-start:disabled { opacity: 0.5; cursor: not-allowed; }
 
         /* Toast */
         #toast {
@@ -384,12 +385,6 @@
             font-size: 0.85rem; color: var(--mid); line-height: 1.5; margin: 0;
         }
 
-        /* Disabled card */
-        .game-card.disabled {
-            opacity: 0.5; cursor: not-allowed; pointer-events: none; filter: grayscale(30%);
-        }
-        .game-card.disabled:hover { transform: none; border-color: var(--border); box-shadow: none; }
-
         /* Network monitor */
         .network-monitor { margin-top: 10px; }
         .monitor-grid {
@@ -538,7 +533,7 @@
                 <input type="password" id="user-pin" class="field-inp" placeholder="4 to 8 digits" maxlength="8" autocomplete="current-password">
             </div>
 
-            <button class="btn-start" onclick="handleAuth()">ENTER HUB</button>
+            <button class="btn-start" id="auth-btn">ENTER HUB</button>
             <p class="login-hint">If the username doesn't exist, we'll create one for you.</p>
         </div>
     </div>
@@ -567,7 +562,7 @@
             <div class="account-meta">
                 <span class="meta-label">Account Status</span>
                 <span class="secure-badge">● SECURE / ENCRYPTED</span>
-                <button class="btn-logout" onclick="logout()">LOGOUT</button>
+                <button class="btn-logout" id="logout-btn">LOGOUT</button>
             </div>
         </section>
 
@@ -582,14 +577,13 @@
                 <p class="game-desc">Classic Snake with different modes. Earn up to 100 CC per claim in Hardcore Mode.</p>
             </a>
 
-            <!-- Web Miner  -->
-           <a href="mining.html" class="game-card">
-    <span class="game-badge">NEW</span>
-    <span class="game-icon" aria-hidden="true">💻</span>
-    <span class="game-name">WEB MINER</span>
-    <p class="game-desc">Mine CC directly using your browser's CPU. Auto mining block.</p>
-</a>
-        </div>
+            <!-- Web Miner -->
+            <a href="mining.html" class="game-card">
+                <span class="game-badge">NEW</span>
+                <span class="game-icon" aria-hidden="true">💻</span>
+                <span class="game-name">WEB MINER</span>
+                <p class="game-desc">Mine CC directly using your browser's CPU. Auto mining block.</p>
+            </a>
 
             <!-- ChocoHunt / Block Hunt -->
             <a href="hunt.html" class="game-card">
@@ -623,8 +617,13 @@
     <div id="toast" role="status" aria-live="polite"></div>
 
     <script>
+        // ══════════════════════════════════════════════════════
+        // SECURITY-FIXED DASHBOARD SCRIPT
+        // ══════════════════════════════════════════════════════
+        
         let currentBalance = 0;
         let balanceAnimationId = null;
+        let authToken = null; // JWT token thay vì PIN
 
         function animateValue(id, start, end, duration) {
             const obj = document.getElementById(id);
@@ -642,13 +641,23 @@
                 const displayValue = Number.isInteger(end)
                     ? Math.round(current).toLocaleString('en-US', { minimumIntegerDigits: 4, useGrouping: false })
                     : current.toFixed(4);
-                obj.innerHTML = displayValue + ' <span class="currency">CC</span>';
+                obj.textContent = ''; // Xóa nội dung cũ an toàn
+                obj.appendChild(document.createTextNode(displayValue + ' '));
+                const span = document.createElement('span');
+                span.className = 'currency';
+                span.textContent = 'CC';
+                obj.appendChild(span);
                 if (progress < 1) {
                     balanceAnimationId = requestAnimationFrame(step);
                 } else {
-                    obj.innerHTML = (Number.isInteger(end)
+                    obj.textContent = '';
+                    obj.appendChild(document.createTextNode((Number.isInteger(end)
                         ? end.toLocaleString('en-US', { minimumIntegerDigits: 4, useGrouping: false })
-                        : end.toFixed(4)) + ' <span class="currency">CC</span>';
+                        : end.toFixed(4)) + ' '));
+                    const span2 = document.createElement('span');
+                    span2.className = 'currency';
+                    span2.textContent = 'CC';
+                    obj.appendChild(span2);
                     balanceAnimationId = null;
                 }
             };
@@ -657,9 +666,12 @@
 
         async function updateBalanceAction() {
             const user = localStorage.getItem('choco_user');
-            if (!user) return;
+            const token = localStorage.getItem('choco_token');
+            if (!user || !token) return;
             try {
-                const res = await fetch(`/get_user/${encodeURIComponent(user)}`);
+                const res = await fetch(`/get_user/${encodeURIComponent(user)}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
                 if (!res.ok) throw new Error('Network error');
                 const data = await res.json();
                 if (data.status !== 'error' && typeof data.balance === 'number') {
@@ -681,22 +693,48 @@
 
                 const blocksLog = document.getElementById('mined-blocks-log');
                 if (data.recent_blocks && data.recent_blocks.length > 0) {
-                    blocksLog.innerHTML = data.recent_blocks.map(b =>
-                        `<li><span class="block-id">#${escapeHTML(b.id?.substring(0,8) || '?')}</span> — ${escapeHTML(b.username || 'unknown')} — <span class="reward">${escapeHTML(String(b.reward))} CC</span></li>`
-                    ).join('');
+                    const frag = document.createDocumentFragment();
+                    data.recent_blocks.forEach(b => {
+                        const li = document.createElement('li');
+                        const spanId = document.createElement('span');
+                        spanId.className = 'block-id';
+                        spanId.textContent = '#' + (b.id ? b.id.substring(0,8) : '?');
+                        li.appendChild(spanId);
+                        li.appendChild(document.createTextNode(' — ' + (b.username || 'unknown') + ' — '));
+                        const spanReward = document.createElement('span');
+                        spanReward.className = 'reward';
+                        spanReward.textContent = String(b.reward) + ' CC';
+                        li.appendChild(spanReward);
+                        frag.appendChild(li);
+                    });
+                    blocksLog.textContent = '';
+                    blocksLog.appendChild(frag);
                 } else {
                     blocksLog.innerHTML = '<li class="empty-state">Awaiting activity...</li>';
                 }
 
                 const minersList = document.getElementById('active-miners-list');
                 if (data.active_miners && data.active_miners.length > 0) {
-                    minersList.innerHTML = data.active_miners.map(m =>
-                        `<div class="miner-entry">
-                            <span class="miner-dot" aria-hidden="true"></span>
-                            <span class="miner-name">${escapeHTML(m.username || '?')}</span>
-                            <span class="miner-device">${escapeHTML(m.device || '')}</span>
-                        </div>`
-                    ).join('');
+                    const frag = document.createDocumentFragment();
+                    data.active_miners.forEach(m => {
+                        const div = document.createElement('div');
+                        div.className = 'miner-entry';
+                        const dot = document.createElement('span');
+                        dot.className = 'miner-dot';
+                        dot.setAttribute('aria-hidden', 'true');
+                        div.appendChild(dot);
+                        const name = document.createElement('span');
+                        name.className = 'miner-name';
+                        name.textContent = m.username || '?';
+                        div.appendChild(name);
+                        const device = document.createElement('span');
+                        device.className = 'miner-device';
+                        device.textContent = m.device || '';
+                        div.appendChild(device);
+                        frag.appendChild(div);
+                    });
+                    minersList.textContent = '';
+                    minersList.appendChild(frag);
                 } else {
                     minersList.innerHTML = '<div class="empty-state">No active miners</div>';
                 }
@@ -726,7 +764,7 @@
             if (username.length < 3 || pin.length < 4) {
                 return showToast('Name min 3, PIN min 4 chars', 'error');
             }
-            const btn = document.querySelector('.btn-start');
+            const btn = document.getElementById('auth-btn');
             if (btn) {
                 btn.disabled = true;
                 btn.textContent = 'AUTHENTICATING...';
@@ -739,8 +777,14 @@
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
+                    // ✅ CHỈ lưu token, KHÔNG lưu PIN
                     localStorage.setItem('choco_user', username.toLowerCase());
-                    localStorage.setItem('choco_pin', pin);
+                    if (data.token) {
+                        localStorage.setItem('choco_token', data.token);
+                        authToken = data.token;
+                    }
+                    // Lưu PIN TẠM THỜI vào sessionStorage (mất khi đóng tab)
+                    sessionStorage.setItem('choco_pin_temp', pin);
                     showToast(data.message || 'Welcome!', 'success');
                     setTimeout(() => location.reload(), 900);
                 } else {
@@ -761,15 +805,20 @@
                 dash.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
             }
             setTimeout(() => {
-                localStorage.clear();
+                // ✅ Xóa TOÀN BỘ dữ liệu nhạy cảm
+                localStorage.removeItem('choco_user');
+                localStorage.removeItem('choco_token');
+                sessionStorage.removeItem('choco_pin_temp');
                 location.reload();
             }, 350);
         }
 
         async function init() {
             const user = localStorage.getItem('choco_user');
-            const pin = localStorage.getItem('choco_pin');
-            if (user && pin) {
+            const token = localStorage.getItem('choco_token');
+            
+            if (user && token) {
+                authToken = token;
                 const overlay = document.getElementById('login-overlay');
                 if (overlay) {
                     overlay.classList.add('fading');
@@ -783,6 +832,17 @@
                 await Promise.allSettled([updateBalanceAction(), updateNetworkMonitor()]);
                 setInterval(updateBalanceAction, 5000);
                 setInterval(updateNetworkMonitor, 10000);
+            }
+
+            // Event listeners (dùng addEventListener thay vì inline onclick)
+            const authBtn = document.getElementById('auth-btn');
+            if (authBtn) {
+                authBtn.addEventListener('click', handleAuth);
+            }
+            
+            const logoutBtn = document.getElementById('logout-btn');
+            if (logoutBtn) {
+                logoutBtn.addEventListener('click', logout);
             }
 
             const pinInput = document.getElementById('user-pin');
@@ -802,7 +862,8 @@
             t._timeout = setTimeout(() => { t.className = ''; }, 3000);
         }
 
-        window.onload = init;
+        // ✅ Dùng DOMContentLoaded thay vì window.onload (an toàn hơn)
+        document.addEventListener('DOMContentLoaded', init);
     </script>
 </body>
 </html>
