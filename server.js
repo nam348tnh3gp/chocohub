@@ -1,4 +1,4 @@
-// server.js - Hybrid PoW + PoS (no hunt - status validator fixed - active validators fix)
+// server.js - Hybrid PoW + PoS (no hunt - status validator fixed - active validators fix - leaderboard added)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -84,7 +84,6 @@ app.get('/get_balance', (req, res) => {
 app.get('/network_status', (req, res) => {
   try {
     const recent = db.getRecentBlocks(10);
-    // Đảm bảo trường "stake" cho frontend
     const validators = db.getValidators(10).map(v => ({
       username: v.username,
       stake: v.amount
@@ -114,6 +113,19 @@ app.get('/snake/cooldown', (req, res) => {
   try {
     const result = snake.getCooldown(username);
     res.json(result);
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+// LEADERBOARD ROUTE
+// ═══════════════════════════════════════════════════════
+app.get('/leaderboard', (req, res) => {
+  try {
+    const normal = db.getLeaderboard('normal', 10);
+    const hardcore = db.getLeaderboard('hardcore', 10);
+    res.json({ normal, hardcore });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
   }
@@ -310,7 +322,8 @@ app.listen(PORT, () => {
   console.log('║     🍫 CHOCO HUB · PoW+PoS 🍫      ║');
   console.log('╠══════════════════════════════════════╣');
   console.log(`║  Dashboard: http://localhost:${PORT}    ║`);
-  console.log('║  API Test:  /api/test               ║');
+  console.log('║  API Test:  /api/test               ║`);
+  console.log('║  Leaderboard: /leaderboard          ║');
   console.log('║  PoW Auto-Bounty: active            ║');
   console.log('║  PoS Minting: active (30s blocks)   ║');
   console.log('╚══════════════════════════════════════╝');
