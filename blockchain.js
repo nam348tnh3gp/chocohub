@@ -11,10 +11,10 @@ sqlite.pragma('journal_mode = WAL');
 // ═══════════════════════════════════════════════════
 // AUTO-BOUNTY: Server tạo block miễn phí (PoW)
 // ═══════════════════════════════════════════════════
-const AUTO_BOUNTY_MIN = 0.005;
-const AUTO_BOUNTY_MAX = 0.1;
-const MIN_ACTIVE_BOUNTIES = 3;
-const AUTO_BOUNTY_INTERVAL = 30000; // 30 giây
+const AUTO_BOUNTY_MIN = 0.0001;
+const AUTO_BOUNTY_MAX = 0.01;
+const MIN_ACTIVE_BOUNTIES = 30;
+const AUTO_BOUNTY_INTERVAL = 1000; // 30 giây
 const AUTO_DIFFICULTIES = [8, 10, 12, 14, 16];
 
 function createAutoBounty() {
