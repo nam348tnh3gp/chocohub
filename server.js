@@ -9,6 +9,30 @@ const db = require('./db');
 const blockchain = require('./blockchain');
 const snake = require('./snake');
 
+// --- CÓDIGO DO WEBHOOK AQUI ---
+const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1501353650243633202/JH4DnjVgN_H42VaEc0rflF03HJjl2Nh1iy7qCRZbkxX7uhHDN_rZfaaNAGqAvAjZAqNU';
+
+async function sendMinerWebhook(worker, bountyId, device) {
+  try {
+    await fetch(DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        embeds: [{
+          title: "⛏️ Block Solved! (WebMiner)",
+          description: `A new block was solved.\n\n**Worker:** \`${worker}\`\n**Block ID:** \`${bountyId}\`\n**Device:** \`${device}\``,
+          color: 0xf1c40f,
+          timestamp: new Date().toISOString(),
+          footer: { text: "ChocoHub Mining Monitor" }
+        }]
+      })
+    });
+  } catch (err) {
+    console.error('⚠️ quiet error on webhook:', err.message);
+  }
+}
+// --- FIM DO CÓDIGO DO WEBHOOK ---
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -195,6 +219,12 @@ app.post('/submit_solution', (req, res) => {
     }
 
     const result = blockchain.submitSolution(bounty_id, nonce, worker_name, device_type);
+
+    // ✅ DISPARO DO WEBHOOK: Apenas se o bloco for resolvido com sucesso
+    if (result && result.status === 'success') {
+      sendMinerWebhook(worker_name, bounty_id, device_type);
+    }
+
     res.json(result);
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
