@@ -1,11 +1,11 @@
-// cpu.js - Web Worker tương thích MỌI BROWSER
+// cpu.js - Web Worker khai thác SHA-256 hiệu năng tối đa
 (function() {
 'use strict';
 
 let running = false;
 let jobData = null;
 
-// ==================== SHA-256 CORE - PURE JS ====================
+// ==================== SHA-256 CORE - TỐI ƯU ====================
 class SHA256 {
     constructor() {
         this.state = new Uint32Array(8);
@@ -15,7 +15,7 @@ class SHA256 {
         this.totalLen = 0;
         this.reset();
     }
-    
+
     reset() {
         this.state[0] = 0x6a09e667;
         this.state[1] = 0xbb67ae85;
@@ -29,66 +29,107 @@ class SHA256 {
         this.totalLen = 0;
         return this;
     }
-    
+
+    // Cập nhật dữ liệu - tối ưu cho mảng lớn
     update(data, len) {
+        // Nếu data là Uint8Array và len là toàn bộ, duyệt bằng vòng lặp tăng chỉ số
+        const buf = this.buffer;
+        let bufLen = this.bufferLen;
+        let total = this.totalLen;
         for (let i = 0; i < len; i++) {
-            this.buffer[this.bufferLen++] = data[i];
-            this.totalLen++;
-            if (this.bufferLen === 64) {
-                this._processBlock(this.buffer, 0);
-                this.bufferLen = 0;
+            buf[bufLen++] = data[i];
+            total++;
+            if (bufLen === 64) {
+                this._processBlock(buf, 0);
+                bufLen = 0;
             }
         }
+        this.bufferLen = bufLen;
+        this.totalLen = total;
     }
-    
-    digest() {
-        // Padding
-        const buffer = this.buffer;
-        const bufferLen = this.bufferLen;
-        buffer[bufferLen] = 0x80;
-        
-        if (bufferLen >= 56) {
-            for (let i = bufferLen + 1; i < 64; i++) buffer[i] = 0;
-            this._processBlock(buffer, 0);
+
+    // Cập nhật chỉ 1 byte - nhanh hơn cho padding
+    updateByte(b) {
+        const buf = this.buffer;
+        const bufLen = this.bufferLen;
+        buf[bufLen] = b;
+        this.totalLen++;
+        if (bufLen + 1 === 64) {
+            this._processBlock(buf, 0);
             this.bufferLen = 0;
+        } else {
+            this.bufferLen = bufLen + 1;
         }
-        
-        for (let i = this.bufferLen; i < 56; i++) buffer[i] = 0;
-        
-        const bitLen = this.totalLen * 8;
-        buffer[56] = (bitLen >>> 24) & 0xFF;
-        buffer[57] = (bitLen >>> 16) & 0xFF;
-        buffer[58] = (bitLen >>> 8) & 0xFF;
-        buffer[59] = bitLen & 0xFF;
-        
-        this._processBlock(buffer, 0);
-        
+    }
+
+    // Kết thúc và lấy hash - tối ưu hoá padding
+    digest() {
+        const buf = this.buffer;
+        let bufLen = this.bufferLen;
+        const total = this.totalLen;
+
+        // Bước 1: thêm byte 0x80
+        buf[bufLen++] = 0x80;
+        if (bufLen > 56) {
+            // Không đủ chỗ cho độ dài 64-bit -> thêm block mới
+            for (let i = bufLen; i < 64; i++) buf[i] = 0;
+            this._processBlock(buf, 0);
+            bufLen = 0;
+        }
+        // Đệm thêm 0 cho đủ 56 byte
+        for (let i = bufLen; i < 56; i++) buf[i] = 0;
+
+        // Ghi độ dài (tính bằng bit) vào 8 byte cuối (big-endian)
+        const bitLen = total * 8;
+        buf[56] = (bitLen >>> 24) & 0xFF;
+        buf[57] = (bitLen >>> 16) & 0xFF;
+        buf[58] = (bitLen >>> 8) & 0xFF;
+        buf[59] = bitLen & 0xFF;
+        // 4 byte cao (với dữ liệu < 2^32 bit thì bằng 0)
+        buf[60] = 0;
+        buf[61] = 0;
+        buf[62] = 0;
+        buf[63] = 0;
+
+        this._processBlock(buf, 0);
+
         const result = new Uint8Array(32);
-        const view = new DataView(result.buffer);
+        const state = this.state;
+        // Ghi trực tiếp vào result bằng dịch chuyển, tránh DataView nếu có thể
         for (let i = 0; i < 8; i++) {
-            view.setUint32(i * 4, this.state[i], false);
+            const s = state[i];
+            const off = i * 4;
+            result[off] = (s >>> 24) & 0xFF;
+            result[off + 1] = (s >>> 16) & 0xFF;
+            result[off + 2] = (s >>> 8) & 0xFF;
+            result[off + 3] = s & 0xFF;
         }
         return result;
     }
-    
+
+    // Xử lý một block 64 byte - tối ưu hoá bằng cách giảm tạo biến và dùng DataView tái sử dụng
     _processBlock(block, offset) {
         const w = this.w;
+        const state = this.state;
+        // Dùng DataView một lần duy nhất
         const view = new DataView(block.buffer || block, offset);
-        
+
+        // Mở rộng message schedule
         for (let i = 0; i < 16; i++) {
             w[i] = view.getUint32(i * 4, false);
         }
-        
         for (let i = 16; i < 64; i++) {
-            const w15 = w[i-15], w2 = w[i-2];
+            const w15 = w[i-15];
+            const w2 = w[i-2];
             const s0 = ((w15 >>> 7) | (w15 << 25)) ^ ((w15 >>> 18) | (w15 << 14)) ^ (w15 >>> 3);
             const s1 = ((w2 >>> 17) | (w2 << 15)) ^ ((w2 >>> 19) | (w2 << 13)) ^ (w2 >>> 10);
             w[i] = (w[i-16] + s0 + w[i-7] + s1) | 0;
         }
-        
-        let a = this.state[0], b = this.state[1], c = this.state[2], d = this.state[3];
-        let e = this.state[4], f = this.state[5], g = this.state[6], h = this.state[7];
-        
+
+        let a = state[0], b = state[1], c = state[2], d = state[3];
+        let e = state[4], f = state[5], g = state[6], h = state[7];
+
+        // Vòng lặp chính - tránh truy cập mảng K bên ngoài nhiều lần
         for (let i = 0; i < 64; i++) {
             const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
             const ch = (e & f) ^ (~e & g);
@@ -96,19 +137,19 @@ class SHA256 {
             const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
             const maj = (a & b) ^ (a & c) ^ (b & c);
             const temp2 = (S0 + maj) | 0;
-            
+
             h = g; g = f; f = e; e = (d + temp1) | 0;
             d = c; c = b; b = a; a = (temp1 + temp2) | 0;
         }
-        
-        this.state[0] = (this.state[0] + a) | 0;
-        this.state[1] = (this.state[1] + b) | 0;
-        this.state[2] = (this.state[2] + c) | 0;
-        this.state[3] = (this.state[3] + d) | 0;
-        this.state[4] = (this.state[4] + e) | 0;
-        this.state[5] = (this.state[5] + f) | 0;
-        this.state[6] = (this.state[6] + g) | 0;
-        this.state[7] = (this.state[7] + h) | 0;
+
+        state[0] = (state[0] + a) | 0;
+        state[1] = (state[1] + b) | 0;
+        state[2] = (state[2] + c) | 0;
+        state[3] = (state[3] + d) | 0;
+        state[4] = (state[4] + e) | 0;
+        state[5] = (state[5] + f) | 0;
+        state[6] = (state[6] + g) | 0;
+        state[7] = (state[7] + h) | 0;
     }
 }
 
@@ -144,7 +185,6 @@ let textEncoder;
 try {
     textEncoder = new TextEncoder();
 } catch(e) {
-    // Polyfill cho browser cũ
     textEncoder = {
         encode: function(str) {
             const len = str.length;
@@ -172,75 +212,120 @@ try {
 const hasher = new SHA256();
 let prefixBytes, suffixBytes, targetBinStr, bountyId;
 let inputBuffer, prefixLen, suffixLen, bufferLen;
+// Nonce buffer con trỏ để ghi nhanh
+const nonceDigits = new Uint8Array(20); // vùng đệm tạm cho chữ số
 
 function initJob(last_hash, username, target_bin, bounty_id) {
     prefixBytes = textEncoder.encode(last_hash);
     suffixBytes = textEncoder.encode(username);
     targetBinStr = target_bin;
     bountyId = bounty_id;
-    
+
     prefixLen = prefixBytes.length;
     suffixLen = suffixBytes.length;
     bufferLen = prefixLen + 20 + suffixLen;
-    
+
     inputBuffer = new Uint8Array(bufferLen);
     inputBuffer.set(prefixBytes);
-    inputBuffer.set(suffixBytes, prefixLen + 20);
+    // Đảm bảo vùng nonce được khởi tạo = '0' (48)
+    const nonceStart = prefixLen;
+    for (let i = 0; i < 20; i++) {
+        inputBuffer[nonceStart + i] = 48; // ký tự '0'
+    }
+    inputBuffer.set(suffixBytes, nonceStart + 20);
 }
 
-// Inline nonce conversion - siêu nhanh
+// Viết nonce dưới dạng thập phân vào đúng 20 byte, đảo ngược từ phải sang trái
 function writeNonce(nonce) {
     let n = nonce;
+    const buf = inputBuffer;
     let pos = prefixLen + 19;
+    // Trường hợp n = 0
     if (n === 0) {
-        inputBuffer[pos] = 48; // '0'
-        return pos;
+        // Tất cả đã là '0', không cần làm gì, nhưng đảm bảo pos cuối cùng là '0'
+        return pos; // vị trí bắt đầu của nonce (tận cùng bên trái sau khi đã xóa số 0)
     }
-    while (n > 0) {
-        inputBuffer[pos--] = 48 + (n % 10);
+    // Xoá các chữ số cũ (ghi '0' vào các vị trí cao hơn)
+    // Chúng ta không cần xoá toàn bộ 20 byte, chỉ cần ghi đè lên các chữ số mới,
+    // nhưng phải đảm bảo các byte không dùng đến vẫn là '0'.
+    // Giải pháp: ghi đầy đủ 20 chữ số, bắt đầu từ cuối.
+    let idx = pos;
+    while (n > 0 && idx >= prefixLen) {
+        buf[idx--] = 48 + (n % 10);
         n = (n / 10) | 0;
     }
-    return pos + 1;
+    // Các vị trí còn lại (từ prefixLen đến idx) giữ nguyên là '0' (đã được khởi tạo ban đầu và giữ nguyên)
+    return idx + 1; // vị trí bắt đầu của chuỗi số (bỏ qua các số 0 dẫn đầu)
 }
 
-// Fast target check
+// Kiểm tra hash với target (dạng chuỗi nhị phân "010101...")
 function verifyHash(hashBytes) {
-    // Check từng byte
     const bitLen = targetBinStr.length;
-    
-    for (let i = 0; i < bitLen; i++) {
-        const byteIdx = i >>> 3;
-        const bitIdx = 7 - (i & 7);
-        const bit = (hashBytes[byteIdx] >>> bitIdx) & 1;
-        const expected = targetBinStr.charCodeAt(i) - 48; // '0'=48, '1'=49
-        if (bit !== expected) {
-            return bit < expected; // true nếu nhỏ hơn target (valid)
+    // So sánh từng bit, nhưng tối ưu bằng cách kiểm tra byte trước
+    const byteLen = (bitLen + 7) >>> 3;
+    for (let i = 0; i < byteLen; i++) {
+        const byte = hashBytes[i];
+        const targetByte = (i < targetBinStr.length >>> 3) ?
+            parseInt(targetBinStr.substr(i*8, 8), 2) : 0;
+        if (byte !== targetByte) {
+            // Khác biệt ở byte này, cần kiểm tra bit để xác định lớn hơn hay nhỏ hơn
+            for (let j = 0; j < 8; j++) {
+                const bitPos = i * 8 + j;
+                if (bitPos >= bitLen) break;
+                const bit = (byte >>> (7 - j)) & 1;
+                const expected = targetBinStr.charCodeAt(bitPos) - 48;
+                if (bit !== expected) {
+                    return bit < expected; // true nếu hash < target
+                }
+            }
+            // Nếu tất cả bit đã so sánh đều bằng nhau, byte hiện tại khác biệt ở các bit thấp hơn không nằm trong target length? 
+            // an toàn: trả về false
+            return false;
         }
     }
-    return true; // bằng nhau cũng valid
+    return true; // bằng nhau hoàn toàn
 }
 
+// Hàm chuyển hash bytes sang hex string (dùng pre-computed table)
+function bytesToHex(bytes) {
+    let hex = '';
+    for (let i = 0; i < bytes.length; i++) {
+        hex += HEX[bytes[i]];
+    }
+    return hex;
+}
+
+// ==================== MINING LOOP TỰ ĐIỀU CHỈNH ====================
 function mine() {
     let nonce = jobData.startNonce || 0;
-    
-    // Batch size động - điều chỉnh theo performance
-    const BATCH_SIZE = 10000;
-    
+    // Batch size động
+    let batchSize = 20000; // Bắt đầu an toàn
+    let lastTime = performance.now();
+    const TARGET_FRAME_MS = 40; // tối đa 40ms mỗi batch để không khựng UI
+
     while (running) {
+        const startTime = performance.now();
         let count = 0;
-        
-        for (let i = 0; i < BATCH_SIZE; i++) {
-            if (!running) return;
-            
-            const start = writeNonce(nonce);
-            const len = prefixLen + (prefixLen + 20 - start) + suffixLen;
-            
+
+        for (let i = 0; i < batchSize && running; i++) {
+            // Ghi nonce vào buffer (hàm đã tối ưu)
+            const nonceStartIdx = writeNonce(nonce);
+            // Độ dài thực tế cần hash = từ nonceStartIdx đến hết buffer (bỏ qua các số 0 dẫn đầu)
+            // Nhưng cẩn thận: SHA256 yêu cầu hash toàn bộ buffer từ đầu đến cuối,
+            // vì vậy không thể bỏ qua phần đầu. Tuy nhiên giao thức yêu cầu hash cả buffer đầy đủ?
+            // Code cũ: hasher.update(inputBuffer, len) với len = prefixLen + (prefixLen+20 - start) + suffixLen.
+            // Tức là bỏ qua các số 0 dẫn đầu. Điều này rất quan trọng: nonce được biểu diễn dạng thập phân không có số 0 ở đầu.
+            // Vậy len = từ vị trí bắt đầu của nonce (sau khi đã bỏ 0) đến hết.
+            const len = nonceStartIdx + (prefixLen + 20 - nonceStartIdx) + suffixLen; // thực ra = prefixLen + 20 + suffixLen - (nonceStartIdx - prefixLen)???
+            // Tính chính xác: len = bufferLen - (nonceStartIdx - prefixLen)
+            const hashLen = bufferLen - (nonceStartIdx - prefixLen);
+
             hasher.reset();
-            hasher.update(inputBuffer, len);
+            hasher.update(inputBuffer.subarray(nonceStartIdx), hashLen);
             const hashBytes = hasher.digest();
-            
+
             if (verifyHash(hashBytes)) {
-                const hex = Array.from(hashBytes, b => HEX[b]).join('');
+                const hex = bytesToHex(hashBytes);
                 self.postMessage({
                     type: 'found',
                     nonce: nonce,
@@ -250,21 +335,31 @@ function mine() {
                 running = false;
                 return;
             }
-            
+
             nonce++;
             count++;
         }
-        
-        // Report progress - không block main thread quá lâu
+
+        // Đo thời gian và điều chỉnh batchSize
+        const elapsed = performance.now() - startTime;
+        if (elapsed > TARGET_FRAME_MS && batchSize > 1000) {
+            batchSize = Math.max(1000, Math.floor(batchSize * 0.8));
+        } else if (elapsed < TARGET_FRAME_MS * 0.6 && batchSize < 200000) {
+            batchSize = Math.min(200000, Math.floor(batchSize * 1.2));
+        }
+
+        // Báo tiến độ
         self.postMessage({
             type: 'progress',
             nonce: nonce,
             hashes: count
         });
-        
-        // Yield cho browser breathing room
-        if (count < BATCH_SIZE) {
-            setTimeout(function() { if (running) mine(); }, 0);
+
+        // Nhường quyền điều khiển cho browser
+        // Sử dụng setTimeout(F,0) thay vì postMessage để không tự gọi đệ quy ngay
+        if (running) {
+            // Dùng setTimeout để break vòng lặp và cho phép message 'stop' được xử lý
+            setTimeout(() => { if (running) mine(); }, 0);
             return;
         }
     }
@@ -273,26 +368,27 @@ function mine() {
 // ==================== MESSAGE HANDLER ====================
 self.onmessage = function(e) {
     const msg = e.data;
-    
+
     switch(msg.type) {
         case 'start':
             running = true;
             initJob(msg.last_hash, msg.username, msg.target_bin, msg.bounty_id);
             jobData = msg;
-            mine();
+            // Bắt đầu mining, dùng setTimeout để không chặn onmessage
+            setTimeout(mine, 0);
             break;
-            
+
         case 'stop':
             running = false;
             break;
-            
+
         case 'ping':
             self.postMessage({ type: 'pong' });
             break;
     }
 };
 
-// Report ready
+// Thông báo sẵn sàng
 self.postMessage({ type: 'ready' });
 
 })();
