@@ -1,4 +1,4 @@
-// server.js - Hybrid PoW + PoS (no hunt - status validator fixed)
+// server.js - Hybrid PoW + PoS (no hunt - status validator fixed - active validators fix)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -84,7 +84,11 @@ app.get('/get_balance', (req, res) => {
 app.get('/network_status', (req, res) => {
   try {
     const recent = db.getRecentBlocks(10);
-    const validators = db.getValidators(10);
+    // Đảm bảo trường "stake" cho frontend
+    const validators = db.getValidators(10).map(v => ({
+      username: v.username,
+      stake: v.amount
+    }));
     res.json({ recent_blocks: recent, active_validators: validators });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
@@ -132,7 +136,6 @@ app.get('/pos/info', (req, res) => {
     const staked = Number(stake.amount) || 0;
     const pending = Number(stake.pending_reward) || 0;
 
-    // 🟢 CHỈ là validator nếu bạn LÀ người vừa được chọn (currentValidator)
     const currentVal = blockchain.getCurrentValidator();
     const isValidator = (username === currentVal);
 
@@ -172,7 +175,7 @@ app.post('/pos/unstake', (req, res) => {
     if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing fields' });
 
     db.authenticate(username, pin);
-    db.unstake(username); // đã hoàn trả balance + pending reward bên trong
+    db.unstake(username);
 
     res.json({ status: 'success', message: 'Unstaked successfully. All funds returned.', staked: 0 });
   } catch (e) {
@@ -181,8 +184,6 @@ app.post('/pos/unstake', (req, res) => {
 });
 
 // ─── Bounty endpoints (PoW) ──────────────────────────
-// ĐÃ XÓA route '/create_bounty'
-
 app.get('/active_bounties_list', (req, res) => {
   try {
     const bounties = blockchain.getActiveBounties();
@@ -202,7 +203,6 @@ app.get('/get_job/:id', (req, res) => {
   }
 });
 
-// ─── Submit Resolution With WebHooks ──────────────────────────────────
 app.post('/submit_solution', (req, res) => {
   try {
     const bounty_id = req.query.bounty_id || req.body.bounty_id;
