@@ -1,4 +1,4 @@
-// server.js - Hybrid PoW + PoS (no hunt)
+// server.js - Hybrid PoW + PoS (no hunt - status validator fixed)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -62,7 +62,6 @@ app.get('/get_balance', (req, res) => {
 app.get('/network_status', (req, res) => {
   try {
     const recent = db.getRecentBlocks(10);
-    // PoS: active validators > 10 CC staked
     const validators = db.getValidators(10);
     res.json({ recent_blocks: recent, active_validators: validators });
   } catch (e) {
@@ -95,23 +94,36 @@ app.get('/snake/cooldown', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// PROOF OF STAKE (PoS) ROUTES
+// PROOF OF STAKE (PoS) ROUTES — VALIDATOR STATUS FIXED
 // ═══════════════════════════════════════════════════════
+
 app.get('/pos/info', (req, res) => {
   try {
     const username = (req.query.username || '').toLowerCase().trim();
     if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
+
     const user = db.getUser(username);
     if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+
     const stake = db.getStake(username);
+    const balance = Number(user.balance) || 0;
+    const staked = Number(stake.amount) || 0;
+    const pending = Number(stake.pending_reward) || 0;
+
+    // 🟢 CHỈ là validator nếu bạn LÀ người vừa được chọn (currentValidator)
+    const currentVal = blockchain.getCurrentValidator();
+    const isValidator = (username === currentVal);
+
     res.json({
       status: 'success',
-      balance: user.balance,
-      staked: stake.amount,
-      is_validator: stake.amount >= 10,
-      pending_reward: stake.pending_reward
+      balance,
+      staked,
+      is_validator: isValidator,
+      pending_reward: pending,
+      current_validator: currentVal || null
     });
   } catch (e) {
+    console.error('/pos/info error:', e);
     res.status(500).json({ status: 'error', message: e.message });
   }
 });
@@ -120,12 +132,13 @@ app.post('/pos/stake', (req, res) => {
   try {
     const { username, pin, amount } = req.body;
     if (!username || !pin || !amount) return res.status(400).json({ status: 'error', message: 'Missing fields' });
-    // Verify PIN
-    db.authenticate(username, pin); // sẽ throw nếu sai
+
+    db.authenticate(username, pin);
     const stakeAmount = parseFloat(amount);
     if (isNaN(stakeAmount) || stakeAmount < 10) throw new Error('Minimum stake is 10 CC');
+
     const result = db.stake(username, stakeAmount);
-    res.json({ status: 'success', message: `Staked ${stakeAmount} CC`, staked: result.amount });
+    res.json({ status: 'success', message: `Staked ${stakeAmount} CC`, staked: Number(result.amount) || 0 });
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
   }
@@ -135,26 +148,18 @@ app.post('/pos/unstake', (req, res) => {
   try {
     const { username, pin } = req.body;
     if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing fields' });
+
     db.authenticate(username, pin);
-    const result = db.unstake(username);
-    const total = result.amount + result.pending_reward; // Trong unstake đã hoàn trả rồi, nhưng ta chỉ cần thông báo
-    res.json({ status: 'success', message: 'Unstaked successfully', staked: 0 });
+    db.unstake(username); // đã hoàn trả balance + pending reward bên trong
+
+    res.json({ status: 'success', message: 'Unstaked successfully. All funds returned.', staked: 0 });
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
   }
 });
 
 // ─── Bounty endpoints (PoW) ──────────────────────────
-app.post('/create_bounty', (req, res) => {
-  const { username, pin, difficulty, reward, target_device } = req.body;
-  if (!username || !pin || !difficulty) return res.status(400).json({ status: 'error', message: 'Missing fields' });
-  try {
-    const result = blockchain.createBounty(username, pin, difficulty, reward, target_device);
-    res.json(result);
-  } catch (e) {
-    res.status(400).json({ status: 'error', message: e.message });
-  }
-});
+// ĐÃ XÓA route '/create_bounty'
 
 app.get('/active_bounties_list', (req, res) => {
   try {
@@ -183,9 +188,9 @@ app.post('/submit_solution', (req, res) => {
     const device_type = req.query.device_type || req.body.device_type || 'web';
 
     if (!bounty_id || !nonce || !worker_name) {
-      return res.status(400).json({ 
-        status: 'error', 
-        message: 'Missing required parameters: bounty_id, nonce, worker_name' 
+      return res.status(400).json({
+        status: 'error',
+        message: 'Missing required parameters: bounty_id, nonce, worker_name'
       });
     }
 
@@ -203,8 +208,8 @@ app.get('/miner_heartbeat', (req, res) => {
 
 // ─── API test endpoint ─────────────────────────────────
 app.get('/api/test', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     time: new Date().toISOString(),
     message: 'ChocoHub API is running',
     uptime: process.uptime()
