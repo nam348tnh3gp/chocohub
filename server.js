@@ -132,7 +132,7 @@ app.get('/leaderboard', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// PROOF OF STAKE (PoS) ROUTES — VALIDATOR STATUS FIXED
+// PROOF OF STAKE (PoS) ROUTES
 // ═══════════════════════════════════════════════════════
 
 app.get('/pos/info', (req, res) => {
@@ -175,7 +175,7 @@ app.post('/pos/stake', (req, res) => {
     if (isNaN(stakeAmount) || stakeAmount < 10) throw new Error('Minimum stake is 10 CC');
 
     const result = db.stake(username, stakeAmount);
-    res.json({ status: 'success', message: `Staked ${stakeAmount} CC`, staked: Number(result.amount) || 0 });
+    res.json({ status: 'success', message: 'Staked ' + stakeAmount + ' CC', staked: Number(result.amount) || 0 });
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
   }
@@ -263,38 +263,7 @@ app.get('*', (req, res) => {
     if (fs.existsSync(indexPath)) {
       res.sendFile(indexPath);
     } else {
-      res.status(200).send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>ChocoHub</title>
-          <style>
-            body {
-              background: #0a0a12;
-              color: #eee4d8;
-              font-family: 'Outfit', sans-serif;
-              display: flex;
-              justify-content: center;
-              align-items: center;
-              height: 100vh;
-              margin: 0;
-              text-align: center;
-            }
-            h1 { color: #f58a00; font-size: 2.5rem; }
-            p { color: #8b8296; margin-top: 10px; }
-          </style>
-        </head>
-        <body>
-          <div>
-            <h1>🍫 ChocoHub</h1>
-            <p>Server is running. Please upload frontend files to continue.</p>
-            <p style="font-size:0.8rem; margin-top:20px;">API: <code style="color:#f58a00;">/api/test</code></p>
-          </div>
-        </body>
-        </html>
-      `);
+      res.status(200).send('<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>ChocoHub</title><style>body{background:#0a0a12;color:#eee4d8;font-family:"Outfit",sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;text-align:center}h1{color:#f58a00;font-size:2.5rem}p{color:#8b8296;margin-top:10px}</style></head><body><div><h1>ChocoHub</h1><p>Server is running. Please upload frontend files to continue.</p><p style="font-size:0.8rem;margin-top:20px;">API: <code style="color:#f58a00;">/api/test</code></p></div></body></html>');
     }
   } catch(e) {
     res.status(500).send('Server error');
@@ -303,7 +272,7 @@ app.get('*', (req, res) => {
 
 // ─── Error handler ─────────────────────────────────────
 app.use((err, req, res, next) => {
-  console.error('❌ Server error:', err.message);
+  console.error('Server error:', err.message);
   res.status(500).json({ status: 'error', message: 'Internal server error' });
 });
 
@@ -319,10 +288,10 @@ blockchain.startPoSMinting();
 app.listen(PORT, () => {
   console.log('');
   console.log('╔══════════════════════════════════════╗');
-  console.log('║     🍫 CHOCO HUB · PoW+PoS 🍫      ║');
+  console.log('║     CHOCO HUB - PoW+PoS            ║');
   console.log('╠══════════════════════════════════════╣');
-  console.log(`║  Dashboard: http://localhost:${PORT}    ║`);
-  console.log('║  API Test:  /api/test               ║`);
+  console.log('║  Dashboard: http://localhost:' + PORT + '    ║');
+  console.log('║  API Test:  /api/test               ║');
   console.log('║  Leaderboard: /leaderboard          ║');
   console.log('║  PoW Auto-Bounty: active            ║');
   console.log('║  PoS Minting: active (30s blocks)   ║');
