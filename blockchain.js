@@ -1,4 +1,4 @@
-// blockchain.js - PoW + PoS hybrid (cleaned + validator status fix)
+// blockchain.js - PoW + PoS hybrid (cleaned + no expiry)
 const crypto = require('crypto');
 const db = require('./db');
 
@@ -14,7 +14,7 @@ sqlite.pragma('journal_mode = WAL');
 const AUTO_BOUNTY_MIN = 0.0001;
 const AUTO_BOUNTY_MAX = 0.01;
 const MIN_ACTIVE_BOUNTIES = 30;
-const AUTO_BOUNTY_INTERVAL = 1000; // 30 giây
+const AUTO_BOUNTY_INTERVAL = 1000; // 1 giây
 const AUTO_DIFFICULTIES = [8, 10, 12, 14, 16];
 
 function createAutoBounty() {
@@ -47,19 +47,8 @@ function checkAndRefillBounties() {
       console.log(`📊 Bounties refilled: ${activeCount} → ${MIN_ACTIVE_BOUNTIES}`);
     }
 
-    // Dọn dẹp auto-bounty cũ (giữ tối đa 10)
-    const autoCount = sqlite.prepare(
-      'SELECT COUNT(*) as count FROM bounties WHERE status=? AND creator_username=?'
-    ).get('active', 'server').count;
+    // 🟢 KHÔNG xóa block cũ – không bao giờ hết hạn
     
-    if (autoCount > 10) {
-      const toRemove = sqlite.prepare(
-        'SELECT id FROM bounties WHERE status=? AND creator_username=? ORDER BY created_at ASC LIMIT ?'
-      ).all('active', 'server', autoCount - 10);
-      toRemove.forEach(b => {
-        sqlite.prepare('UPDATE bounties SET status=? WHERE id=?').run('expired', b.id);
-      });
-    }
   } catch (e) {
     console.error('Auto-bounty error:', e.message);
   }
@@ -68,7 +57,7 @@ function checkAndRefillBounties() {
 function startAutoBounty() {
   checkAndRefillBounties();
   setInterval(checkAndRefillBounties, AUTO_BOUNTY_INTERVAL);
-  console.log(`🤖 Auto-bounty started (${AUTO_BOUNTY_MIN}-${AUTO_BOUNTY_MAX} CC, min ${MIN_ACTIVE_BOUNTIES} blocks)`);
+  console.log(`🤖 Auto-bounty started (${AUTO_BOUNTY_MIN}-${AUTO_BOUNTY_MAX} CC, min ${MIN_ACTIVE_BOUNTIES} blocks, no expiry)`);
 }
 
 // ═══════════════════════════════════════════════════
