@@ -618,12 +618,12 @@
 
     <script>
         // ══════════════════════════════════════════════════════
-        // SECURITY-FIXED DASHBOARD SCRIPT
+        // SECURITY-FIXED DASHBOARD SCRIPT (Case-Sensitive Username)
         // ══════════════════════════════════════════════════════
         
         let currentBalance = 0;
         let balanceAnimationId = null;
-        let authToken = null; // JWT token thay vì PIN
+        let authToken = null;
 
         function animateValue(id, start, end, duration) {
             const obj = document.getElementById(id);
@@ -641,7 +641,7 @@
                 const displayValue = Number.isInteger(end)
                     ? Math.round(current).toLocaleString('en-US', { minimumIntegerDigits: 4, useGrouping: false })
                     : current.toFixed(4);
-                obj.textContent = ''; // Xóa nội dung cũ an toàn
+                obj.textContent = '';
                 obj.appendChild(document.createTextNode(displayValue + ' '));
                 const span = document.createElement('span');
                 span.className = 'currency';
@@ -669,8 +669,8 @@
             const token = localStorage.getItem('choco_token');
             if (!user || !token) return;
             try {
-                const res = await fetch(`/get_user/${encodeURIComponent(user)}`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
+                const res = await fetch('/get_user/' + encodeURIComponent(user), {
+                    headers: { 'Authorization': 'Bearer ' + token }
                 });
                 if (!res.ok) throw new Error('Network error');
                 const data = await res.json();
@@ -700,7 +700,7 @@
                         spanId.className = 'block-id';
                         spanId.textContent = '#' + (b.id ? b.id.substring(0,8) : '?');
                         li.appendChild(spanId);
-                        li.appendChild(document.createTextNode(' — ' + (b.username || 'unknown') + ' — '));
+                        li.appendChild(document.createTextNode(' - ' + (b.username || 'unknown') + ' - '));
                         const spanReward = document.createElement('span');
                         spanReward.className = 'reward';
                         spanReward.textContent = String(b.reward) + ' CC';
@@ -755,7 +755,7 @@
             if (hour < 12) greet = 'Good morning';
             else if (hour < 18) greet = 'Good afternoon';
             const el = document.getElementById('welcome-msg');
-            if (el) el.textContent = `${greet}, ${name}!`;
+            if (el) el.textContent = greet + ', ' + name + '!';
         }
 
         async function handleAuth() {
@@ -777,13 +777,12 @@
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
-                    // ✅ CHỈ lưu token, KHÔNG lưu PIN
-                    localStorage.setItem('choco_user', username.toLowerCase());
+                    // ✅ Lưu username GIỮ NGUYÊN hoa/thường (không toLowerCase)
+                    localStorage.setItem('choco_user', username);
                     if (data.token) {
                         localStorage.setItem('choco_token', data.token);
                         authToken = data.token;
                     }
-                    // Lưu PIN TẠM THỜI vào sessionStorage (mất khi đóng tab)
                     sessionStorage.setItem('choco_pin_temp', pin);
                     showToast(data.message || 'Welcome!', 'success');
                     setTimeout(() => location.reload(), 900);
@@ -805,7 +804,6 @@
                 dash.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
             }
             setTimeout(() => {
-                // ✅ Xóa TOÀN BỘ dữ liệu nhạy cảm
                 localStorage.removeItem('choco_user');
                 localStorage.removeItem('choco_token');
                 sessionStorage.removeItem('choco_pin_temp');
@@ -834,7 +832,6 @@
                 setInterval(updateNetworkMonitor, 10000);
             }
 
-            // Event listeners (dùng addEventListener thay vì inline onclick)
             const authBtn = document.getElementById('auth-btn');
             if (authBtn) {
                 authBtn.addEventListener('click', handleAuth);
@@ -853,16 +850,15 @@
             }
         }
 
-        function showToast(msg, type = '') {
+        function showToast(msg, type) {
             const t = document.getElementById('toast');
             if (!t) return;
             t.textContent = msg;
-            t.className = `show ${type}`;
+            t.className = 'show ' + (type || '');
             clearTimeout(t._timeout);
             t._timeout = setTimeout(() => { t.className = ''; }, 3000);
         }
 
-        // ✅ Dùng DOMContentLoaded thay vì window.onload (an toàn hơn)
         document.addEventListener('DOMContentLoaded', init);
     </script>
 </body>
