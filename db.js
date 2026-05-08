@@ -1,4 +1,4 @@
-// db.js – Full fix + PoS Staking support
+// db.js – Full fix + PoS Staking support (Case-Sensitive Username)
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -57,10 +57,13 @@ console.log('✅ Database ready (better-sqlite3)');
 
 // ─── Helper functions ─────────────────────────────
 function authenticate(username, pin) {
-  username = username.toLowerCase().trim();
+  // ✅ Chỉ trim, giữ nguyên hoa/thường
+  username = username.trim();
+  
   let user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
   
   if (!user) {
+    // Tạo user mới với username gốc (giữ nguyên hoa/thường)
     const hash = bcrypt.hashSync(pin, 10);
     db.prepare('INSERT INTO users (username, pin_hash, balance) VALUES (?, ?, 0)').run(username, hash);
     user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
@@ -75,11 +78,13 @@ function authenticate(username, pin) {
 }
 
 function getUser(username) {
-  return db.prepare('SELECT username, balance FROM users WHERE username = ?').get(username.toLowerCase());
+  // ✅ Giữ nguyên username, không toLowerCase
+  return db.prepare('SELECT username, balance FROM users WHERE username = ?').get(username.trim());
 }
 
 function updateBalance(username, amount) {
-  db.prepare('UPDATE users SET balance = balance + ? WHERE username = ?').run(amount, username.toLowerCase());
+  // ✅ Giữ nguyên username
+  db.prepare('UPDATE users SET balance = balance + ? WHERE username = ?').run(amount, username.trim());
 }
 
 function getRecentBlocks(limit = 10) {
@@ -92,7 +97,8 @@ function getActiveMiners(limit = 5) {
 
 // ─── Staking functions ────────────────────────────
 function getStake(username) {
-  username = username.toLowerCase().trim();
+  // ✅ Giữ nguyên username
+  username = username.trim();
   let row = db.prepare('SELECT * FROM stakes WHERE username = ?').get(username);
   if (!row) {
     // Tạo bản ghi mặc định
@@ -103,7 +109,8 @@ function getStake(username) {
 }
 
 function stake(username, amount) {
-  username = username.toLowerCase().trim();
+  // ✅ Giữ nguyên username
+  username = username.trim();
   const user = getUser(username);
   if (!user) throw new Error('User not found');
   if (user.balance < amount) throw new Error('Insufficient balance');
@@ -120,7 +127,8 @@ function stake(username, amount) {
 }
 
 function unstake(username) {
-  username = username.toLowerCase().trim();
+  // ✅ Giữ nguyên username
+  username = username.trim();
   const current = getStake(username);
   if (current.amount <= 0) throw new Error('No stake to withdraw');
   
@@ -140,20 +148,23 @@ function getValidators(minStake = 10) {
 }
 
 function addStakeReward(username, reward) {
+  // ✅ Giữ nguyên username
   db.prepare('UPDATE stakes SET pending_reward = pending_reward + ? WHERE username = ?')
-    .run(reward, username.toLowerCase().trim());
+    .run(reward, username.trim());
 }
 
 function getLastSnakeClaim(username) {
+  // ✅ Giữ nguyên username
   return db.prepare(
     'SELECT claimed_at FROM snake_claims WHERE username=? ORDER BY claimed_at DESC LIMIT 1'
-  ).get(username.toLowerCase().trim());
+  ).get(username.trim());
 }
 
 function insertSnakeClaim(username, apples, mode, reward) {
+  // ✅ Giữ nguyên username
   return db.prepare(
     'INSERT INTO snake_claims (username, apples, mode, reward) VALUES (?, ?, ?, ?)'
-  ).run(username.toLowerCase().trim(), apples, mode || 'normal', reward);
+  ).run(username.trim(), apples, mode || 'normal', reward);
 }
 
 // ─── CHỈ MỘT DÒNG MODULE.EXPORTS DUY NHẤT ─────────
