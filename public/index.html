@@ -1,869 +1,318 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>CHOCO HUB · Dashboard</title>
+// server.js - Hybrid PoW + PoS (no hunt - status validator fixed - active validators fix)
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const path = require('path');
+const fs = require('fs');
+const db = require('./db');
+const blockchain = require('./blockchain');
+const snake = require('./snake');
 
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1501353650243633202/JH4DnjVgN_H42VaEc0rflF03HJjl2Nh1iy7qCRZbkxX7uhHDN_rZfaaNAGqAvAjZAqNU';
 
-    <style>
-        /* ═══════════════════════════════════════════
-           CHOCO HUB · GLOBAL DESIGN SYSTEM (merged style.css)
-           ═══════════════════════════════════════════ */
-        :root {
-            --void:        #0a0a12;
-            --deep:        #0d0b0a;
-            --surface:     rgba(20, 20, 35, 0.7);
-            --raised:      #1d1d2e;
-            --overlay:     rgba(8, 8, 16, 0.94);
-            --border:      rgba(255, 149, 0, 0.08);
-            --border-mid:  rgba(255, 149, 0, 0.18);
-            --border-hi:   rgba(255, 149, 0, 0.35);
-            --text:        #eee4d8;
-            --mid:         #8b8296;
-            --dim:         #4a4458;
-            --amber:       #f58a00;
-            --amber-soft:  #ffb347;
-            --amber-glow:  rgba(245, 138, 0, 0.25);
-            --amber-faint: rgba(245, 138, 0, 0.04);
-            --gold:        #f2c94c;
-            --green:       #40c057;
-            --red:         #fa5252;
-            --pink:        #f06292;
+async function sendMinerWebhook(worker, bountyId, device) {
+  try {
+    await fetch(DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        embeds: [{
+          title: "⛏️ Block Solved! (WebMiner)",
+          description: `A new block was solved.\n\n**Worker:** \`${worker}\`\n**Block ID:** \`${bountyId}\`\n**Device:** \`${device}\``,
+          color: 0xf1c40f,
+          timestamp: new Date().toISOString(),
+          footer: { text: "ChocoHub Mining Monitor" }
+        }]
+      })
+    });
+  } catch (err) {
+    console.error('⚠️ quiet error on webhook:', err.message);
+  }
+}
 
-            --bg: var(--void);
-            --radius-sm: 12px;
-            --radius-md: 20px;
-            --radius-lg: 28px;
-            --radius-full: 99px;
-            --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.4);
-            --shadow-card-hover: 0 20px 48px rgba(0, 0, 0, 0.55);
-            --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
-            --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
-            --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
-        }
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        html { font-size: 14px; }
+// Middleware
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false
+}));
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
 
-        body {
-            margin: 0; padding: 0; background-color: #0a0807;
-            background-image:
-                radial-gradient(circle at 50% 40%, rgba(255, 120, 0, 0.08) 0%, transparent 70%),
-                radial-gradient(circle at 50% 50%, #140d0a 0%, #0a0807 100%);
-            background-attachment: fixed; color: var(--text); font-family: 'Outfit', sans-serif;
-            overflow-x: hidden; min-height: 100vh; display: flex; flex-direction: column; align-items: center;
-        }
+// ─── Auth ─────────────────────────────────────────────
+app.post('/auth', (req, res) => {
+  const { username, pin } = req.body;
+  if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing fields' });
+  try {
+    const result = db.authenticate(username, pin);
+    res.json(result);
+  } catch (e) {
+    res.status(401).json({ status: 'error', message: e.message });
+  }
+});
 
-        button { font-family: inherit; cursor: pointer; border: none; outline: none; }
-        a { color: var(--amber); text-decoration: none; }
+// ─── User info ─────────────────────────────────────────
+app.get('/get_user/:username', (req, res) => {
+  try {
+    const user = db.getUser(req.params.username);
+    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+    res.json({ status: 'success', balance: user.balance, username: user.username });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
 
-        /* Animations */
-        @keyframes pulseGlow {
-            0% { box-shadow: 0 0 5px rgba(255, 149, 0, 0.05); }
-            50% { box-shadow: 0 0 15px rgba(255, 149, 0, 0.2); }
-            100% { box-shadow: 0 0 5px rgba(255, 149, 0, 0.05); }
-        }
-        @keyframes liquidMove {
-            0% { transform: translate(0, 0) scale(1) rotate(30deg); }
-            50% { transform: translate(-5%, 5%) scale(1.3) rotate(100deg); }
-            100% { transform: translate(5%, -5%) scale(1) rotate(-2deg); }
-        }
-        @keyframes logoBounce {
-            0%, 100% { transform: translateY(0); }
-            30% { transform: translateY(-6px); }
-            50% { transform: translateY(0); }
-            70% { transform: translateY(-3px); }
-        }
-        @keyframes shimmer {
-            0% { transform: translateX(-100%); }
-            100% { transform: translateX(100%); }
-        }
+// ─── Get balance (query param) ─────────────────────────
+app.get('/get_balance', (req, res) => {
+  const username = req.query.username;
+  if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
+  try {
+    const user = db.getUser(username);
+    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+    res.json({ status: 'success', balance: user.balance });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
 
-        .liquid-bg {
-            position: fixed; top: -25%; left: -25%; width: 150%; height: 150%;
-            background: radial-gradient(circle at center, rgba(255, 149, 0, 0.04) 0%, rgba(30, 20, 10, 0.2) 30%, transparent 60%);
-            z-index: -1; pointer-events: none; filter: blur(60px);
-            animation: liquidMove 20s ease-in-out infinite alternate;
-        }
+// ─── Network status ────────────────────────────────────
+app.get('/network_status', (req, res) => {
+  try {
+    const recent = db.getRecentBlocks(10);
+    // Đảm bảo trường "stake" cho frontend
+    const validators = db.getValidators(10).map(v => ({
+      username: v.username,
+      stake: v.amount
+    }));
+    res.json({ recent_blocks: recent, active_validators: validators });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
 
-        /* Panel (shared) */
-        .panel {
-            position: relative; z-index: 1; width: 100%; max-width: 680px;
-            background: var(--surface); backdrop-filter: blur(14px) saturate(160%);
-            -webkit-backdrop-filter: blur(14px) saturate(160%);
-            border: 1px solid var(--border); border-radius: 18px; padding: 35px;
-            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
-        }
+// ─── Snake claim ──────────────────────────────────────
+app.post('/snake/claim', (req, res) => {
+  const { username, pin, apples, mode } = req.body;
+  if (!username || !pin || apples == null) return res.status(400).json({ status: 'error', message: 'Missing fields' });
+  try {
+    const result = snake.processClaim(username, pin, apples, mode);
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ status: 'error', message: e.message });
+  }
+});
 
-        .c-tr, .c-bl {
-            content: ''; position: absolute; width: 18px; height: 18px;
-            border-color: var(--amber); border-style: solid; opacity: .45;
-        }
-        .c-tr { top: -1px; right: -1px; border-width: 2px 2px 0 0; border-radius: 0 18px 0 0; }
-        .c-bl { bottom: -1px; left: -1px; border-width: 0 0 2px 2px; border-radius: 0 0 0 18px; }
+// ─── Check cooldown ────────────────────────────────────
+app.get('/snake/cooldown', (req, res) => {
+  const username = req.query.username;
+  if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
+  try {
+    const result = snake.getCooldown(username);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
 
-        /* Field & Button */
-        .field-lbl {
-            font-family: 'Space Mono', monospace; font-size: .65rem; color: var(--dim);
-            letter-spacing: 1px; text-transform: uppercase; margin-bottom: 7px; text-align: left;
-        }
-        .field-inp {
-            width: 100%; padding: 16px 20px; background: rgba(10, 10, 20, 0.6);
-            border: 1px solid var(--border-mid); border-radius: 10px; color: var(--amber);
-            font-family: 'Space Mono'; font-size: 1.05rem;
-            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
-            outline: none; transition: 0.2s; animation: pulseGlow 3s infinite ease-in-out;
-        }
-        .field-inp:focus { border-color: var(--border-hi); }
+// ═══════════════════════════════════════════════════════
+// PROOF OF STAKE (PoS) ROUTES — VALIDATOR STATUS FIXED
+// ═══════════════════════════════════════════════════════
 
-        .btn-start {
-            width: 100%; background: var(--amber); color: #000; border-radius: 12px;
-            padding: 18px; font-weight: 800; font-size: 1rem; letter-spacing: 1px;
-            box-shadow: 0 4px 22px rgba(255,149,0,.3); transition: 0.2s; margin-top: 15px;
-        }
-        .btn-start:hover { background: var(--amber-soft); transform: translateY(-2px); }
-        .btn-start:disabled { opacity: 0.5; cursor: not-allowed; }
+app.get('/pos/info', (req, res) => {
+  try {
+    const username = (req.query.username || '').toLowerCase().trim();
+    if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
 
-        /* Toast */
-        #toast {
-            position: fixed; bottom: 30px; left: 50%;
-            transform: translateX(-50%) translateY(20px);
-            background: #111; padding: 14px 28px; border-radius: 50px;
-            border: 1px solid var(--amber); color: #fff; font-weight: 600;
-            font-size: 0.9rem; opacity: 0; transition: 0.3s; z-index: 10005;
-            pointer-events: none;
-        }
-        #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-        #toast.success { border-color: var(--green); color: var(--green); }
-        #toast.error { border-color: var(--red); color: var(--red); }
+    const user = db.getUser(username);
+    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
 
-        /* ═══════════════════════════════════════════
-           DASHBOARD SPECIFIC STYLES
-           ═══════════════════════════════════════════ */
-        .dashboard-container {
-            width: min(920px, 94vw);
-            margin: 40px auto 60px;
-            padding: 0 16px;
-            position: relative;
-            z-index: 1;
-            opacity: 0;
-            transform: translateY(28px);
-            transition: opacity 0.6s var(--ease-out-expo), transform 0.6s var(--ease-out-expo);
-        }
+    const stake = db.getStake(username);
+    const balance = Number(user.balance) || 0;
+    const staked = Number(stake.amount) || 0;
+    const pending = Number(stake.pending_reward) || 0;
 
-        .dashboard-container.loaded {
-            opacity: 1;
-            transform: translateY(0);
-        }
+    const currentVal = blockchain.getCurrentValidator();
+    const isValidator = (username === currentVal);
 
-        /* Header */
-        .dashboard-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 36px;
-            flex-wrap: wrap;
-            gap: 16px;
-        }
+    res.json({
+      status: 'success',
+      balance,
+      staked,
+      is_validator: isValidator,
+      pending_reward: pending,
+      current_validator: currentVal || null
+    });
+  } catch (e) {
+    console.error('/pos/info error:', e);
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
 
-        .logo {
-            font-size: 1.6rem;
-            font-weight: 800;
-            letter-spacing: -0.02em;
-            color: var(--amber);
-            text-shadow: 0 0 16px var(--amber-glow), 0 0 45px rgba(255,149,0,.18);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            user-select: none;
-        }
-        .logo .logo-icon {
-            display: inline-block;
-            font-size: 1.8rem;
-            animation: logoBounce 3s ease-in-out infinite;
-        }
+app.post('/pos/stake', (req, res) => {
+  try {
+    const { username, pin, amount } = req.body;
+    if (!username || !pin || !amount) return res.status(400).json({ status: 'error', message: 'Missing fields' });
 
-        .status-pill {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-full);
-            padding: 8px 18px;
-            font-size: 0.78rem;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-            color: var(--green);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-        }
-        .status-pill .pulse-dot {
-            width: 8px; height: 8px; border-radius: 50%;
-            background: var(--green);
-            box-shadow: 0 0 8px rgba(64,192,87,0.25);
-            animation: pulseDot 2s ease-in-out infinite;
-        }
-        @keyframes pulseDot {
-            0%, 100% { box-shadow: 0 0 4px rgba(64,192,87,0.25); }
-            50% { box-shadow: 0 0 16px rgba(64,192,87,0.25), 0 0 24px rgba(64,192,87,0.2); }
-        }
+    db.authenticate(username, pin);
+    const stakeAmount = parseFloat(amount);
+    if (isNaN(stakeAmount) || stakeAmount < 10) throw new Error('Minimum stake is 10 CC');
 
-        /* Greeting */
-        .greeting { margin-bottom: 32px; }
-        .greeting h1 {
-            font-size: clamp(1.8rem, 4vw, 2.4rem);
-            font-weight: 800; color: var(--text);
-            margin: 0 0 4px; letter-spacing: -0.02em; line-height: 1.2;
-        }
-        .greeting .subtitle {
-            color: var(--mid); font-size: 0.95rem; font-weight: 400; letter-spacing: 0.01em;
-        }
+    const result = db.stake(username, stakeAmount);
+    res.json({ status: 'success', message: `Staked ${stakeAmount} CC`, staked: Number(result.amount) || 0 });
+  } catch (e) {
+    res.status(400).json({ status: 'error', message: e.message });
+  }
+});
 
-        /* Main balance card */
-        .main-card {
-            background: linear-gradient(145deg, rgba(245, 138, 0, 0.55) 0%, rgba(255, 45, 120, 0.18) 55%, rgba(90, 40, 120, 0.08) 100%);
-            backdrop-filter: blur(24px);
-            -webkit-backdrop-filter: blur(24px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: var(--radius-lg);
-            padding: 36px 40px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 24px;
-            margin-bottom: 44px;
-            position: relative;
-            overflow: hidden;
-            box-shadow: var(--shadow-card), 0 0 30px rgba(245,166,35,0.15);
-            transition: box-shadow 0.6s var(--ease-smooth), border-color 0.6s var(--ease-smooth);
-        }
-        .main-card:hover {
-            box-shadow: var(--shadow-card-hover), 0 0 50px rgba(245,166,35,0.2);
-            border-color: rgba(255,255,255,0.18);
-        }
-        .main-card::after {
-            content: ''; position: absolute; top: -50%; left: -50%;
-            width: 200%; height: 200%;
-            background: radial-gradient(circle at 30% 40%, rgba(255,255,255,0.04) 0%, transparent 50%);
-            pointer-events: none;
-            animation: shimmerRotate 15s linear infinite;
-        }
-        @keyframes shimmerRotate {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
+app.post('/pos/unstake', (req, res) => {
+  try {
+    const { username, pin } = req.body;
+    if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing fields' });
 
-        .balance-info { position: relative; z-index: 1; }
-        .balance-info .label {
-            font-size: 0.72rem; color: var(--amber);
-            text-transform: uppercase; letter-spacing: 3px;
-            margin-bottom: 10px; font-weight: 700; opacity: 0.9;
-        }
-        .balance-info .amount {
-            font-family: 'Space Mono', 'Courier New', monospace;
-            font-size: clamp(2.5rem, 6vw, 4.2rem);
-            font-weight: 700; line-height: 1;
-            display: flex; align-items: baseline; gap: 8px;
-            letter-spacing: -0.03em;
-        }
-        .balance-info .amount .currency {
-            font-size: 1.1rem; color: var(--mid); font-weight: 400; letter-spacing: 0.05em;
-        }
+    db.authenticate(username, pin);
+    db.unstake(username);
 
-        .account-meta {
-            position: relative; z-index: 1; text-align: right;
-            display: flex; flex-direction: column; align-items: flex-end; gap: 14px;
-        }
-        .account-meta .meta-label {
-            color: var(--mid); font-size: 0.7rem; letter-spacing: 2px;
-            text-transform: uppercase; font-weight: 600;
-        }
-        .account-meta .secure-badge {
-            color: var(--green); font-weight: 800; letter-spacing: 0.5px;
-            font-size: 0.82rem; display: flex; align-items: center; gap: 6px;
-        }
+    res.json({ status: 'success', message: 'Unstaked successfully. All funds returned.', staked: 0 });
+  } catch (e) {
+    res.status(400).json({ status: 'error', message: e.message });
+  }
+});
 
-        .btn-logout {
-            background: rgba(255, 45, 120, 0.08);
-            color: var(--pink);
-            border: 1px solid rgba(255, 45, 120, 0.2);
-            padding: 10px 22px;
-            border-radius: var(--radius-full);
-            font-size: 0.78rem; font-weight: 700; letter-spacing: 0.05em;
-            cursor: pointer;
-            transition: all 0.15s var(--ease-smooth);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-        }
-        .btn-logout:hover {
-            background: var(--pink); color: #fff;
-            border-color: var(--pink);
-            box-shadow: 0 0 24px rgba(255,45,120,0.25);
-            transform: translateY(-1px);
-        }
-        .btn-logout:active { transform: scale(0.96); }
+// ─── Bounty endpoints (PoW) ──────────────────────────
+app.get('/active_bounties_list', (req, res) => {
+  try {
+    const bounties = blockchain.getActiveBounties();
+    res.json(bounties);
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
 
-        /* Section titles */
-        .section-title {
-            font-weight: 800; letter-spacing: 0.03em; margin-bottom: 22px;
-            font-size: 1.05rem; text-transform: uppercase; color: var(--text);
-            display: flex; align-items: center; gap: 10px;
-        }
-        .section-title::after {
-            content: ''; flex: 1; height: 1px; background: var(--border); min-width: 30px;
-        }
+app.get('/get_job/:id', (req, res) => {
+  try {
+    const job = blockchain.getJob(req.params.id);
+    if (!job) return res.status(404).json({ status: 'error', message: 'Bounty not found' });
+    res.json(job);
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
 
-        /* Game grid */
-        .game-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-            gap: 22px;
-            margin-bottom: 44px;
-        }
+app.post('/submit_solution', (req, res) => {
+  try {
+    const bounty_id = req.query.bounty_id || req.body.bounty_id;
+    const nonce = req.query.nonce || req.body.nonce;
+    const worker_name = req.query.worker_name || req.body.worker_name;
+    const device_type = req.query.device_type || req.body.device_type || 'web';
 
-        .game-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-md);
-            padding: 28px 26px;
-            text-decoration: none;
-            color: var(--text);
-            transition: all 0.3s var(--ease-out-expo);
-            position: relative;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            cursor: pointer;
-            overflow: hidden;
-            box-shadow: var(--shadow-card);
-        }
-        .game-card:hover {
-            border-color: var(--amber);
-            transform: translateY(-6px);
-            background: rgba(28, 28, 45, 0.85);
-            box-shadow: var(--shadow-card-hover), 0 0 30px rgba(245,166,35,0.1);
-        }
-        .game-card:active { transform: scale(0.97); transition: transform 0.1s ease; }
+    if (!bounty_id || !nonce || !worker_name) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Missing required parameters: bounty_id, nonce, worker_name'
+      });
+    }
 
-        .game-badge {
-            position: absolute; top: 18px; right: 18px;
-            background: rgba(245, 138, 0, 0.12);
-            color: var(--amber);
-            padding: 5px 14px;
-            border-radius: var(--radius-full);
-            font-size: 0.68rem; font-weight: 800; letter-spacing: 0.06em;
-            z-index: 2;
-            backdrop-filter: blur(4px);
-            -webkit-backdrop-filter: blur(4px);
-            border: 1px solid rgba(245, 166, 35, 0.2);
-        }
-        .game-badge.soon {
-            background: rgba(255,255,255,0.04); color: var(--dim);
-            border-color: rgba(255,255,255,0.08);
-        }
-        .game-badge.beta {
-            background: rgba(0, 230, 118, 0.1); color: var(--green);
-            border-color: rgba(0, 230, 118, 0.2);
-        }
+    const result = blockchain.submitSolution(bounty_id, nonce, worker_name, device_type);
 
-        .game-icon {
-            font-size: 3.2rem; display: block; line-height: 1;
-            transition: transform 0.3s var(--ease-out-back);
-        }
-        .game-card:hover .game-icon { transform: scale(1.12) rotate(-3deg); }
+    if (result && result.status === 'success') {
+      sendMinerWebhook(worker_name, bounty_id, device_type);
+    }
 
-        .game-name { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.01em; margin: 0; }
-        .game-desc {
-            font-size: 0.85rem; color: var(--mid); line-height: 1.5; margin: 0;
-        }
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ status: 'error', message: e.message });
+  }
+});
 
-        /* Network monitor */
-        .network-monitor { margin-top: 10px; }
-        .monitor-grid {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 20px;
-            width: 100%;
-        }
-        @media (max-width: 600px) {
-            .monitor-grid { grid-template-columns: 1fr; }
-        }
+// ─── Miner heartbeat ──────────────────────────────────
+app.get('/miner_heartbeat', (req, res) => {
+  res.json({ status: 'ok', time: Date.now() });
+});
 
-        .panel-dark {
-            background: var(--surface); border: 1px solid var(--border);
-            border-radius: var(--radius-md); padding: 22px 24px;
-            backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-            transition: border-color 0.3s var(--ease-smooth);
-        }
-        .panel-dark:hover { border-color: var(--border-hi); }
-        .panel-dark h4 {
-            color: var(--mid); font-size: 0.7rem; letter-spacing: 2px;
-            margin-bottom: 16px; text-transform: uppercase; font-weight: 700;
-        }
+// ─── API test endpoint ─────────────────────────────────
+app.get('/api/test', (req, res) => {
+  res.json({
+    status: 'ok',
+    time: new Date().toISOString(),
+    message: 'ChocoHub API is running',
+    uptime: process.uptime()
+  });
+});
 
-        .log-list {
-            list-style: none; padding: 0;
-            font-family: 'Space Mono', 'Courier New', monospace;
-            font-size: 0.8rem; max-height: 220px; overflow-y: auto;
-        }
-        .log-list li {
-            padding: 8px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-            color: var(--mid); transition: color 0.15s;
-            display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-        }
-        .log-list li:last-child { border-bottom: none; }
-        .log-list .block-id { color: var(--amber); font-weight: 700; }
-        .log-list .reward { color: var(--green); font-weight: 700; }
-
-        .miner-entry {
-            display: flex; align-items: center; gap: 10px;
-            padding: 8px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-            font-family: 'Space Mono', 'Courier New', monospace; font-size: 0.8rem;
-        }
-        .miner-entry:last-child { border-bottom: none; }
-        .miner-dot {
-            width: 7px; height: 7px; border-radius: 50%;
-            background: var(--green); box-shadow: 0 0 8px rgba(64,192,87,0.25);
-            flex-shrink: 0; animation: pulseDot 2s ease-in-out infinite;
-        }
-        .miner-name { color: var(--amber); font-weight: 700; }
-        .miner-device { color: var(--dim); font-size: 0.7rem; margin-left: auto; }
-
-        .empty-state {
-            color: var(--dim); text-align: center; padding: 24px 0;
-            font-style: italic; font-size: 0.82rem;
-        }
-
-        /* Login overlay */
-        #login-overlay {
-            position: fixed; inset: 0;
-            background: var(--void);
-            z-index: 2000;
-            display: flex; align-items: center; justify-content: center;
-            transition: opacity 0.5s ease;
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-        }
-        #login-overlay.fading {
-            opacity: 0; pointer-events: none;
-        }
-
-        .login-box {
-            width: min(420px, 92vw); text-align: center;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            padding: 40px 32px;
-            box-shadow: var(--shadow-card-hover);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            animation: loginSlideUp 0.7s var(--ease-out-expo) both;
-        }
-        @keyframes loginSlideUp {
-            from { opacity: 0; transform: translateY(40px) scale(0.96); }
-            to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-
-        .login-icon {
-            font-size: 4.5rem; margin-bottom: 8px;
-            animation: logoBounce 3s ease-in-out infinite;
-            display: inline-block;
-        }
-        .login-box h2 {
-            font-weight: 800; margin-bottom: 4px;
-            letter-spacing: -0.02em; font-size: 1.5rem; color: var(--text);
-        }
-        .login-box .login-sub {
-            color: var(--mid); margin-bottom: 28px; font-size: 0.88rem;
-        }
-
-        .login-hint {
-            font-size: 0.72rem; color: var(--dim); margin-top: 18px; line-height: 1.5;
-        }
-
-        /* Responsive */
-        @media (max-width: 768px) {
-            .main-card {
-                flex-direction: column; text-align: center;
-                padding: 28px 24px; gap: 20px;
+// ─── SPA fallback ─────────────────────────────────────
+app.get('*', (req, res) => {
+  const indexPath = path.join(__dirname, 'public', 'index.html');
+  try {
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(200).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>ChocoHub</title>
+          <style>
+            body {
+              background: #0a0a12;
+              color: #eee4d8;
+              font-family: 'Outfit', sans-serif;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              height: 100vh;
+              margin: 0;
+              text-align: center;
             }
-            .balance-info .amount {
-                justify-content: center; font-size: 2.8rem;
-            }
-            .account-meta { align-items: center; text-align: center; }
-            .game-grid { grid-template-columns: 1fr; }
-            .dashboard-header { flex-direction: column; align-items: flex-start; }
-            .greeting h1 { font-size: 1.5rem; }
-        }
-        @media (max-width: 400px) {
-            .main-card { padding: 20px 16px; border-radius: var(--radius-md); }
-            .balance-info .amount { font-size: 2.2rem; }
-            .game-card { padding: 20px 16px; }
-            .login-box { padding: 28px 18px; }
-        }
-    </style>
-</head>
-<body>
+            h1 { color: #f58a00; font-size: 2.5rem; }
+            p { color: #8b8296; margin-top: 10px; }
+          </style>
+        </head>
+        <body>
+          <div>
+            <h1>🍫 ChocoHub</h1>
+            <p>Server is running. Please upload frontend files to continue.</p>
+            <p style="font-size:0.8rem; margin-top:20px;">API: <code style="color:#f58a00;">/api/test</code></p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+  } catch(e) {
+    res.status(500).send('Server error');
+  }
+});
 
-    <!-- Animated liquid background -->
-    <div class="liquid-bg" aria-hidden="true"></div>
+// ─── Error handler ─────────────────────────────────────
+app.use((err, req, res, next) => {
+  console.error('❌ Server error:', err.message);
+  res.status(500).json({ status: 'error', message: 'Internal server error' });
+});
 
-    <!-- LOGIN OVERLAY (only shown if not authenticated) -->
-    <div id="login-overlay">
-        <div class="login-box">
-            <span class="login-icon" aria-hidden="true">🍫</span>
-            <h2>CHOCO HUB</h2>
-            <p class="login-sub">Enter your credentials to access the vault.</p>
+// ═══════════════════════════════════════════════════════
+// START AUTO-BOUNTY (PoW) + PoS MINTING
+// ═══════════════════════════════════════════════════════
+blockchain.startAutoBounty();
+blockchain.startPoSMinting();
 
-            <div style="text-align: left; margin-bottom: 18px;">
-                <label class="field-lbl">Username</label>
-                <input type="text" id="user-name" class="field-inp" placeholder="e.g. ChocoKing" autocomplete="username" spellcheck="false">
-            </div>
-
-            <div style="text-align: left; margin-bottom: 28px;">
-                <label class="field-lbl">Security PIN</label>
-                <input type="password" id="user-pin" class="field-inp" placeholder="4 to 8 digits" maxlength="8" autocomplete="current-password">
-            </div>
-
-            <button class="btn-start" id="auth-btn">ENTER HUB</button>
-            <p class="login-hint">If the username doesn't exist, we'll create one for you.</p>
-        </div>
-    </div>
-
-    <!-- DASHBOARD (hidden until login) -->
-    <div class="dashboard-container" id="dash-ui">
-        <header class="dashboard-header">
-            <div class="logo">
-                <span class="logo-icon" aria-hidden="true">🍫</span> CHOCO HUB
-            </div>
-            <div class="status-pill" aria-live="polite">
-                <span class="pulse-dot" aria-hidden="true"></span> HYBRID PoW+PoS
-            </div>
-        </header>
-
-        <div class="greeting">
-            <h1 id="welcome-msg">Good morning, Guest</h1>
-            <p class="subtitle">Ready to earn CC with mining & staking?</p>
-        </div>
-
-        <section class="main-card">
-            <div class="balance-info">
-                <div class="label">Total Vault Balance</div>
-                <div class="amount" id="balance-val">0000 <span class="currency">CC</span></div>
-            </div>
-            <div class="account-meta">
-                <span class="meta-label">Account Status</span>
-                <span class="secure-badge">● SECURE / ENCRYPTED</span>
-                <button class="btn-logout" id="logout-btn">LOGOUT</button>
-            </div>
-        </section>
-
-        <h3 class="section-title">Available Services</h3>
-
-        <div class="game-grid">
-            <!-- Snake Faucet -->
-            <a href="snake.html" class="game-card">
-                <span class="game-badge">HOT ⚡</span>
-                <span class="game-icon" aria-hidden="true">🐍</span>
-                <span class="game-name">SNAKE FAUCET</span>
-                <p class="game-desc">Classic Snake with different modes. Earn up to 100 CC per claim in Hardcore Mode.</p>
-            </a>
-
-            <!-- Web Miner (PoW) -->
-            <a href="mining.html" class="game-card">
-                <span class="game-badge">PoW</span>
-                <span class="game-icon" aria-hidden="true">⛏️</span>
-                <span class="game-name">WEB MINER</span>
-                <p class="game-desc">Mine CC using your browser's CPU. Solve Proof-of-Work blocks and earn rewards.</p>
-            </a>
-
-            <!-- Staking Vault (PoS) -->
-            <a href="staking.html" class="game-card">
-                <span class="game-badge">PoS</span>
-                <span class="game-icon" aria-hidden="true">🏦</span>
-                <span class="game-name">STAKING VAULT</span>
-                <p class="game-desc">Stake your CC to become a validator. Earn block rewards via Proof-of-Stake consensus.</p>
-            </a>
-        </div>
-
-        <div class="network-monitor">
-            <h3 class="section-title">Network Activity</h3>
-            <div class="monitor-grid">
-                <div class="panel-dark">
-                    <h4>Recently Mined / Forged</h4>
-                    <ul id="mined-blocks-log" class="log-list">
-                        <li class="empty-state">Awaiting activity...</li>
-                    </ul>
-                </div>
-                <div class="panel-dark">
-                    <h4>Active Validators</h4>
-                    <div id="active-miners-list">
-                        <div class="empty-state">No active validators</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Toast container -->
-    <div id="toast" role="status" aria-live="polite"></div>
-
-    <script>
-        // ══════════════════════════════════════════════════════
-        // SECURITY-FIXED DASHBOARD SCRIPT
-        // ══════════════════════════════════════════════════════
-        
-        let currentBalance = 0;
-        let balanceAnimationId = null;
-        let authToken = null; // JWT token thay vì PIN
-
-        function animateValue(id, start, end, duration) {
-            const obj = document.getElementById(id);
-            if (!obj) return;
-            if (balanceAnimationId) {
-                cancelAnimationFrame(balanceAnimationId);
-                balanceAnimationId = null;
-            }
-            const startTimestamp = performance.now();
-            const step = (timestamp) => {
-                const elapsed = timestamp - startTimestamp;
-                const progress = Math.min(elapsed / duration, 1);
-                const eased = 1 - Math.pow(1 - progress, 3);
-                const current = start + (end - start) * eased;
-                const displayValue = Number.isInteger(end)
-                    ? Math.round(current).toLocaleString('en-US', { minimumIntegerDigits: 4, useGrouping: false })
-                    : current.toFixed(4);
-                obj.textContent = ''; // Xóa nội dung cũ an toàn
-                obj.appendChild(document.createTextNode(displayValue + ' '));
-                const span = document.createElement('span');
-                span.className = 'currency';
-                span.textContent = 'CC';
-                obj.appendChild(span);
-                if (progress < 1) {
-                    balanceAnimationId = requestAnimationFrame(step);
-                } else {
-                    obj.textContent = '';
-                    obj.appendChild(document.createTextNode((Number.isInteger(end)
-                        ? end.toLocaleString('en-US', { minimumIntegerDigits: 4, useGrouping: false })
-                        : end.toFixed(4)) + ' '));
-                    const span2 = document.createElement('span');
-                    span2.className = 'currency';
-                    span2.textContent = 'CC';
-                    obj.appendChild(span2);
-                    balanceAnimationId = null;
-                }
-            };
-            balanceAnimationId = requestAnimationFrame(step);
-        }
-
-        async function updateBalanceAction() {
-            const user = localStorage.getItem('choco_user');
-            const token = localStorage.getItem('choco_token');
-            if (!user || !token) return;
-            try {
-                const res = await fetch(`/get_user/${encodeURIComponent(user)}`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                if (!res.ok) throw new Error('Network error');
-                const data = await res.json();
-                if (data.status !== 'error' && typeof data.balance === 'number') {
-                    if (data.balance !== currentBalance) {
-                        animateValue('balance-val', currentBalance, data.balance, 1200);
-                        currentBalance = data.balance;
-                    }
-                }
-            } catch (e) {
-                console.warn('Balance update failed:', e.message);
-            }
-        }
-
-        async function updateNetworkMonitor() {
-            try {
-                const res = await fetch('/network_status');
-                if (!res.ok) throw new Error('Fetch failed');
-                const data = await res.json();
-
-                const blocksLog = document.getElementById('mined-blocks-log');
-                if (data.recent_blocks && data.recent_blocks.length > 0) {
-                    const frag = document.createDocumentFragment();
-                    data.recent_blocks.forEach(b => {
-                        const li = document.createElement('li');
-                        const spanId = document.createElement('span');
-                        spanId.className = 'block-id';
-                        spanId.textContent = '#' + (b.id ? b.id.substring(0,8) : '?');
-                        li.appendChild(spanId);
-                        li.appendChild(document.createTextNode(' — ' + (b.username || 'unknown') + ' — '));
-                        const spanReward = document.createElement('span');
-                        spanReward.className = 'reward';
-                        spanReward.textContent = String(b.reward) + ' CC';
-                        li.appendChild(spanReward);
-                        frag.appendChild(li);
-                    });
-                    blocksLog.textContent = '';
-                    blocksLog.appendChild(frag);
-                } else {
-                    blocksLog.innerHTML = '<li class="empty-state">Awaiting activity...</li>';
-                }
-
-                const minersList = document.getElementById('active-miners-list');
-                if (data.active_validators && data.active_validators.length > 0) {
-                    const frag = document.createDocumentFragment();
-                    data.active_validators.forEach(v => {
-                        const div = document.createElement('div');
-                        div.className = 'miner-entry';
-                        const dot = document.createElement('span');
-                        dot.className = 'miner-dot';
-                        dot.setAttribute('aria-hidden', 'true');
-                        div.appendChild(dot);
-                        const name = document.createElement('span');
-                        name.className = 'miner-name';
-                        name.textContent = v.username || '?';
-                        div.appendChild(name);
-                        const stake = document.createElement('span');
-                        stake.className = 'miner-device';
-                        stake.textContent = (v.stake || 0) + ' CC staked';
-                        div.appendChild(stake);
-                        frag.appendChild(div);
-                    });
-                    minersList.textContent = '';
-                    minersList.appendChild(frag);
-                } else {
-                    minersList.innerHTML = '<div class="empty-state">No active validators</div>';
-                }
-            } catch (e) {
-                console.warn('Network monitor update failed:', e.message);
-            }
-        }
-
-        function escapeHTML(str) {
-            const div = document.createElement('div');
-            div.appendChild(document.createTextNode(str));
-            return div.innerHTML;
-        }
-
-        function setHumaneGreeting(name) {
-            const hour = new Date().getHours();
-            let greet = 'Good night';
-            if (hour < 12) greet = 'Good morning';
-            else if (hour < 18) greet = 'Good afternoon';
-            const el = document.getElementById('welcome-msg');
-            if (el) el.textContent = `${greet}, ${name}!`;
-        }
-
-        async function handleAuth() {
-            const username = document.getElementById('user-name').value.trim();
-            const pin = document.getElementById('user-pin').value.trim();
-            if (username.length < 3 || pin.length < 4) {
-                return showToast('Name min 3, PIN min 4 chars', 'error');
-            }
-            const btn = document.getElementById('auth-btn');
-            if (btn) {
-                btn.disabled = true;
-                btn.textContent = 'AUTHENTICATING...';
-            }
-            try {
-                const res = await fetch('/auth', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, pin })
-                });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    // ✅ CHỈ lưu token, KHÔNG lưu PIN
-                    localStorage.setItem('choco_user', username.toLowerCase());
-                    if (data.token) {
-                        localStorage.setItem('choco_token', data.token);
-                        authToken = data.token;
-                    }
-                    // Lưu PIN TẠM THỜI vào sessionStorage (mất khi đóng tab)
-                    sessionStorage.setItem('choco_pin_temp', pin);
-                    showToast(data.message || 'Welcome!', 'success');
-                    setTimeout(() => location.reload(), 900);
-                } else {
-                    showToast(data.message || 'Auth failed', 'error');
-                    if (btn) { btn.disabled = false; btn.textContent = 'ENTER HUB'; }
-                }
-            } catch (e) {
-                showToast('Server unreachable', 'error');
-                if (btn) { btn.disabled = false; btn.textContent = 'ENTER HUB'; }
-            }
-        }
-
-        function logout() {
-            const dash = document.getElementById('dash-ui');
-            if (dash) {
-                dash.style.opacity = '0';
-                dash.style.transform = 'translateY(20px)';
-                dash.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
-            }
-            setTimeout(() => {
-                // ✅ Xóa TOÀN BỘ dữ liệu nhạy cảm
-                localStorage.removeItem('choco_user');
-                localStorage.removeItem('choco_token');
-                sessionStorage.removeItem('choco_pin_temp');
-                location.reload();
-            }, 350);
-        }
-
-        async function init() {
-            const user = localStorage.getItem('choco_user');
-            const token = localStorage.getItem('choco_token');
-            
-            if (user && token) {
-                authToken = token;
-                const overlay = document.getElementById('login-overlay');
-                if (overlay) {
-                    overlay.classList.add('fading');
-                    setTimeout(() => { overlay.style.display = 'none'; }, 500);
-                }
-                const dashUI = document.getElementById('dash-ui');
-                if (dashUI) {
-                    setTimeout(() => { dashUI.classList.add('loaded'); }, 150);
-                }
-                setHumaneGreeting(user.charAt(0).toUpperCase() + user.slice(1));
-                await Promise.allSettled([updateBalanceAction(), updateNetworkMonitor()]);
-                setInterval(updateBalanceAction, 5000);
-                setInterval(updateNetworkMonitor, 10000);
-            }
-
-            // Event listeners (dùng addEventListener thay vì inline onclick)
-            const authBtn = document.getElementById('auth-btn');
-            if (authBtn) {
-                authBtn.addEventListener('click', handleAuth);
-            }
-            
-            const logoutBtn = document.getElementById('logout-btn');
-            if (logoutBtn) {
-                logoutBtn.addEventListener('click', logout);
-            }
-
-            const pinInput = document.getElementById('user-pin');
-            if (pinInput) {
-                pinInput.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter') handleAuth();
-                });
-            }
-        }
-
-        function showToast(msg, type = '') {
-            const t = document.getElementById('toast');
-            if (!t) return;
-            t.textContent = msg;
-            t.className = `show ${type}`;
-            clearTimeout(t._timeout);
-            t._timeout = setTimeout(() => { t.className = ''; }, 3000);
-        }
-
-        // ✅ Dùng DOMContentLoaded thay vì window.onload (an toàn hơn)
-        document.addEventListener('DOMContentLoaded', init);
-    </script>
-</body>
-</html>
+// ═══════════════════════════════════════════════════════
+// START SERVER
+// ═══════════════════════════════════════════════════════
+app.listen(PORT, () => {
+  console.log('');
+  console.log('╔══════════════════════════════════════╗');
+  console.log('║     🍫 CHOCO HUB · PoW+PoS 🍫      ║');
+  console.log('╠══════════════════════════════════════╣');
+  console.log(`║  Dashboard: http://localhost:${PORT}    ║`);
+  console.log('║  API Test:  /api/test               ║');
+  console.log('║  PoW Auto-Bounty: active            ║');
+  console.log('║  PoS Minting: active (30s blocks)   ║');
+  console.log('╚══════════════════════════════════════╝');
+  console.log('');
+});
