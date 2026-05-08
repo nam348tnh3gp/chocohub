@@ -1,4 +1,4 @@
-// blockchain.js
+// blockchain.js - PoW + PoS hybrid
 const crypto = require('crypto');
 const db = require('./db');
 
@@ -9,7 +9,7 @@ const sqlite = new Database(path.join(__dirname, 'chocohub.db'));
 sqlite.pragma('journal_mode = WAL');
 
 // ═══════════════════════════════════════════════════
-// AUTO-BOUNTY: Server tạo block miễn phí
+// AUTO-BOUNTY: Server tạo block miễn phí (PoW)
 // ═══════════════════════════════════════════════════
 const AUTO_BOUNTY_MIN = 0.005;
 const AUTO_BOUNTY_MAX = 0.1;
@@ -72,7 +72,55 @@ function startAutoBounty() {
 }
 
 // ═══════════════════════════════════════════════════
-// BOUNTY MANAGEMENT
+// PROOF OF STAKE (PoS) MINTING
+// ═══════════════════════════════════════════════════
+const POS_BLOCK_INTERVAL = 30000; // mỗi 30 giây tạo 1 block PoS
+const MIN_STAKE = 10; // Tối thiểu 10 CC để làm validator
+const POS_BLOCK_REWARD = 0.1; // Thưởng cố định mỗi block PoS
+
+function selectValidator() {
+  const validators = db.getValidators(MIN_STAKE);
+  if (validators.length === 0) return null;
+  
+  // Chọn validator dựa trên tỷ lệ stake (xác suất tỷ lệ)
+  const totalStake = validators.reduce((sum, v) => sum + v.amount, 0);
+  let random = Math.random() * totalStake;
+  for (const v of validators) {
+    random -= v.amount;
+    if (random <= 0) return v;
+  }
+  // fallback
+  return validators[0];
+}
+
+function mintPoSBlock() {
+  const validator = selectValidator();
+  if (!validator) {
+    console.log('🔒 No validator available for PoS block');
+    return;
+  }
+  
+  const reward = POS_BLOCK_REWARD;
+  
+  // Ghi nhận block (dùng chung bảng blocks_mined)
+  const blockId = 'pos_' + crypto.randomBytes(6).toString('hex');
+  sqlite.prepare('INSERT INTO blocks_mined (username, bounty_id, reward) VALUES (?, ?, ?)')
+    .run(validator.username, blockId, reward);
+  
+  // Cộng pending reward vào stake
+  db.addStakeReward(validator.username, reward);
+  
+  console.log(`🏦 PoS Block forged by ${validator.username} | +${reward} CC | Stake: ${validator.amount} CC`);
+}
+
+function startPoSMinting() {
+  mintPoSBlock(); // chạy ngay lần đầu
+  setInterval(mintPoSBlock, POS_BLOCK_INTERVAL);
+  console.log(`🏦 PoS minting started (block every ${POS_BLOCK_INTERVAL/1000}s, reward ${POS_BLOCK_REWARD} CC)`);
+}
+
+// ═══════════════════════════════════════════════════
+// BOUNTY MANAGEMENT (PoW)
 // ═══════════════════════════════════════════════════
 
 function createBounty(username, pin, difficulty, reward, targetDevice) {
@@ -190,5 +238,8 @@ module.exports = {
   getJob, 
   submitSolution,
   startAutoBounty,
-  checkAndRefillBounties
+  checkAndRefillBounties,
+  // PoS exports
+  startPoSMinting,
+  mintPoSBlock
 };
