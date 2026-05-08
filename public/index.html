@@ -545,13 +545,13 @@
                 <span class="logo-icon" aria-hidden="true">🍫</span> CHOCO HUB
             </div>
             <div class="status-pill" aria-live="polite">
-                <span class="pulse-dot" aria-hidden="true"></span> SECURE VAULT
+                <span class="pulse-dot" aria-hidden="true"></span> HYBRID PoW+PoS
             </div>
         </header>
 
         <div class="greeting">
             <h1 id="welcome-msg">Good morning, Guest</h1>
-            <p class="subtitle">Ready to collect some CC points today?</p>
+            <p class="subtitle">Ready to earn CC with mining & staking?</p>
         </div>
 
         <section class="main-card">
@@ -577,20 +577,20 @@
                 <p class="game-desc">Classic Snake with different modes. Earn up to 100 CC per claim in Hardcore Mode.</p>
             </a>
 
-            <!-- Web Miner -->
+            <!-- Web Miner (PoW) -->
             <a href="mining.html" class="game-card">
-                <span class="game-badge">NEW</span>
-                <span class="game-icon" aria-hidden="true">💻</span>
+                <span class="game-badge">PoW</span>
+                <span class="game-icon" aria-hidden="true">⛏️</span>
                 <span class="game-name">WEB MINER</span>
-                <p class="game-desc">Mine CC directly using your browser's CPU. Auto mining block.</p>
+                <p class="game-desc">Mine CC using your browser's CPU. Solve Proof-of-Work blocks and earn rewards.</p>
             </a>
 
-            <!-- ChocoHunt / Block Hunt -->
-            <a href="hunt.html" class="game-card">
-                <span class="game-badge beta">BETA</span>
-                <span class="game-icon" aria-hidden="true">⛏️</span>
-                <span class="game-name">Block Hunt</span>
-                <p class="game-desc">Binary Hunt system: create or hunt blocks for CC rewards, compete with other miners.</p>
+            <!-- Staking Vault (PoS) -->
+            <a href="staking.html" class="game-card">
+                <span class="game-badge">PoS</span>
+                <span class="game-icon" aria-hidden="true">🏦</span>
+                <span class="game-name">STAKING VAULT</span>
+                <p class="game-desc">Stake your CC to become a validator. Earn block rewards via Proof-of-Stake consensus.</p>
             </a>
         </div>
 
@@ -598,15 +598,15 @@
             <h3 class="section-title">Network Activity</h3>
             <div class="monitor-grid">
                 <div class="panel-dark">
-                    <h4>Recently Mined</h4>
+                    <h4>Recently Mined / Forged</h4>
                     <ul id="mined-blocks-log" class="log-list">
                         <li class="empty-state">Awaiting activity...</li>
                     </ul>
                 </div>
                 <div class="panel-dark">
-                    <h4>Active Miners</h4>
+                    <h4>Active Validators</h4>
                     <div id="active-miners-list">
-                        <div class="empty-state">No active miners</div>
+                        <div class="empty-state">No active validators</div>
                     </div>
                 </div>
             </div>
@@ -714,9 +714,9 @@
                 }
 
                 const minersList = document.getElementById('active-miners-list');
-                if (data.active_miners && data.active_miners.length > 0) {
+                if (data.active_validators && data.active_validators.length > 0) {
                     const frag = document.createDocumentFragment();
-                    data.active_miners.forEach(m => {
+                    data.active_validators.forEach(v => {
                         const div = document.createElement('div');
                         div.className = 'miner-entry';
                         const dot = document.createElement('span');
@@ -725,18 +725,18 @@
                         div.appendChild(dot);
                         const name = document.createElement('span');
                         name.className = 'miner-name';
-                        name.textContent = m.username || '?';
+                        name.textContent = v.username || '?';
                         div.appendChild(name);
-                        const device = document.createElement('span');
-                        device.className = 'miner-device';
-                        device.textContent = m.device || '';
-                        div.appendChild(device);
+                        const stake = document.createElement('span');
+                        stake.className = 'miner-device';
+                        stake.textContent = (v.stake || 0) + ' CC staked';
+                        div.appendChild(stake);
                         frag.appendChild(div);
                     });
                     minersList.textContent = '';
                     minersList.appendChild(frag);
                 } else {
-                    minersList.innerHTML = '<div class="empty-state">No active miners</div>';
+                    minersList.innerHTML = '<div class="empty-state">No active validators</div>';
                 }
             } catch (e) {
                 console.warn('Network monitor update failed:', e.message);
