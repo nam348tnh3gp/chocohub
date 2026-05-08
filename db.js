@@ -1,4 +1,4 @@
-// db.js – Full fix (gộp module.exports)
+// db.js – Full fix + PoS Staking support
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -7,7 +7,7 @@ const path = require('path');
 const db = new Database(path.join(__dirname, 'chocohub.db'));
 db.pragma('journal_mode = WAL');
 
-// Khởi tạo bảng
+// Khởi tạo bảng (thêm stakes, sửa active_validators thành dạng view sau)
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,6 +43,13 @@ db.exec(`
     bounty_id TEXT,
     reward REAL,
     mined_at TEXT DEFAULT (datetime('now'))
+  );
+  -- Bảng staking PoS
+  CREATE TABLE IF NOT EXISTS stakes (
+    username TEXT PRIMARY KEY,
+    amount REAL NOT NULL DEFAULT 0,
+    pending_reward REAL NOT NULL DEFAULT 0,
+    last_reward_block INTEGER DEFAULT 0
   );
 `);
 
@@ -83,6 +90,60 @@ function getActiveMiners(limit = 5) {
   return db.prepare('SELECT DISTINCT username, "web" as device FROM blocks_mined ORDER BY mined_at DESC LIMIT ?').all(limit);
 }
 
+// ─── Staking functions ────────────────────────────
+function getStake(username) {
+  username = username.toLowerCase().trim();
+  let row = db.prepare('SELECT * FROM stakes WHERE username = ?').get(username);
+  if (!row) {
+    // Tạo bản ghi mặc định
+    db.prepare('INSERT INTO stakes (username, amount, pending_reward) VALUES (?, 0, 0)').run(username);
+    row = { username, amount: 0, pending_reward: 0 };
+  }
+  return row;
+}
+
+function stake(username, amount) {
+  username = username.toLowerCase().trim();
+  const user = getUser(username);
+  if (!user) throw new Error('User not found');
+  if (user.balance < amount) throw new Error('Insufficient balance');
+  
+  // Trừ balance
+  updateBalance(username, -amount);
+  
+  // Cập nhật stakes
+  const current = getStake(username);
+  db.prepare('UPDATE stakes SET amount = amount + ?, pending_reward = pending_reward WHERE username = ?')
+    .run(amount, username);
+  
+  return getStake(username);
+}
+
+function unstake(username) {
+  username = username.toLowerCase().trim();
+  const current = getStake(username);
+  if (current.amount <= 0) throw new Error('No stake to withdraw');
+  
+  // Hoàn trả balance + pending reward
+  const total = current.amount + (current.pending_reward || 0);
+  updateBalance(username, total);
+  
+  // Reset stake
+  db.prepare('UPDATE stakes SET amount = 0, pending_reward = 0 WHERE username = ?').run(username);
+  
+  return { amount: 0, pending_reward: 0 };
+}
+
+function getValidators(minStake = 10) {
+  // Lấy danh sách validator (stake >= minStake)
+  return db.prepare('SELECT username, amount FROM stakes WHERE amount >= ? ORDER BY amount DESC').all(minStake);
+}
+
+function addStakeReward(username, reward) {
+  db.prepare('UPDATE stakes SET pending_reward = pending_reward + ? WHERE username = ?')
+    .run(reward, username.toLowerCase().trim());
+}
+
 function getLastSnakeClaim(username) {
   return db.prepare(
     'SELECT claimed_at FROM snake_claims WHERE username=? ORDER BY claimed_at DESC LIMIT 1'
@@ -103,5 +164,11 @@ module.exports = {
   getRecentBlocks,
   getActiveMiners,
   getLastSnakeClaim,
-  insertSnakeClaim
+  insertSnakeClaim,
+  // PoS additions
+  getStake,
+  stake,
+  unstake,
+  getValidators,
+  addStakeReward
 };
