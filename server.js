@@ -8,6 +8,7 @@ const fs = require('fs');
 const db = require('./db');
 const blockchain = require('./blockchain');
 const snake = require('./snake');
+const backupClient = require('./backupSync'); // 🟢 THÊM DÒNG NÀY
 
 const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1501353650243633202/JH4DnjVgN_H42VaEc0rflF03HJjl2Nh1iy7qCRZbkxX7uhHDN_rZfaaNAGqAvAjZAqNU';
 
@@ -137,7 +138,6 @@ app.get('/leaderboard', (req, res) => {
 
 app.get('/pos/info', (req, res) => {
   try {
-    // ✅ FIX: Giữ nguyên hoa/thường, không ép lowercase
     const username = (req.query.username || '').trim();
     if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
 
@@ -298,4 +298,7 @@ app.listen(PORT, () => {
   console.log('║  PoS Minting: active (30s blocks)   ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
+
+  // 🟢 THÊM DÒNG NÀY: Khởi động backup client ngay khi server sẵn sàng
+  backupClient.start();
 });
