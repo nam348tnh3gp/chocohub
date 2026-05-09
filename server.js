@@ -353,25 +353,18 @@ app.post('/api/backup/sync', (req, res) => {
       console.log(`📥 Receiving full backup (${data.rows ? data.rows.length : 0} items)...`);
       
       if (data.rows && Array.isArray(data.rows)) {
-        data.rows.forEach(row => {
-          try {
-            if (row.type === 'DELTA' && row.payload) {
-              console.log(`🔄 Processing delta: seq=${row.seq}, action=${row.payload.action || 'unknown'}`);
-              // TODO: Thực sự restore dữ liệu vào DB ở đây
-            }
-          } catch (e) {
-            console.error('❌ Error processing row:', e.message);
-          }
-        });
+        // 🔄 THỰC SỰ RESTORE DỮ LIỆU VÀO DB
+        backupClient.restoreFromBackup(data.rows);
+        console.log('✅ Full backup restored from backup server');
+      } else {
+        console.log('⚠️ FULL_BACKUP received but no rows found');
       }
-      
-      console.log('✅ Backup restored successfully');
       
       return res.json({
         type: 'BACKUP_ACK',
         seq: data.seq,
         status: 'success',
-        message: 'Backup received'
+        message: 'Backup restored'
       });
     }
     
