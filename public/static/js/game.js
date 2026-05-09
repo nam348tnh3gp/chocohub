@@ -368,13 +368,13 @@ function toggleHardcoreMode() {
     if (hardcoreMode) {
         wrap.classList.add("hc-on"); sw.classList.add("on");
         badges.style.display = "flex"; warn.style.display = "block";
-        vApple.textContent = "2.0 CC"; // Sửa từ "50 CC"
-        vMax.textContent = "150 CC";   // Sửa từ "2500 CC"
+        vApple.textContent = "2.0 CC";
+        vMax.textContent = "150 CC";
     } else {
         wrap.classList.remove("hc-on"); sw.classList.remove("on");
         badges.style.display = "none"; warn.style.display = "none";
-        vApple.textContent = "0.5 CC"; // Sửa từ "10 CC"
-        vMax.textContent = "100 CC";   // Sửa từ "500 CC"
+        vApple.textContent = "0.5 CC";
+        vMax.textContent = "100 CC";
     }
 }
 
@@ -382,6 +382,15 @@ function restartGame() {
     document.getElementById("modal").classList.remove("show");
     clearCooldownUI();
     startGame();
+}
+
+// 🏠 Thoát về Dashboard
+function exitToDashboard() {
+    document.getElementById("modal").classList.remove("show");
+    if (typeof _cleanHC === "function") _cleanHC();
+    document.getElementById("normalMusic").pause();
+    document.getElementById("hardcoreMusic").pause();
+    window.location.href = "/";
 }
 
 // ── API CLAIM ── (Đồng bộ: POST /snake/claim)
@@ -408,10 +417,8 @@ async function claimReward() {
             toast("✅ Claimed " + data.reward + " CC! Balance: " + data.new_balance + " CC", "success");
             btn.textContent = "✅ CLAIMED!";
 
-            // Cooldown bar 15 phút
             startCooldownUI();
 
-            // Notification
             if ('Notification' in window && Notification.permission === 'granted') {
                 new Notification('🍫 CC Received!', {
                     body: `+${data.reward} CC credited to your account!`
