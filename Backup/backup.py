@@ -1,394 +1,333 @@
-#!/usr/bin/env python3
-"""
-backup.py – Backup server for ChocoHub (Hybrid PoW+PoS)
-Python version
-"""
-
+# backup.py – Backup Server nhận sync từ ChocoHub qua HTTP
 import os
-import sys
 import json
-import socket
-import sqlite3
-import threading
 import time
-import logging
-from datetime import datetime
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse
+import threading
 import requests
-
-# ==================== Configuration ====================
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
+from datetime import datetime
+import sqlite3
+from pathlib import Path
+
 load_dotenv()
 
-HTTP_PORT = int(os.getenv('HTTP_PORT', 0)) or None
-TCP_PORT = int(os.getenv('TCP_PORT', 0)) or None
-BACKUP_TOKENS = [t.strip() for t in os.getenv('BACKUP_TOKENS', 'chocohub-default-token').split(',') if t.strip()]
-DB_PATH = os.getenv('BACKUP_DB_PATH', os.path.join(os.path.dirname(__file__), 'backup.db'))
-MAIN_SERVERS = [s.strip() for s in os.getenv('MAIN_SERVERS', '').split(',') if s.strip()]
+app = Flask(__name__)
 
-if not HTTP_PORT and not TCP_PORT:
-    print('❌ No server configured! Set HTTP_PORT and/or TCP_PORT in .env')
-    sys.exit(1)
+# ─── Config từ .env ─────────────────────────────────
+BACKUP_PORT = int(os.getenv('BACKUP_PORT', 5000))
+BACKUP_TOKEN = os.getenv('BACKUP_TOKEN', 'chocohub-default-token')
+MAIN_SERVER_URL = os.getenv('MAIN_SERVER_URL', 'https://chocohub-r011.onrender.com')
+CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL', 10))  # Giây
+MAX_READY_RETRIES = int(os.getenv('MAX_READY_RETRIES', 2))
+DB_PATH = os.getenv('BACKUP_DB_PATH', 'backup.db')
 
-# ==================== Logging ====================
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%H:%M:%S'
-)
-logger = logging.getLogger('backup')
-
-# ==================== Database ====================
-class Database:
-    def __init__(self, db_path):
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute('PRAGMA journal_mode = WAL')
-        self._init_tables()
-    
-    def _init_tables(self):
-        self.conn.executescript("""
-            CREATE TABLE IF NOT EXISTS backup_data (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at TEXT DEFAULT (datetime('now'))
-            );
-            INSERT OR IGNORE INTO backup_data (key, value) VALUES ('seq', '0');
-            INSERT OR IGNORE INTO backup_data (key, value) VALUES ('ready_count', '0');
-            INSERT OR IGNORE INTO backup_data (key, value) VALUES ('last_backup', '{}');
-            INSERT OR IGNORE INTO backup_data (key, value) VALUES ('backup_status', 'idle');
-        """)
-        self.conn.commit()
-    
-    def get(self, key):
-        row = self.conn.execute('SELECT value FROM backup_data WHERE key = ?', (key,)).fetchone()
-        return row['value'] if row else '0'
-    
-    def set(self, key, value):
-        self.conn.execute(
-            'INSERT OR REPLACE INTO backup_data (key, value, updated_at) VALUES (?, ?, datetime(\'now\'))',
-            (key, str(value))
+# ─── Khởi tạo SQLite ───────────────────────────────
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS backup_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            seq INTEGER NOT NULL,
+            data_type TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            received_at TEXT DEFAULT (datetime('now'))
         )
-        self.conn.commit()
-    
-    def get_ready_count(self):
-        return int(self.get('ready_count'))
-    
-    def increment_ready(self):
-        count = self.get_ready_count() + 1
-        self.set('ready_count', count)
-        return count
-    
-    def reset_ready(self):
-        self.set('ready_count', '0')
-    
-    def close(self):
-        self.conn.close()
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sync_state (
+            id INTEGER PRIMARY KEY CHECK(id = 1),
+            last_seq INTEGER NOT NULL DEFAULT 0,
+            last_ready_time TEXT,
+            ready_count INTEGER DEFAULT 0
+        )
+    ''')
+    cursor.execute('INSERT OR IGNORE INTO sync_state (id, last_seq, ready_count) VALUES (1, 0, 0)')
+    conn.commit()
+    conn.close()
+    print('✅ Backup database ready')
 
-db = Database(DB_PATH)
+# ─── Lưu dữ liệu backup ────────────────────────────
+def save_backup(seq, data_type, payload):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        'INSERT INTO backup_data (seq, data_type, payload) VALUES (?, ?, ?)',
+        (seq, data_type, json.dumps(payload))
+    )
+    # Cập nhật last_seq
+    cursor.execute('UPDATE sync_state SET last_seq = MAX(last_seq, ?) WHERE id = 1', (seq,))
+    conn.commit()
+    conn.close()
+    print(f'💾 Saved backup: seq={seq}, type={data_type}')
 
-# ==================== Backup Logic ====================
-main_backup_data = None
+# ─── Lấy dữ liệu backup mới nhất ────────────────────
+def get_latest_backup():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT seq, data_type, payload FROM backup_data ORDER BY seq DESC LIMIT 1')
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {
+            'seq': row[0],
+            'type': row[1],
+            'payload': json.loads(row[2])
+        }
+    return None
 
-def fetch_from_main_servers():
-    """Lấy dữ liệu từ main server"""
-    global main_backup_data
-    
-    if not MAIN_SERVERS:
-        logger.info('ℹ️  No MAIN_SERVERS configured. Waiting for data push...')
-        return
-    
-    logger.info(f'🔄 Fetching data from {len(MAIN_SERVERS)} main server(s)...')
-    
-    for main_url in MAIN_SERVERS:
-        try:
-            if not main_url.startswith('http'):
-                main_url = f'http://{main_url}'
-            
-            resp = requests.get(
-                f'{main_url}/network_status',
-                headers={'Accept': 'application/json'},
-                timeout=5
-            )
-            
-            if resp.status_code == 200:
-                data = resp.json()
-                main_backup_data = data
-                db.set('last_backup', json.dumps(data))
-                db.set('seq', str(int(time.time() * 1000)))
-                db.set('backup_status', 'synced')
-                logger.info(f'✅ Fetched data from {main_url}')
-            else:
-                logger.error(f'❌ Fetch failed from {main_url}: HTTP {resp.status_code}')
-        except Exception as e:
-            logger.error(f'❌ Fetch error from {main_url}: {e}')
+# ─── Lấy toàn bộ backup data ────────────────────────
+def get_all_backup_data():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT seq, data_type, payload FROM backup_data ORDER BY seq ASC')
+    rows = cursor.fetchall()
+    conn.close()
+    return [{'seq': r[0], 'type': r[1], 'payload': json.loads(r[2])} for r in rows]
 
+# ─── Cập nhật ready count ───────────────────────────
+def update_ready_count():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE sync_state 
+        SET ready_count = ready_count + 1,
+            last_ready_time = datetime('now')
+        WHERE id = 1
+    ''')
+    cursor.execute('SELECT ready_count FROM sync_state WHERE id = 1')
+    count = cursor.fetchone()[0]
+    conn.commit()
+    conn.close()
+    return count
 
-def push_backup_to_main():
-    """Đẩy backup về main server"""
-    if not MAIN_SERVERS:
-        logger.info('ℹ️  No MAIN_SERVERS to push backup to.')
-        return
-    
-    backup_data = main_backup_data or json.loads(db.get('last_backup') or '{}')
-    
-    payload = {
-        'type': 'FULL_BACKUP',
-        'rows': backup_data,
-        'seq': db.get('seq'),
-        'timestamp': datetime.now().isoformat(),
-        'server': 'backup'
-    }
-    
-    logger.info(f'📤 Pushing FULL_BACKUP to {len(MAIN_SERVERS)} main server(s)...')
-    
-    for main_url in MAIN_SERVERS:
-        try:
-            if not main_url.startswith('http'):
-                main_url = f'http://{main_url}'
-            
-            resp = requests.post(
-                f'{main_url}/api/backup/receive',
-                json=payload,
-                headers={
-                    'Content-Type': 'application/json',
-                    'X-Backup-Token': BACKUP_TOKENS[0] if BACKUP_TOKENS else 'chocohub-default-token'
-                },
-                timeout=10
-            )
-            
-            if resp.status_code == 200:
-                logger.info(f'✅ Backup pushed to {main_url}')
-                db.set('backup_status', 'pushed')
-            else:
-                logger.error(f'❌ Push failed to {main_url}: HTTP {resp.status_code}')
-        except Exception as e:
-            logger.error(f'❌ Push error to {main_url}: {e}')
+# ─── Reset ready count ──────────────────────────────
+def reset_ready_count():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('UPDATE sync_state SET ready_count = 0 WHERE id = 1')
+    conn.commit()
+    conn.close()
 
+# ═══════════════════════════════════════════════════════
+# FLASK ROUTES – Nhận sync từ server.js
+# ═══════════════════════════════════════════════════════
 
-def handle_ready_message():
-    """Xử lý READY, trả về response và kiểm tra có cần push không"""
-    count = db.increment_ready()
-    logger.info(f'📥 READY received (count: {count}/2)')
-    
-    response = {
-        'type': 'READY_ACK',
-        'seq': db.get('seq'),
-        'ready_count': count
-    }
-    
-    # Nếu nhận READY 2 lần → push backup
-    if count >= 2:
-        logger.info('🎯 READY received 2 times! Triggering backup push...')
-        db.reset_ready()
-        threading.Thread(target=push_backup_to_main, daemon=True).start()
-        response['message'] = 'Backup will be pushed to main servers'
-    
-    return response
-
-
-# ==================== HTTP Server ====================
-class BackupHTTPHandler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
-        logger.debug(f'HTTP: {args[0]}')
-    
-    def _send_json(self, data, status=200):
-        self.send_response(status)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, ngrok-skip-browser-warning, X-Backup-Token')
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
-    
-    def do_OPTIONS(self):
-        self._send_json({})
-    
-    def do_GET(self):
-        if self.path == '/health':
-            self._send_json({
-                'status': 'ok',
-                'seq': db.get('seq'),
-                'ready_count': db.get_ready_count(),
-                'backup_status': db.get('backup_status'),
-                'main_servers': len(MAIN_SERVERS),
-                'time': datetime.now().isoformat()
-            })
-        elif self.path == '/backup/status':
-            self._send_json({
-                'status': db.get('backup_status'),
-                'seq': db.get('seq'),
-                'ready_count': db.get_ready_count(),
-                'has_data': main_backup_data is not None,
-                'main_servers': MAIN_SERVERS
-            })
-        else:
-            self._send_json({'error': 'Not found'}, 404)
-    
-    def do_POST(self):
-        if self.path in ['/api/backup/sync', '/api/backup/receive']:
-            content_length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(content_length).decode() if content_length > 0 else '{}'
-            
-            try:
-                msg = json.loads(body)
-                logger.info(f'📥 [HTTP] Received: {msg.get("type", "unknown")}')
-                
-                # Xác thực token
-                token = msg.get('token') or self.headers.get('X-Backup-Token')
-                if token and token not in BACKUP_TOKENS:
-                    self._send_json({'type': 'ERROR', 'message': 'Invalid token'}, 403)
-                    return
-                
-                response = {}
-                
-                if msg.get('type') == 'READY':
-                    response = handle_ready_message()
-                    
-                elif msg.get('type') == 'FULL_BACKUP':
-                    logger.info('📥 Receiving FULL_BACKUP from main server...')
-                    if msg.get('rows'):
-                        global main_backup_data
-                        main_backup_data = msg['rows']
-                        db.set('last_backup', json.dumps(msg['rows']))
-                        db.set('seq', str(msg.get('seq', int(time.time() * 1000))))
-                        db.set('backup_status', 'received')
-                    response = {'type': 'BACKUP_ACK', 'status': 'saved', 'seq': db.get('seq')}
-                    
-                elif msg.get('type') == 'POLL':
-                    response = {'type': 'POLL_ACK', 'seq': db.get('seq')}
-                    
-                elif msg.get('type') == 'DELTA':
-                    logger.info('📥 Receiving DELTA...')
-                    response = {'type': 'DELTA_ACK', 'seq': db.get('seq')}
-                    
-                else:
-                    response = {'type': 'UNKNOWN', 'message': f"Unknown type: {msg.get('type')}"}
-                
-                self._send_json(response)
-                
-            except json.JSONDecodeError:
-                self._send_json({'type': 'ERROR', 'message': 'Invalid JSON'}, 400)
-        
-        elif self.path == '/backup/push':
-            threading.Thread(target=push_backup_to_main, daemon=True).start()
-            self._send_json({'status': 'pushing', 'message': 'Backup push initiated'})
-        
-        else:
-            self._send_json({'error': 'Not found'}, 404)
-
-
-# ==================== TCP Server ====================
-def handle_tcp_client(client_socket, client_address):
-    """Xử lý TCP client"""
-    client_info = f'{client_address[0]}:{client_address[1]}'
-    logger.info(f'🔌 [TCP] New connection: {client_info}')
-    
-    authenticated = False
-    buffer = ''
-    
+@app.route('/api/backup/sync', methods=['POST'])
+def receive_sync():
+    """Nhận READY, PING, DELTA từ main server"""
     try:
-        while True:
-            data = client_socket.recv(4096)
-            if not data:
-                break
+        data = request.get_json()
+        if not data:
+            return jsonify({'status': 'error', 'message': 'No data'}), 400
+        
+        msg_type = data.get('type', 'UNKNOWN')
+        token = data.get('token', '')
+        seq = data.get('seq', 0)
+        
+        print(f'📥 Received: type={msg_type}, seq={seq}')
+        
+        # Verify token
+        if token != BACKUP_TOKEN:
+            return jsonify({'status': 'error', 'message': 'Invalid token'}), 401
+        
+        if msg_type == 'READY':
+            # Đếm số lần READY
+            count = update_ready_count()
+            print(f'🔔 READY received (count: {count}/{MAX_READY_RETRIES})')
             
-            buffer += data.decode()
-            lines = buffer.split('\n')
-            buffer = lines.pop()
+            # Lưu backup
+            save_backup(seq, 'READY', data)
             
-            for line in lines:
-                if not line.strip():
-                    continue
-                
-                try:
-                    msg = json.loads(line)
-                    
-                    if not authenticated:
-                        if msg.get('type') == 'READY' and msg.get('token') in BACKUP_TOKENS:
-                            authenticated = True
-                            response = handle_ready_message()
-                            client_socket.send((json.dumps(response) + '\n').encode())
-                            logger.info(f'✅ [TCP] {client_info} authenticated')
-                        else:
-                            client_socket.send((json.dumps({'type': 'ERROR', 'message': 'Invalid token'}) + '\n').encode())
-                            client_socket.close()
-                            return
-                    else:
-                        if msg.get('type') == 'DELTA':
-                            client_socket.send((json.dumps({'type': 'DELTA_ACK', 'seq': db.get('seq')}) + '\n').encode())
-                        else:
-                            client_socket.send((json.dumps({'type': 'UNKNOWN', 'message': f"Unknown: {msg.get('type')}"}) + '\n').encode())
-                            
-                except json.JSONDecodeError:
-                    logger.error(f'❌ Parse error: {line[:100]}')
-                    
+            # Nếu READY >= MAX_READY_RETRIES lần → server vừa restart
+            if count >= MAX_READY_RETRIES:
+                print('🔄 Detected server restart! Will send backup...')
+                # Reset count để tránh gửi lại liên tục
+                reset_ready_count()
+                # Trigger gửi backup trong background
+                threading.Thread(target=send_full_backup_to_server, daemon=True).start()
+            
+            return jsonify({
+                'type': 'READY_ACK',
+                'seq': seq,
+                'status': 'success'
+            })
+        
+        elif msg_type == 'PING':
+            # Heartbeat – reset ready count vì server vẫn alive
+            reset_ready_count()
+            return jsonify({
+                'type': 'PONG',
+                'seq': seq,
+                'timestamp': datetime.now().isoformat()
+            })
+        
+        elif msg_type == 'DELTA':
+            # Nhận delta update
+            save_backup(seq, 'DELTA', data)
+            return jsonify({
+                'type': 'DELTA_ACK',
+                'seq': seq
+            })
+        
+        elif msg_type == 'FULL_BACKUP':
+            # Nhận full backup từ server (nếu có)
+            save_backup(seq, 'FULL_BACKUP', data)
+            return jsonify({
+                'type': 'BACKUP_ACK',
+                'seq': seq
+            })
+        
+        else:
+            print(f'⚠️ Unknown message type: {msg_type}')
+            return jsonify({'status': 'error', 'message': f'Unknown type: {msg_type}'}), 400
+            
     except Exception as e:
-        logger.error(f'❌ [TCP] Socket error ({client_info}): {e}')
-    finally:
-        logger.info(f'🔌 [TCP] Disconnected: {client_info}')
-        client_socket.close()
+        print(f'❌ Error processing sync: {e}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@app.route('/api/backup/status', methods=['GET'])
+def backup_status():
+    """Kiểm tra trạng thái backup server"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT last_seq, last_ready_time, ready_count FROM sync_state WHERE id = 1')
+    state = cursor.fetchone()
+    cursor.execute('SELECT COUNT(*) FROM backup_data')
+    total_backups = cursor.fetchone()[0]
+    conn.close()
+    
+    return jsonify({
+        'status': 'ok',
+        'last_seq': state[0] if state else 0,
+        'last_ready_time': state[1] if state else None,
+        'ready_count': state[2] if state else 0,
+        'total_backups': total_backups,
+        'main_server': MAIN_SERVER_URL
+    })
 
-def start_tcp_server():
-    """Khởi động TCP server"""
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(('0.0.0.0', TCP_PORT))
-    server.listen(5)
-    logger.info(f'🔌 TCP Backup server on port {TCP_PORT}')
+@app.route('/api/backup/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat()
+    })
+
+# ═══════════════════════════════════════════════════════
+# GỬI BACKUP LÊN MAIN SERVER
+# ═══════════════════════════════════════════════════════
+
+def send_full_backup_to_server():
+    """Gửi toàn bộ backup data lên main server khi phát hiện server restart"""
+    try:
+        print(f'📤 Sending full backup to {MAIN_SERVER_URL}...')
+        
+        backup_data = get_all_backup_data()
+        if not backup_data:
+            print('⚠️ No backup data to send')
+            return
+        
+        latest = get_latest_backup()
+        
+        payload = {
+            'type': 'FULL_BACKUP',
+            'token': BACKUP_TOKEN,
+            'seq': latest['seq'] if latest else 0,
+            'rows': backup_data,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Gửi qua HTTP POST đến main server
+        response = requests.post(
+            f'{MAIN_SERVER_URL}/api/backup/sync',
+            json=payload,
+            headers={
+                'Content-Type': 'application/json',
+                'User-Agent': 'ChocoHub-BackupServer/1.0'
+            },
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            print(f'✅ Backup sent successfully to {MAIN_SERVER_URL}')
+            print(f'   Response: {response.json()}')
+        else:
+            print(f'❌ Failed to send backup. Status: {response.status_code}')
+            print(f'   Response: {response.text[:200]}')
+            
+    except requests.exceptions.RequestException as e:
+        print(f'❌ Error sending backup: {e}')
+    except Exception as e:
+        print(f'❌ Unexpected error: {e}')
+
+def check_main_server():
+    """Kiểm tra main server có online không"""
+    try:
+        response = requests.get(
+            f'{MAIN_SERVER_URL}/api/test',
+            timeout=5
+        )
+        return response.status_code == 200
+    except:
+        return False
+
+# ═══════════════════════════════════════════════════════
+# MONITORING THREAD – Theo dõi main server
+# ═══════════════════════════════════════════════════════
+
+def monitor_main_server():
+    """Background thread: Kiểm tra main server định kỳ"""
+    print(f'🔍 Starting server monitor (check every {CHECK_INTERVAL}s)...')
+    print(f'   Main server: {MAIN_SERVER_URL}')
+    
+    was_down = False
     
     while True:
-        client_socket, client_address = server.accept()
-        thread = threading.Thread(target=handle_tcp_client, args=(client_socket, client_address), daemon=True)
-        thread.start()
+        time.sleep(CHECK_INTERVAL)
+        
+        is_online = check_main_server()
+        
+        if not is_online and not was_down:
+            print(f'🔴 Main server appears DOWN at {datetime.now().strftime("%H:%M:%S")}')
+            was_down = True
+        elif is_online and was_down:
+            print(f'🟢 Main server is BACK ONLINE at {datetime.now().strftime("%H:%M:%S")}')
+            print('🔄 Server just recovered – sending backup...')
+            was_down = False
+            send_full_backup_to_server()
+        elif is_online:
+            # Server vẫn online – reset ready count
+            reset_ready_count()
 
-
-# ==================== Main ====================
-def main():
-    print('╔══════════════════════════════════════╗')
-    print('║   CHOCO HUB - BACKUP SERVER (Py)    ║')
-    print('╚══════════════════════════════════════╝')
-    
-    # HTTP Server
-    if HTTP_PORT:
-        httpd = HTTPServer(('0.0.0.0', HTTP_PORT), BackupHTTPHandler)
-        logger.info(f'🌐 HTTP Backup server on port {HTTP_PORT}')
-        logger.info(f'   Health: http://localhost:{HTTP_PORT}/health')
-        http_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-        http_thread.start()
-    
-    # TCP Server
-    if TCP_PORT:
-        tcp_thread = threading.Thread(target=start_tcp_server, daemon=True)
-        tcp_thread.start()
-    
-    logger.info(f'🔐 Tokens: {", ".join(BACKUP_TOKENS) if BACKUP_TOKENS else "(none)"}')
-    logger.info(f'💾 DB: {DB_PATH}')
-    logger.info(f'📡 Main servers: {", ".join(MAIN_SERVERS) if MAIN_SERVERS else "(none - will only receive, not push)"}')
-    print('')
-    
-    # Auto-fetch từ main server
-    if MAIN_SERVERS:
-        time.sleep(2)
-        fetch_from_main_servers()
-        # Fetch định kỳ
-        def periodic_fetch():
-            while True:
-                time.sleep(60)
-                fetch_from_main_servers()
-        threading.Thread(target=periodic_fetch, daemon=True).start()
-    
-    # Giữ main thread alive
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print('\n🛑 Shutting down...')
-        db.close()
-        sys.exit(0)
-
+# ═══════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════
 
 if __name__ == '__main__':
-    main()
+    print('')
+    print('╔══════════════════════════════════════╗')
+    print('║   CHOCO HUB - BACKUP SERVER         ║')
+    print('╠══════════════════════════════════════╣')
+    print(f'║  Port: {BACKUP_PORT}                         ║')
+    print(f'║  Main Server: {MAIN_SERVER_URL[:30]}... ║')
+    print(f'║  Token: {BACKUP_TOKEN[:15]}...          ║')
+    print(f'║  Check Interval: {CHECK_INTERVAL}s                  ║')
+    print(f'║  Max Ready Retries: {MAX_READY_RETRIES}                ║')
+    print('╚══════════════════════════════════════╝')
+    print('')
+    
+    # Khởi tạo database
+    init_db()
+    
+    # Bắt đầu monitor thread
+    monitor_thread = threading.Thread(target=monitor_main_server, daemon=True)
+    monitor_thread.start()
+    
+    # Chạy Flask server
+    app.run(
+        host='0.0.0.0',
+        port=BACKUP_PORT,
+        debug=False
+    )
