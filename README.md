@@ -2,20 +2,10 @@
 
 # 🍫 ChocoHub
 
-<table width="100%">
-  <tr>
-    <td align="center" width="50%">
-      <a href="https://chocohub-r011.onrender.com/">
-        <img src="https://img.shields.io/badge/🌐_Official_Website-ChocoHub-7B3F00?style=for-the-badge&logo=render&logoColor=white" width="100%">
-      </a>
-    </td>
-    <td align="center" width="50%">
-      <a href="https://discord.gg/sztTse9p">
-        <img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white&labelColor=5865F2" width="100%">
-      </a>
-    </td>
-  </tr>
-</table>
+| [🌐 Official Website](https://chocohub-r011.onrender.com/) | [💬 Join Discord](https://discord.gg/sztTse9p) |
+| :---: | :---: |
+
+</div>
 
 </div>
 
