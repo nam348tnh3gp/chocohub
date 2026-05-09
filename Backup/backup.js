@@ -1,279 +1,393 @@
-// backupServer.js – Backup server for ChocoHub (Hybrid PoW+PoS)
-require('dotenv').config();
+// backup.js – Backup server for ChocoHub
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const net = require('net');
 const http = require('http');
 const Database = require('better-sqlite3');
 const path = require('path');
-const crypto = require('crypto');
 
 // ---------- Configuration ----------
-const BACKUP_PORT = process.env.BACKUP_PORT ? parseInt(process.env.BACKUP_PORT) : null;
-const HTTP_PORT = process.env.HTTP_PORT ? parseInt(process.env.HTTP_PORT) : null;
+const TCP_PORT = parseInt(process.env.TCP_PORT) || 3001;
+const HTTP_PORT = parseInt(process.env.HTTP_PORT) || 3001;
 const ALLOWED_TOKENS = (process.env.BACKUP_TOKENS || 'chocohub-default-token')
   .split(',')
   .map(t => t.trim())
   .filter(Boolean);
 const DB_PATH = process.env.BACKUP_DB_PATH || path.join(__dirname, 'backup.db');
-
-// Check ít nhất 1 server được bật
-if (!BACKUP_PORT && !HTTP_PORT) {
-  console.error('❌ No server configured! Set BACKUP_PORT and/or HTTP_PORT in .env');
-  process.exit(1);
-}
-
-if (ALLOWED_TOKENS.length === 0) {
-  console.warn('⚠️  No backup tokens configured. Use BACKUP_TOKENS env.');
-}
+const MAIN_SERVERS = (process.env.MAIN_SERVERS || '')
+  .split(',')
+  .filter(Boolean)
+  .map(url => url.trim());
 
 // ---------- Database ----------
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    pin_hash TEXT NOT NULL,
-    balance REAL DEFAULT 0
+  CREATE TABLE IF NOT EXISTS backup_data (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT DEFAULT (datetime('now'))
   );
-  CREATE TABLE IF NOT EXISTS bounties (
-    id TEXT PRIMARY KEY,
-    creator_username TEXT,
-    target_device TEXT,
-    difficulty INTEGER,
-    reward REAL,
-    cost REAL,
-    binary_target TEXT,
-    last_hash TEXT,
-    nonce TEXT,
-    solver_username TEXT,
-    status TEXT DEFAULT 'active',
-    created_at TEXT DEFAULT (datetime('now'))
-  );
-  CREATE TABLE IF NOT EXISTS snake_claims (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT,
-    apples INTEGER,
-    mode TEXT,
-    reward REAL,
-    claimed_at TEXT DEFAULT (datetime('now'))
-  );
-  CREATE TABLE IF NOT EXISTS blocks_mined (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT,
-    bounty_id TEXT,
-    reward REAL,
-    mined_at TEXT DEFAULT (datetime('now'))
-  );
-  CREATE TABLE IF NOT EXISTS stakes (
-    username TEXT PRIMARY KEY,
-    amount REAL NOT NULL DEFAULT 0,
-    pending_reward REAL NOT NULL DEFAULT 0,
-    last_reward_block INTEGER DEFAULT 0
-  );
-  CREATE TABLE IF NOT EXISTS sync_seq (
-    id INTEGER PRIMARY KEY CHECK(id = 1),
-    seq INTEGER NOT NULL DEFAULT 0
-  );
-  INSERT OR IGNORE INTO sync_seq (id, seq) VALUES (1, 0);
+  INSERT OR IGNORE INTO backup_data (key, value) VALUES ('seq', '0');
+  INSERT OR IGNORE INTO backup_data (key, value) VALUES ('ready_count', '0');
+  INSERT OR IGNORE INTO backup_data (key, value) VALUES ('last_backup', '');
+  INSERT OR IGNORE INTO backup_data (key, value) VALUES ('backup_status', 'idle');
 `);
 
-// Helper: get current sequence
-function getSeq() {
-  const row = db.prepare('SELECT seq FROM sync_seq WHERE id = 1').get();
-  return row ? row.seq : 0;
+// ---------- Helpers ----------
+function getBackupValue(key) {
+  const row = db.prepare('SELECT value FROM backup_data WHERE key = ?').get(key);
+  return row ? row.value : '0';
 }
 
-function setSeq(newSeq) {
-  db.prepare('UPDATE sync_seq SET seq = ? WHERE id = 1').run(newSeq);
+function setBackupValue(key, value) {
+  db.prepare('INSERT OR REPLACE INTO backup_data (key, value) VALUES (?, ?)').run(key, String(value));
 }
 
-// ---------- Full backup exporter ----------
-function gatherFullBackup() {
-  return {
-    users: db.prepare('SELECT * FROM users').all(),
-    bounties: db.prepare('SELECT * FROM bounties').all(),
-    snake_claims: db.prepare('SELECT * FROM snake_claims').all(),
-    blocks_mined: db.prepare('SELECT * FROM blocks_mined').all(),
-    stakes: db.prepare('SELECT * FROM stakes').all()
-  };
+function getReadyCount() {
+  return parseInt(getBackupValue('ready_count')) || 0;
 }
 
-// ---------- Message Processing (dùng chung) ----------
-function handleReady(msg) {
-  const currentSeq = getSeq();
-  const response = { type: 'READY_ACK', seq: currentSeq };
+function incrementReady() {
+  const count = getReadyCount() + 1;
+  setBackupValue('ready_count', count);
+  return count;
+}
 
-  if (msg.empty && currentSeq > 0) {
-    response.full_backup = gatherFullBackup();
-    response.full_backup_seq = currentSeq;
+function resetReady() {
+  setBackupValue('ready_count', '0');
+}
+
+// ---------- Lấy dữ liệu từ main server (nếu có config) ----------
+let mainBackupData = null;
+
+function fetchFromMainServers() {
+  if (MAIN_SERVERS.length === 0) {
+    console.log('ℹ️  No MAIN_SERVERS configured. Waiting for data push...');
+    return;
   }
 
-  return response;
+  console.log(`🔄 Fetching data from ${MAIN_SERVERS.length} main server(s)...`);
+  
+  MAIN_SERVERS.forEach(mainUrl => {
+    try {
+      const url = new URL(mainUrl.startsWith('http') ? mainUrl : `http://${mainUrl}`);
+      const options = {
+        hostname: url.hostname,
+        port: url.port || 3000,
+        path: '/network_status',
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      };
+      const httpModule = url.protocol === 'https:' ? require('https') : http;
+
+      const req = httpModule.request(options, (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk);
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(body);
+            mainBackupData = data;
+            setBackupValue('last_backup', JSON.stringify(data));
+            setBackupValue('seq', String(Date.now()));
+            setBackupValue('backup_status', 'synced');
+            const now = new Date().toISOString();
+            console.log(`✅ [${now}] Fetched data from ${url.hostname}:${url.port}`);
+          } catch (e) {
+            console.error(`❌ Parse error from ${mainUrl}:`, e.message);
+          }
+        });
+      });
+
+      req.on('error', (err) => {
+        console.error(`❌ Fetch error from ${mainUrl}:`, err.message);
+      });
+
+      req.setTimeout(5000, () => {
+        req.destroy();
+        console.error(`⏰ Timeout fetching from ${mainUrl}`);
+      });
+
+      req.end();
+    } catch (e) {
+      console.error(`❌ URL parse error for ${mainUrl}:`, e.message);
+    }
+  });
 }
 
-function handlePoll(msg) {
-  return { type: 'POLL_ACK', seq: getSeq() };
+// ---------- Gửi backup về main server ----------
+function pushBackupToMain() {
+  if (MAIN_SERVERS.length === 0) {
+    console.log('ℹ️  No MAIN_SERVERS to push backup to.');
+    return;
+  }
+
+  const backupPayload = {
+    type: 'FULL_BACKUP',
+    rows: mainBackupData || JSON.parse(getBackupValue('last_backup') || '{}'),
+    seq: getBackupValue('seq'),
+    timestamp: new Date().toISOString(),
+    server: 'backup'
+  };
+
+  console.log(`📤 Pushing FULL_BACKUP to ${MAIN_SERVERS.length} main server(s)...`);
+
+  MAIN_SERVERS.forEach(mainUrl => {
+    try {
+      const url = new URL(mainUrl.startsWith('http') ? mainUrl : `http://${mainUrl}`);
+      const options = {
+        hostname: url.hostname,
+        port: url.port || 3000,
+        path: '/api/backup/receive',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Backup-Token': ALLOWED_TOKENS[0] || 'chocohub-default-token'
+        }
+      };
+      const httpModule = url.protocol === 'https:' ? require('https') : http;
+
+      const req = httpModule.request(options, (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk);
+        res.on('end', () => {
+          if (res.statusCode === 200) {
+            console.log(`✅ Backup pushed to ${url.hostname}:${url.port}`);
+            setBackupValue('backup_status', 'pushed');
+          } else {
+            console.error(`❌ Push failed to ${url.hostname}:${url.port} (${res.statusCode}):`, body.substring(0, 100));
+          }
+        });
+      });
+
+      req.on('error', (err) => {
+        console.error(`❌ Push error to ${mainUrl}:`, err.message);
+      });
+
+      req.setTimeout(5000, () => {
+        req.destroy();
+        console.error(`⏰ Push timeout to ${mainUrl}`);
+      });
+
+      req.write(JSON.stringify(backupPayload));
+      req.end();
+    } catch (e) {
+      console.error(`❌ URL parse error for push ${mainUrl}:`, e.message);
+    }
+  });
 }
 
 // ==================== HTTP Server ====================
-if (HTTP_PORT) {
-  const httpServer = http.createServer((req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, ngrok-skip-browser-warning');
+const httpServer = http.createServer((req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, ngrok-skip-browser-warning, X-Backup-Token');
 
-    if (req.method === 'OPTIONS') {
-      res.writeHead(200);
-      res.end();
-      return;
-    }
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
 
-    if (req.method === 'POST' && req.url === '/api/backup/sync') {
-      let body = '';
-      req.on('data', chunk => body += chunk);
-      req.on('end', () => {
-        try {
-          const msg = JSON.parse(body);
-          console.log(`📥 [HTTP] Received: ${msg.type} (token: ${msg.token ? 'yes' : 'no'})`);
+  // Health check
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: 'ok',
+      seq: getBackupValue('seq'),
+      ready_count: getReadyCount(),
+      backup_status: getBackupValue('backup_status'),
+      main_servers: MAIN_SERVERS.length,
+      time: new Date().toISOString()
+    }));
+    return;
+  }
 
-          if (msg.token && !ALLOWED_TOKENS.includes(msg.token)) {
-            res.writeHead(403, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ type: 'ERROR', message: 'Invalid token' }));
-            return;
-          }
+  // Nhận backup từ main server
+  if ((req.method === 'POST') && (req.url === '/api/backup/sync' || req.url === '/api/backup/receive')) {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const msg = JSON.parse(body);
+        console.log(`📥 [HTTP] Received: ${msg.type}`);
 
-          let response;
-          switch (msg.type) {
-            case 'READY':
-              response = handleReady(msg);
-              console.log(`✅ [HTTP] READY from client (seq=${msg.seq}, empty=${msg.empty})`);
-              if (response.full_backup) {
-                console.log(`📤 [HTTP] Sending FULL_BACKUP (seq=${response.full_backup_seq})`);
-              }
-              break;
-            case 'POLL':
-              response = handlePoll(msg);
-              break;
-            default:
-              response = { type: 'UNKNOWN', message: `Unknown type: ${msg.type}` };
-          }
-
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(response));
-        } catch (e) {
-          console.error('❌ [HTTP] Invalid JSON:', body.substring(0, 100));
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ type: 'ERROR', message: 'Invalid JSON' }));
+        // Xác thực token
+        const token = msg.token || req.headers['x-backup-token'];
+        if (token && !ALLOWED_TOKENS.includes(token)) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ type: 'ERROR', message: 'Invalid token' }));
+          return;
         }
-      });
-      return;
-    }
 
-    if (req.url === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', seq: getSeq() }));
-      return;
-    }
+        let response;
 
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ type: 'ERROR', message: 'Not found' }));
-  });
+        switch (msg.type) {
+          case 'READY':
+            const count = incrementReady();
+            console.log(`📥 READY received (count: ${count}/2)`);
+            response = { type: 'READY_ACK', seq: getBackupValue('seq'), ready_count: count };
 
-  httpServer.listen(HTTP_PORT, () => {
-    console.log(`🌐 HTTP Backup server listening on port ${HTTP_PORT}`);
-    console.log(`   Endpoint: POST http://localhost:${HTTP_PORT}/api/backup/sync`);
-  });
+            // Nếu nhận READY 2 lần → push backup về main
+            if (count >= 2) {
+              console.log('🎯 READY received 2 times! Triggering backup push...');
+              resetReady();
+              // Đẩy backup sau 1 giây để đảm bảo response READY_ACK đã gửi
+              setTimeout(() => pushBackupToMain(), 1000);
+              response.message = 'Backup will be pushed to main servers';
+            }
+            break;
 
-  // Lưu reference để shutdown
-  var httpServerRef = httpServer;
-}
+          case 'FULL_BACKUP':
+            // Nhận backup từ main server → lưu lại
+            console.log('📥 Receiving FULL_BACKUP from main server...');
+            if (msg.rows) {
+              mainBackupData = msg.rows;
+              setBackupValue('last_backup', JSON.stringify(msg.rows));
+              setBackupValue('seq', String(msg.seq || Date.now()));
+              setBackupValue('backup_status', 'received');
+            }
+            response = { type: 'BACKUP_ACK', status: 'saved', seq: getBackupValue('seq') };
+            break;
 
-// ==================== TCP Server ====================
-if (BACKUP_PORT) {
-  const tcpServer = net.createServer((socket) => {
-    let authenticated = false;
-    let clientInfo = `${socket.remoteAddress}:${socket.remotePort}`;
+          case 'DELTA':
+            console.log('📥 Receiving DELTA...');
+            response = { type: 'DELTA_ACK', seq: getBackupValue('seq') };
+            break;
 
-    console.log(`🔌 [TCP] New connection: ${clientInfo}`);
-
-    let buffer = '';
-    socket.on('data', (data) => {
-      buffer += data.toString();
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const msg = JSON.parse(line);
-          handleTcpMessage(socket, msg, clientInfo);
-        } catch (e) {
-          console.error(`❌ Invalid JSON from ${clientInfo}:`, line.substring(0, 100));
+          default:
+            response = { type: 'UNKNOWN', message: `Unknown type: ${msg.type}` };
         }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(response));
+      } catch (e) {
+        console.error('❌ Invalid JSON:', body.substring(0, 100));
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ type: 'ERROR', message: 'Invalid JSON' }));
       }
     });
+    return;
+  }
 
-    socket.on('close', () => {
-      console.log(`🔌 [TCP] Disconnected: ${clientInfo}`);
-    });
+  // Trạng thái backup
+  if (req.url === '/backup/status') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: getBackupValue('backup_status'),
+      seq: getBackupValue('seq'),
+      ready_count: getReadyCount(),
+      has_data: !!mainBackupData,
+      main_servers: MAIN_SERVERS
+    }));
+    return;
+  }
 
-    socket.on('error', (err) => {
-      console.error(`❌ [TCP] Socket error (${clientInfo}): ${err.message}`);
-    });
+  // Force push backup
+  if (req.url === '/backup/push' && req.method === 'POST') {
+    pushBackupToMain();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'pushing', message: 'Backup push initiated' }));
+    return;
+  }
 
-    function handleTcpMessage(socket, msg, clientInfo) {
-      if (!authenticated) {
-        if (msg.type === 'READY' && msg.token) {
-          if (ALLOWED_TOKENS.includes(msg.token)) {
+  res.writeHead(404, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ type: 'ERROR', message: 'Not found' }));
+});
+
+httpServer.listen(HTTP_PORT, () => {
+  console.log(`🌐 HTTP Backup server on port ${HTTP_PORT}`);
+  console.log(`   Health: http://localhost:${HTTP_PORT}/health`);
+});
+
+// ==================== TCP Server ====================
+const tcpServer = net.createServer((socket) => {
+  let authenticated = false;
+  let clientInfo = `${socket.remoteAddress}:${socket.remotePort}`;
+
+  console.log(`🔌 [TCP] New connection: ${clientInfo}`);
+
+  let buffer = '';
+  socket.on('data', (data) => {
+    buffer += data.toString();
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const msg = JSON.parse(line);
+        
+        if (!authenticated) {
+          if (msg.type === 'READY' && msg.token && ALLOWED_TOKENS.includes(msg.token)) {
             authenticated = true;
-            const response = handleReady(msg);
-            socket.write(JSON.stringify({ type: 'READY_ACK', seq: response.seq }) + '\n');
+            const count = incrementReady();
+            console.log(`✅ [TCP] ${clientInfo} authenticated (READY count: ${count}/2)`);
             
-            if (response.full_backup) {
-              socket.write(JSON.stringify({
-                type: 'FULL_BACKUP',
-                rows: response.full_backup,
-                seq: response.full_backup_seq
-              }) + '\n');
-              console.log(`📤 [TCP] Sent FULL_BACKUP to ${clientInfo}`);
+            socket.write(JSON.stringify({ 
+              type: 'READY_ACK', 
+              seq: getBackupValue('seq'), 
+              ready_count: count 
+            }) + '\n');
+
+            // READY 2 lần → push backup
+            if (count >= 2) {
+              console.log('🎯 [TCP] READY 2 times! Pushing backup...');
+              resetReady();
+              setTimeout(() => pushBackupToMain(), 1000);
             }
-            console.log(`✅ [TCP] ${clientInfo} authenticated`);
           } else {
             socket.write(JSON.stringify({ type: 'ERROR', message: 'Invalid token' }) + '\n');
             socket.end();
           }
-        }
-        return;
-      }
-
-      switch (msg.type) {
-        case 'DELTA':
-          if (Array.isArray(msg.changes)) {
-            const maxSeq = Math.max(...msg.changes.map(c => c.seq || 0));
-            if (maxSeq > getSeq()) setSeq(maxSeq);
+        } else {
+          // Đã authenticate → xử lý message
+          switch (msg.type) {
+            case 'DELTA':
+              socket.write(JSON.stringify({ type: 'DELTA_ACK', seq: getBackupValue('seq') }) + '\n');
+              break;
+            default:
+              socket.write(JSON.stringify({ type: 'UNKNOWN', message: `Unknown: ${msg.type}` }) + '\n');
           }
-          socket.write(JSON.stringify({ type: 'DELTA_ACK', seq: getSeq() }) + '\n');
-          break;
-        default:
-          console.log(`❓ Unknown TCP message: ${msg.type}`);
+        }
+      } catch (e) {
+        console.error(`❌ Parse error: ${line.substring(0, 100)}`);
       }
     }
   });
 
-  tcpServer.listen(BACKUP_PORT, () => {
-    console.log(`🔌 TCP Backup server listening on port ${BACKUP_PORT}`);
-    console.log(`🔐 Allowed tokens: ${ALLOWED_TOKENS.join(', ') || '(none)'}`);
-    console.log(`💾 Database: ${DB_PATH}`);
+  socket.on('close', () => {
+    console.log(`🔌 [TCP] Disconnected: ${clientInfo}`);
   });
+  socket.on('error', (err) => {
+    console.error(`❌ [TCP] Socket error: ${err.message}`);
+  });
+});
 
-  var tcpServerRef = tcpServer;
+tcpServer.listen(TCP_PORT, () => {
+  console.log(`🔌 TCP Backup server on port ${TCP_PORT}`);
+  console.log(`🔐 Tokens: ${ALLOWED_TOKENS.join(', ') || '(none)'}`);
+  console.log(`💾 DB: ${DB_PATH}`);
+  console.log(`📡 Main servers: ${MAIN_SERVERS.length > 0 ? MAIN_SERVERS.join(', ') : '(none - will only receive, not push)'}`);
+  console.log('');
+});
+
+// ==================== Auto-fetch từ main server ====================
+if (MAIN_SERVERS.length > 0) {
+  // Fetch ngay khi start
+  setTimeout(fetchFromMainServers, 2000);
+  // Fetch định kỳ mỗi 60 giây
+  setInterval(fetchFromMainServers, 60000);
 }
 
-// ---------- Graceful Shutdown ----------
+// ==================== Graceful Shutdown ====================
 process.on('SIGINT', () => {
-  console.log('\nShutting down backup server...');
+  console.log('\n🛑 Shutting down...');
   db.close();
-  if (tcpServerRef) tcpServerRef.close();
-  if (httpServerRef) httpServerRef.close();
+  tcpServer.close();
+  httpServer.close();
   process.exit(0);
 });
+
+console.log('╔══════════════════════════════════════╗');
+console.log('║   CHOCO HUB - BACKUP SERVER         ║');
+console.log('╚══════════════════════════════════════╝');
