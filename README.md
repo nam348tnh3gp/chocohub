@@ -20,6 +20,3 @@
 * **Swap System (Coming Soon):** Within 1-2 weeks, we will implement a Swap system for DUCO (and maybe XNO).
 
 ---
-
-### 🛠️ Technologies
-Project built with a focus on performance and accessibility, utilizing Node.js for backend services and retro-style interfaces for the web components.
