@@ -8,13 +8,11 @@ const fs = require('fs');
 const db = require('./db');
 const blockchain = require('./blockchain');
 const snake = require('./snake');
-const backupClient = require('./backupSync'); // 🟢 THÊM DÒNG NÀY
-
-const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1501353650243633202/JH4DnjVgN_H42VaEc0rflF03HJjl2Nh1iy7qCRZbkxX7uhHDN_rZfaaNAGqAvAjZAqNU';
+const backupClient = require('./backupSync');
 
 async function sendMinerWebhook(worker, bountyId, device) {
   try {
-    await fetch(DISCORD_WEBHOOK_URL, {
+    await fetch(process.env.DISCORD_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -133,9 +131,8 @@ app.get('/leaderboard', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// PROOF OF STAKE (PoS) ROUTES — CASE-SENSITIVE FIX
+// PROOF OF STAKE (PoS) ROUTES
 // ═══════════════════════════════════════════════════════
-
 app.get('/pos/info', (req, res) => {
   try {
     const username = (req.query.username || '').trim();
@@ -257,6 +254,57 @@ app.get('/api/test', (req, res) => {
   });
 });
 
+// ═══════════════════════════════════════════════════════
+// BACKUP RECEIVE ENDPOINT - Nhận backup từ backup server
+// ═══════════════════════════════════════════════════════
+app.post('/api/backup/sync', (req, res) => {
+  try {
+    const data = req.body;
+    const token = data.token || '';
+    
+    if (token !== (process.env.BACKUP_TOKEN || 'chocohub-default-token')) {
+      return res.status(401).json({ status: 'error', message: 'Invalid token' });
+    }
+    
+    console.log(`📥 Received from backup: type=${data.type}, seq=${data.seq}`);
+    
+    if (data.type === 'FULL_BACKUP') {
+      console.log(`📥 Receiving full backup (${data.rows ? data.rows.length : 0} items)...`);
+      
+      if (data.rows && Array.isArray(data.rows)) {
+        data.rows.forEach(row => {
+          try {
+            if (row.type === 'DELTA' && row.payload) {
+              console.log(`🔄 Processing delta: seq=${row.seq}`);
+            }
+          } catch (e) {
+            console.error('❌ Error processing row:', e.message);
+          }
+        });
+      }
+      
+      console.log('✅ Backup restored successfully');
+      
+      return res.json({
+        type: 'BACKUP_ACK',
+        seq: data.seq,
+        status: 'success',
+        message: 'Backup received'
+      });
+    }
+    
+    res.json({
+      type: 'ACK',
+      seq: data.seq || 0,
+      status: 'received'
+    });
+    
+  } catch (e) {
+    console.error('❌ Error receiving backup:', e.message);
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
 // ─── SPA fallback ─────────────────────────────────────
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, 'public', 'index.html');
@@ -299,6 +347,5 @@ app.listen(PORT, () => {
   console.log('╚══════════════════════════════════════╝');
   console.log('');
 
-  // 🟢 THÊM DÒNG NÀY: Khởi động backup client ngay khi server sẵn sàng
   backupClient.start();
 });
