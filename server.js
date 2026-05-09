@@ -1,4 +1,4 @@
-// server.js - Hybrid PoW + PoS (no hunt - status validator fixed - active validators fix - leaderboard added)
+// server.js - Hybrid PoW + PoS (case-sensitive fix + all features)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -132,12 +132,13 @@ app.get('/leaderboard', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// PROOF OF STAKE (PoS) ROUTES
+// PROOF OF STAKE (PoS) ROUTES — CASE-SENSITIVE FIX
 // ═══════════════════════════════════════════════════════
 
 app.get('/pos/info', (req, res) => {
   try {
-    const username = (req.query.username || '').toLowerCase().trim();
+    // ✅ FIX: Giữ nguyên hoa/thường, không ép lowercase
+    const username = (req.query.username || '').trim();
     if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
 
     const user = db.getUser(username);
