@@ -11,13 +11,15 @@
     </td>
     <td align="center" width="50%">
       <a href="https://discord.gg/sztTse9p">
-        <img src="https://img.shields.io/badge/💬_Join_Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" width="100%">
+        <img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white&labelColor=5865F2" width="100%">
       </a>
     </td>
   </tr>
 </table>
 
 </div>
+
+---
 
 ### What is ChocoHub?
 
