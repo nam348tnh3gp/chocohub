@@ -275,27 +275,52 @@ class BackupClient {
       case 'READY_ACK':
         console.log(`✅ Backup server ${server.host}:${server.port} ack, last seq=${msg.seq}`);
         break;
+        
       case 'FULL_BACKUP':
-        if (db.getSeq() === 0) {
-          console.log(`📥 Receiving full backup (${msg.rows ? msg.rows.length : 0} items)...`);
-          this.restoreFromBackup(msg.rows || []);
-        } else {
-          console.log('⚠️ Ignoring FULL_BACKUP because local DB is not empty.');
-        }
+        console.log(`📥 Receiving full backup (${msg.rows ? msg.rows.length : 0} items)...`);
+        this.restoreFromBackup(msg.rows || []);
         break;
+        
       case 'DELTA':
         console.log(`🔄 Received delta from backup: ${msg.action || 'unknown'}`);
+        if (msg.action && msg.payload) {
+          db.applyDelta({
+            action: msg.action,
+            username: msg.username,
+            payload: msg.payload
+          });
+        }
         break;
+        
       case 'PONG':
         // Heartbeat response, không cần log
         break;
+        
       default:
         console.log('❓ Unknown message from backup:', msg.type);
     }
   }
 
   restoreFromBackup(rows) {
-    console.log('🔄 Restore function not fully implemented yet. Would restore', rows.length, 'items.');
+    console.log(`🔄 Restoring ${rows.length} items from backup...`);
+    
+    let restored = 0;
+    rows.forEach(row => {
+      try {
+        if (row.type === 'DELTA' && row.payload) {
+          db.applyDelta({
+            action: row.payload.action || row.action || 'unknown',
+            username: row.payload.username || row.username || 'unknown',
+            payload: row.payload.payload || row.payload
+          });
+          restored++;
+        }
+      } catch (e) {
+        console.error(`❌ Error restoring row: ${e.message}`);
+      }
+    });
+    
+    console.log(`✅ Restored ${restored}/${rows.length} items from backup`);
   }
 
   // ==================== Broadcast ====================
@@ -305,11 +330,58 @@ class BackupClient {
     // Gửi qua TCP
     this.sockets.forEach(({ socket }) => {
       if (!socket.destroyed) {
-        try { socket.write(data); } catch (e) {}
+        try { 
+          socket.write(data); 
+        } catch (e) {
+          console.error(`❌ TCP broadcast error: ${e.message}`);
+        }
       }
     });
 
-    // HTTP clients sẽ nhận update qua heartbeat tiếp theo
+    // Gửi qua HTTP ngay lập tức (không đợi heartbeat)
+    this.httpClients.forEach(({ server }) => {
+      this.sendDeltaHttp(server, deltaMsg);
+    });
+  }
+  
+  sendDeltaHttp(server, deltaMsg) {
+    const httpModule = server.protocol === 'https' ? https : http;
+    const payload = JSON.stringify({
+      type: 'DELTA',
+      token: server.token,
+      seq: deltaMsg.seq,
+      action: deltaMsg.action,
+      username: deltaMsg.username,
+      payload: deltaMsg.payload,
+      dbHash: deltaMsg.dbHash
+    });
+    
+    const options = {
+      hostname: server.host,
+      port: server.port,
+      path: '/api/backup/sync',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'ChocoHub-BackupClient/1.0'
+      },
+      rejectUnauthorized: false
+    };
+    
+    const req = httpModule.request(options, (res) => {
+      // Không cần xử lý response, chỉ log nếu lỗi
+      if (res.statusCode !== 200) {
+        console.error(`⚠️ HTTP delta failed: ${res.statusCode}`);
+      }
+    });
+    
+    req.on('error', (err) => {
+      console.error(`❌ HTTP delta error: ${err.message}`);
+    });
+    
+    req.setTimeout(5000);
+    req.write(payload);
+    req.end();
   }
 }
 
