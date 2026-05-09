@@ -109,9 +109,12 @@ class BackupClient {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': 'true',
-        'User-Agent': 'ChocoHub-BackupClient/1.0'
-      }
+        'ngrok-skip-browser-warning': '1',        // Bỏ qua interstitial
+        'User-Agent': 'ChocoHub-BackupClient/1.0', // Custom User-Agent
+        'Accept': 'application/json',
+        'Connection': 'keep-alive'
+      },
+      rejectUnauthorized: false // Cho phép self-signed cert nếu có
     };
 
     const doRequest = () => {
@@ -121,15 +124,30 @@ class BackupClient {
         res.on('end', () => {
           console.log(`🔗 [HTTPS] Connected to ${server.host}, status: ${res.statusCode}`);
           
-          try {
-            const msg = JSON.parse(body);
-            this.processMessage(msg, server);
-          } catch (e) {
-            console.error('❌ Invalid response from backup:', body.substring(0, 100));
+          // Xử lý redirect 3xx
+          if (res.statusCode >= 300 && res.statusCode < 400) {
+            console.log(`↪️ Redirect to: ${res.headers.location}`);
+            return;
           }
           
-          // HTTP keep-alive: gửi request tiếp theo sau 5s
-          setTimeout(() => this.pollHttp(server, doRequest), 5000);
+          if (res.statusCode === 503) {
+            console.error('❌ Ngrok gateway error - có thể header chưa đúng hoặc backend không reachable');
+            console.error('Body:', body.substring(0, 200));
+            setTimeout(() => doRequest(), RECONNECT_DELAY);
+            return;
+          }
+          
+          try {
+            if (body.trim()) {
+              const msg = JSON.parse(body);
+              this.processMessage(msg, server);
+            }
+          } catch (e) {
+            console.error('❌ Invalid response from backup:', body.substring(0, 200));
+          }
+          
+          // Poll tiếp sau 5s
+          setTimeout(() => doRequest(), 5000);
         });
       });
 
@@ -137,6 +155,14 @@ class BackupClient {
         console.error(`❌ [HTTPS] Request error (${server.host}): ${err.message}`);
         setTimeout(() => this.connect(server), RECONNECT_DELAY);
       });
+
+      req.on('timeout', () => {
+        console.error('⏰ [HTTPS] Request timeout');
+        req.destroy();
+        setTimeout(() => this.connect(server), RECONNECT_DELAY);
+      });
+
+      req.setTimeout(10000); // 10s timeout
 
       const currentSeq = db.getSeq();
       const isEmpty = currentSeq === 0;
@@ -156,50 +182,7 @@ class BackupClient {
     this.httpClients.push({ server, doRequest });
   }
 
-  pollHttp(server, doRequest) {
-    // Định kỳ kiểm tra xem có delta mới không
-    const payload = JSON.stringify({
-      type: 'POLL',
-      token: server.token,
-      seq: db.getSeq()
-    });
-    
-    const httpModule = server.protocol === 'https' ? https : http;
-    const options = {
-      hostname: server.host,
-      port: server.port,
-      path: '/api/backup/sync',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': 'true',
-        'User-Agent': 'ChocoHub-BackupClient/1.0'
-      }
-    };
-
-    const req = httpModule.request(options, (res) => {
-      let body = '';
-      res.on('data', chunk => body += chunk);
-      res.on('end', () => {
-        try {
-          if (body.trim()) {
-            const msg = JSON.parse(body);
-            this.processMessage(msg, server);
-          }
-        } catch (e) {}
-        setTimeout(() => this.pollHttp(server, doRequest), 5000);
-      });
-    });
-
-    req.on('error', () => {
-      setTimeout(() => this.connect(server), RECONNECT_DELAY);
-    });
-
-    req.write(payload);
-    req.end();
-  }
-
-  // ==================== Message Processing (chung cho cả 2 protocol) ====================
+  // ==================== Message Processing ====================
   processMessage(msg, server) {
     switch (msg.type) {
       case 'READY_ACK':
@@ -234,11 +217,7 @@ class BackupClient {
       try { socket.write(data); } catch (e) {}
     });
 
-    // Gửi qua HTTP
-    this.httpClients.forEach(({ server, doRequest }) => {
-      // HTTP clients tự poll nên không cần push real-time
-      // Nếu muốn real-time thì cần WebSocket
-    });
+    // HTTP clients tự poll nên không cần push real-time
   }
 }
 
