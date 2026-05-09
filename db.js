@@ -1,4 +1,4 @@
-// db.js – Full fix + PoS Staking support + Leaderboard (Case-Sensitive Username)
+// db.js – Full fix + PoS Staking support + Leaderboard (Case-Sensitive Username) + Backup sync
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -7,7 +7,7 @@ const path = require('path');
 const db = new Database(path.join(__dirname, 'chocohub.db'));
 db.pragma('journal_mode = WAL');
 
-// Khởi tạo bảng (thêm stakes, sửa active_validators thành dạng view sau)
+// Khởi tạo bảng
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,14 +44,12 @@ db.exec(`
     reward REAL,
     mined_at TEXT DEFAULT (datetime('now'))
   );
-  -- Bảng staking PoS
   CREATE TABLE IF NOT EXISTS stakes (
     username TEXT PRIMARY KEY,
     amount REAL NOT NULL DEFAULT 0,
     pending_reward REAL NOT NULL DEFAULT 0,
     last_reward_block INTEGER DEFAULT 0
   );
-  -- 🟢 Bảng đồng bộ backup
   CREATE TABLE IF NOT EXISTS sync_seq (
     id INTEGER PRIMARY KEY CHECK(id = 1),
     seq INTEGER NOT NULL DEFAULT 0
@@ -63,13 +61,9 @@ console.log('✅ Database ready (better-sqlite3)');
 
 // ─── Helper functions ─────────────────────────────
 function authenticate(username, pin) {
-  // ✅ Chỉ trim, giữ nguyên hoa/thường
   username = username.trim();
-  
   let user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-  
   if (!user) {
-    // Tạo user mới với username gốc (giữ nguyên hoa/thường)
     const hash = bcrypt.hashSync(pin, 10);
     db.prepare('INSERT INTO users (username, pin_hash, balance) VALUES (?, ?, 0)').run(username, hash);
     user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
@@ -78,18 +72,15 @@ function authenticate(username, pin) {
       throw new Error('Invalid PIN');
     }
   }
-  
   const token = jwt.sign({ username: user.username }, process.env.JWT_SECRET || 'secret', { expiresIn: '24h' });
   return { status: 'success', message: user ? 'Authenticated' : 'Account created', token, balance: user.balance };
 }
 
 function getUser(username) {
-  // ✅ Giữ nguyên username, không toLowerCase
   return db.prepare('SELECT username, balance FROM users WHERE username = ?').get(username.trim());
 }
 
 function updateBalance(username, amount) {
-  // ✅ Giữ nguyên username
   db.prepare('UPDATE users SET balance = balance + ? WHERE username = ?').run(amount, username.trim());
 }
 
@@ -103,11 +94,9 @@ function getActiveMiners(limit = 5) {
 
 // ─── Staking functions ────────────────────────────
 function getStake(username) {
-  // ✅ Giữ nguyên username
   username = username.trim();
   let row = db.prepare('SELECT * FROM stakes WHERE username = ?').get(username);
   if (!row) {
-    // Tạo bản ghi mặc định
     db.prepare('INSERT INTO stakes (username, amount, pending_reward) VALUES (?, 0, 0)').run(username);
     row = { username, amount: 0, pending_reward: 0 };
   }
@@ -115,59 +104,44 @@ function getStake(username) {
 }
 
 function stake(username, amount) {
-  // ✅ Giữ nguyên username
   username = username.trim();
   const user = getUser(username);
   if (!user) throw new Error('User not found');
   if (user.balance < amount) throw new Error('Insufficient balance');
-  
-  // Trừ balance
   updateBalance(username, -amount);
-  
-  // Cập nhật stakes
   const current = getStake(username);
   db.prepare('UPDATE stakes SET amount = amount + ?, pending_reward = pending_reward WHERE username = ?')
     .run(amount, username);
-  
   return getStake(username);
 }
 
 function unstake(username) {
-  // ✅ Giữ nguyên username
   username = username.trim();
   const current = getStake(username);
   if (current.amount <= 0) throw new Error('No stake to withdraw');
-  
-  // Hoàn trả balance + pending reward
   const total = current.amount + (current.pending_reward || 0);
   updateBalance(username, total);
-  
-  // Reset stake
   db.prepare('UPDATE stakes SET amount = 0, pending_reward = 0 WHERE username = ?').run(username);
-  
   return { amount: 0, pending_reward: 0 };
 }
 
 function getValidators(minStake = 10) {
-  // Lấy danh sách validator (stake >= minStake)
   return db.prepare('SELECT username, amount FROM stakes WHERE amount >= ? ORDER BY amount DESC').all(minStake);
 }
 
 function addStakeReward(username, reward) {
-  // ✅ Giữ nguyên username
   db.prepare('UPDATE stakes SET pending_reward = pending_reward + ? WHERE username = ?')
     .run(reward, username.trim());
 }
 
+// ─── Snake claim ─────────────────────────────────
 function getLastSnakeClaim(username) {
-  // ✅ Giữ nguyên username
   return db.prepare(
     'SELECT claimed_at FROM snake_claims WHERE username=? ORDER BY claimed_at DESC LIMIT 1'
   ).get(username.trim());
 }
 
 function insertSnakeClaim(username, apples, mode, reward) {
-  // ✅ Giữ nguyên username
   return db.prepare(
     'INSERT INTO snake_claims (username, apples, mode, reward) VALUES (?, ?, ?, ?)'
   ).run(username.trim(), apples, mode || 'normal', reward);
@@ -185,7 +159,7 @@ function getLeaderboard(mode, limit = 10) {
   `).all(mode, limit);
 }
 
-// 🟢 Hàm đồng bộ backup
+// 🟢 Backup sync sequence
 function getSeq() {
   const row = db.prepare('SELECT seq FROM sync_seq WHERE id = 1').get();
   return row ? row.seq : 0;
@@ -196,9 +170,7 @@ function incrementSeq() {
   return db.prepare('SELECT seq FROM sync_seq WHERE id = 1').get().seq;
 }
 
-// Thêm vào cuối file db.js, TRƯỚC module.exports cuối cùng
-
-// 🟢 Các hàm hỗ trợ backup
+// 🟢 Backup support: export full data & apply delta
 function getAllUsers() {
   return db.prepare('SELECT username, balance FROM users').all();
 }
@@ -208,13 +180,10 @@ function getAllStakes() {
 }
 
 function applyDelta(deltaMsg) {
-  // Áp dụng delta từ backup server
   const { action, username, payload } = deltaMsg;
-  
   try {
     switch (action) {
-      case 'user_created':
-        // User có thể đã tồn tại, bỏ qua nếu có
+      case 'user_created': {
         const existing = db.prepare('SELECT username FROM users WHERE username = ?').get(username);
         if (!existing) {
           db.prepare('INSERT INTO users (username, pin_hash, balance) VALUES (?, ?, ?)').run(
@@ -224,20 +193,18 @@ function applyDelta(deltaMsg) {
           );
         }
         break;
-        
+      }
       case 'block_mined':
         db.prepare(
           'INSERT OR IGNORE INTO blocks_mined (username, bounty_id, reward) VALUES (?, ?, ?)'
         ).run(username, payload.bounty_id, payload.reward || 0);
         break;
-        
       case 'snake_claim':
         db.prepare(
           'INSERT OR IGNORE INTO snake_claims (username, apples, mode, reward, claimed_at) VALUES (?, ?, ?, ?, datetime("now"))'
         ).run(username, payload.apples, payload.mode || 'normal', payload.reward || 0);
         break;
-        
-      case 'stake':
+      case 'stake': {
         const existingStake = db.prepare('SELECT username FROM stakes WHERE username = ?').get(username);
         if (existingStake) {
           db.prepare('UPDATE stakes SET amount = amount + ? WHERE username = ?').run(payload.amount || 0, username);
@@ -245,11 +212,10 @@ function applyDelta(deltaMsg) {
           db.prepare('INSERT INTO stakes (username, amount, pending_reward) VALUES (?, ?, 0)').run(username, payload.amount || 0);
         }
         break;
-        
+      }
       case 'unstake':
         db.prepare('UPDATE stakes SET amount = 0, pending_reward = 0 WHERE username = ?').run(username);
         break;
-        
       default:
         console.log(`⚠️ Unknown delta action: ${action}`);
     }
@@ -258,7 +224,7 @@ function applyDelta(deltaMsg) {
   }
 }
 
-// Cập nhật module.exports, THAY THẾ PHẦN module.exports CUỐI CÙNG:
+// ✅ MỘT module.exports DUY NHẤT bao gồm tất cả hàm
 module.exports = {
   authenticate,
   getUser,
@@ -267,7 +233,7 @@ module.exports = {
   getActiveMiners,
   getLastSnakeClaim,
   insertSnakeClaim,
-  // PoS additions
+  // PoS
   getStake,
   stake,
   unstake,
@@ -275,32 +241,11 @@ module.exports = {
   addStakeReward,
   // Leaderboard
   getLeaderboard,
-  // 🟢 Backup seq
+  // Backup sync
   getSeq,
   incrementSeq,
-  // 🟢 Backup support
+  // Backup support
   getAllUsers,
   getAllStakes,
   applyDelta
-};
-// ─── CHỈ MỘT DÒNG MODULE.EXPORTS DUY NHẤT ─────────
-module.exports = {
-  authenticate,
-  getUser,
-  updateBalance,
-  getRecentBlocks,
-  getActiveMiners,
-  getLastSnakeClaim,
-  insertSnakeClaim,
-  // PoS additions
-  getStake,
-  stake,
-  unstake,
-  getValidators,
-  addStakeReward,
-  // Leaderboard
-  getLeaderboard,
-  // 🟢 Backup seq
-  getSeq,
-  incrementSeq
 };
