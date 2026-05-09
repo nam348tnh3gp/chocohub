@@ -27,7 +27,6 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Bảng lưu backup data
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS backup_data (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,7 +39,6 @@ def init_db():
         )
     ''')
     
-    # Bảng lưu trạng thái đồng bộ
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sync_state (
             id INTEGER PRIMARY KEY CHECK(id = 1),
@@ -52,7 +50,6 @@ def init_db():
     ''')
     cursor.execute('INSERT OR IGNORE INTO sync_state (id, last_seq, ready_count) VALUES (1, 0, 0)')
     
-    # Bảng log hoạt động
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS activity_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,12 +91,10 @@ def save_backup(seq, data_type, data):
             json.dumps(data.get('payload', data))
         )
     )
-    # Cập nhật last_seq
     cursor.execute('UPDATE sync_state SET last_seq = MAX(last_seq, ?) WHERE id = 1', (seq,))
     conn.commit()
     conn.close()
     
-    # Log ngắn gọn
     action = data.get('action', 'N/A')
     print(f'💾 Saved: seq={seq} | type={data_type} | action={action}')
 
@@ -199,8 +194,9 @@ def receive_sync():
         msg_type = data.get('type', 'UNKNOWN')
         token = data.get('token', '')
         seq = data.get('seq', 0)
+        empty = data.get('empty', False)
         
-        print(f'📥 Received: type={msg_type}, seq={seq}')
+        print(f'📥 Received: type={msg_type}, seq={seq}, empty={empty}')
         
         # Verify token
         if token != BACKUP_TOKEN:
@@ -208,20 +204,34 @@ def receive_sync():
             return jsonify({'status': 'error', 'message': 'Invalid token'}), 401
         
         if msg_type == 'READY':
-            # Đếm số lần READY
             count = update_ready_count()
             print(f'🔔 READY received (count: {count}/{MAX_READY_RETRIES})')
             
             # Lưu backup
             save_backup(seq, 'READY', data)
             
-            # Nếu READY >= MAX_READY_RETRIES lần → server vừa restart
+            # 🆕 Nếu main server báo DB rỗng VÀ backup server có dữ liệu 
+            # => gửi ngay FULL_BACKUP trong response để main server restore
+            if empty:
+                all_data = get_all_backup_data()
+                if all_data:
+                    print(f'📤 Main server DB is empty. Sending full backup ({len(all_data)} rows) in response...')
+                    log_activity('FULL_BACKUP_SENT_VIA_READY', {'rows': len(all_data)})
+                    return jsonify({
+                        'type': 'FULL_BACKUP',
+                        'token': BACKUP_TOKEN,
+                        'seq': get_sync_state()['last_seq'],
+                        'rows': all_data,
+                        'timestamp': datetime.now().isoformat()
+                    })
+                else:
+                    print('ℹ️ Backup server also empty – nothing to send')
+            
+            # Nếu không empty hoặc backup server cũng rỗng, xử lý READY bình thường
             if count >= MAX_READY_RETRIES:
                 print('🔄 Detected server restart! Will send backup...')
                 log_activity('SERVER_RESTART_DETECTED', {'ready_count': count})
-                # Reset count để tránh gửi lại liên tục
                 reset_ready_count()
-                # Trigger gửi backup trong background
                 threading.Thread(target=send_full_backup_to_server, daemon=True).start()
             
             return jsonify({
@@ -232,15 +242,12 @@ def receive_sync():
             })
         
         elif msg_type == 'RESYNC':
-            # Server reconnect – gửi delta từ last_seq
             print(f'🔄 RESYNC request, server seq={seq}')
             save_backup(seq, 'RESYNC', data)
             
-            # Kiểm tra nếu server thiếu data
             state = get_sync_state()
             if state['last_seq'] > seq:
                 print(f'📤 Server behind by {state["last_seq"] - seq} sequences')
-                # Gửi delta còn thiếu
                 threading.Thread(
                     target=send_missing_deltas, 
                     args=(seq,),
@@ -254,7 +261,6 @@ def receive_sync():
             })
         
         elif msg_type == 'PING':
-            # Heartbeat – reset ready count vì server vẫn alive
             reset_ready_count()
             update_heartbeat()
             
@@ -265,7 +271,6 @@ def receive_sync():
             })
         
         elif msg_type == 'DELTA':
-            # Nhận delta update
             save_backup(seq, 'DELTA', data)
             log_activity('DELTA_RECEIVED', {
                 'action': data.get('action'),
@@ -279,7 +284,6 @@ def receive_sync():
             })
         
         elif msg_type == 'FULL_BACKUP':
-            # Nhận full backup từ server
             print(f'📥 Receiving FULL_BACKUP ({len(data.get("rows", []))} rows)')
             save_backup(seq, 'FULL_BACKUP', data)
             log_activity('FULL_BACKUP_RECEIVED', {'rows': len(data.get('rows', []))})
@@ -302,7 +306,6 @@ def receive_sync():
 
 @app.route('/api/backup/status', methods=['GET'])
 def backup_status():
-    """Kiểm tra trạng thái backup server"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT COUNT(*) FROM backup_data')
@@ -327,7 +330,6 @@ def backup_status():
 
 @app.route('/api/backup/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
     state = get_sync_state()
     return jsonify({
         'status': 'healthy',
@@ -338,7 +340,6 @@ def health_check():
 
 @app.route('/api/backup/data', methods=['GET'])
 def get_backup_data():
-    """Lấy danh sách backup data (hỗ trợ filter)"""
     limit = request.args.get('limit', 50, type=int)
     offset = request.args.get('offset', 0, type=int)
     data_type = request.args.get('type', None)
@@ -381,7 +382,6 @@ def get_backup_data():
 
 @app.route('/api/backup/logs', methods=['GET'])
 def get_activity_logs():
-    """Lấy activity log"""
     limit = request.args.get('limit', 20, type=int)
     
     conn = sqlite3.connect(DB_PATH)
@@ -407,7 +407,7 @@ def get_activity_logs():
 # ═══════════════════════════════════════════════════════
 
 def send_full_backup_to_server():
-    """Gửi toàn bộ backup data lên main server khi phát hiện server restart"""
+    """Gửi toàn bộ backup data lên main server (dùng khi monitor phát hiện server up)"""
     try:
         print(f'📤 Sending full backup to {MAIN_SERVER_URL}...')
         
@@ -426,7 +426,6 @@ def send_full_backup_to_server():
             'timestamp': datetime.now().isoformat()
         }
         
-        # Gửi qua HTTP POST đến main server
         response = requests.post(
             f'{MAIN_SERVER_URL}/api/backup/sync',
             json=payload,
@@ -493,7 +492,7 @@ def send_missing_deltas(from_seq):
             else:
                 print(f'  ❌ Delta seq={row[0]} failed: {response.status_code}')
             
-            time.sleep(0.5)  # Tránh rate limit
+            time.sleep(0.5)
         
         log_activity('MISSING_DELTAS_SENT', {'from_seq': from_seq, 'count': len(rows)})
         
@@ -510,7 +509,6 @@ def check_main_server():
         )
         return response.status_code == 200
     except:
-        # Thử lại với /api/test nếu /health không có
         try:
             response = requests.get(
                 f'{MAIN_SERVER_URL}/api/test',
@@ -557,10 +555,7 @@ def monitor_main_server():
             send_full_backup_to_server()
             
         elif is_online:
-            # Server vẫn online – reset ready count
             reset_ready_count()
-            
-            # Log heartbeat mỗi 5 phút để biết monitor vẫn chạy
             if now.minute % 5 == 0 and now.second < CHECK_INTERVAL:
                 print(f'💚 Monitor active – {now.strftime("%H:%M:%S")}')
 
@@ -581,14 +576,11 @@ if __name__ == '__main__':
     print('╚══════════════════════════════════════╝')
     print('')
     
-    # Khởi tạo database
     init_db()
     
-    # Bắt đầu monitor thread
     monitor_thread = threading.Thread(target=monitor_main_server, daemon=True)
     monitor_thread.start()
     
-    # Chạy Flask server
     app.run(
         host='0.0.0.0',
         port=BACKUP_PORT,
