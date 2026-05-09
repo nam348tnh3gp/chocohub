@@ -1,14 +1,28 @@
-// server.js - Hybrid PoW + PoS (case-sensitive fix + all features)
+// server.js – Hybrid PoW + PoS (case-sensitive fix + all features + backup broadcast)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const db = require('./db');
 const blockchain = require('./blockchain');
 const snake = require('./snake');
 const backupClient = require('./backupSync');
+
+// Hàm tạo hash nhẹ cho DB state (để backup server verify)
+function getDbHash() {
+  try {
+    const users = db.getAllUsers ? db.getAllUsers() : [];
+    const stakes = db.getAllStakes ? db.getAllStakes() : [];
+    const blocks = db.getRecentBlocks(50);
+    const dataStr = JSON.stringify({ users, stakes, blocks });
+    return crypto.createHash('sha256').update(dataStr).digest('hex').substring(0, 16);
+  } catch (e) {
+    return 'unknown';
+  }
+}
 
 async function sendMinerWebhook(worker, bountyId, device) {
   try {
@@ -49,6 +63,18 @@ app.post('/auth', (req, res) => {
   if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing fields' });
   try {
     const result = db.authenticate(username, pin);
+    
+    // 🟢 Broadcast user mới nếu vừa tạo
+    if (result.message === 'Account created') {
+      backupClient.broadcast({
+        type: 'DELTA',
+        seq: db.incrementSeq(),
+        action: 'user_created',
+        username: username,
+        dbHash: getDbHash()
+      });
+    }
+    
     res.json(result);
   } catch (e) {
     res.status(401).json({ status: 'error', message: e.message });
@@ -99,6 +125,17 @@ app.post('/snake/claim', (req, res) => {
   if (!username || !pin || apples == null) return res.status(400).json({ status: 'error', message: 'Missing fields' });
   try {
     const result = snake.processClaim(username, pin, apples, mode);
+    
+    // 🟢 Broadcast claim
+    backupClient.broadcast({
+      type: 'DELTA',
+      seq: db.incrementSeq(),
+      action: 'snake_claim',
+      username: username,
+      payload: { apples, mode, reward: result.reward },
+      dbHash: getDbHash()
+    });
+    
     res.json(result);
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
@@ -173,6 +210,17 @@ app.post('/pos/stake', (req, res) => {
     if (isNaN(stakeAmount) || stakeAmount < 10) throw new Error('Minimum stake is 10 CC');
 
     const result = db.stake(username, stakeAmount);
+    
+    // 🟢 Broadcast stake
+    backupClient.broadcast({
+      type: 'DELTA',
+      seq: db.incrementSeq(),
+      action: 'stake',
+      username: username,
+      payload: { amount: stakeAmount, staked: Number(result.amount) || 0 },
+      dbHash: getDbHash()
+    });
+    
     res.json({ status: 'success', message: 'Staked ' + stakeAmount + ' CC', staked: Number(result.amount) || 0 });
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
@@ -187,6 +235,16 @@ app.post('/pos/unstake', (req, res) => {
     db.authenticate(username, pin);
     db.unstake(username);
 
+    // 🟢 Broadcast unstake
+    backupClient.broadcast({
+      type: 'DELTA',
+      seq: db.incrementSeq(),
+      action: 'unstake',
+      username: username,
+      payload: { staked: 0 },
+      dbHash: getDbHash()
+    });
+    
     res.json({ status: 'success', message: 'Unstaked successfully. All funds returned.', staked: 0 });
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
@@ -231,6 +289,20 @@ app.post('/submit_solution', (req, res) => {
 
     if (result && result.status === 'success') {
       sendMinerWebhook(worker_name, bounty_id, device_type);
+      
+      // 🟢 Broadcast block mined
+      backupClient.broadcast({
+        type: 'DELTA',
+        seq: db.incrementSeq(),
+        action: 'block_mined',
+        username: worker_name,
+        payload: { 
+          bounty_id: bounty_id, 
+          reward: result.reward || 0,
+          device: device_type 
+        },
+        dbHash: getDbHash()
+      });
     }
 
     res.json(result);
@@ -251,6 +323,15 @@ app.get('/api/test', (req, res) => {
     time: new Date().toISOString(),
     message: 'ChocoHub API is running',
     uptime: process.uptime()
+  });
+});
+
+// 🟢 Health endpoint cho Backup Server
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    dbHash: getDbHash()
   });
 });
 
@@ -275,7 +356,8 @@ app.post('/api/backup/sync', (req, res) => {
         data.rows.forEach(row => {
           try {
             if (row.type === 'DELTA' && row.payload) {
-              console.log(`🔄 Processing delta: seq=${row.seq}`);
+              console.log(`🔄 Processing delta: seq=${row.seq}, action=${row.payload.action || 'unknown'}`);
+              // TODO: Thực sự restore dữ liệu vào DB ở đây
             }
           } catch (e) {
             console.error('❌ Error processing row:', e.message);
@@ -344,6 +426,7 @@ app.listen(PORT, () => {
   console.log('║  Leaderboard: /leaderboard          ║');
   console.log('║  PoW Auto-Bounty: active            ║');
   console.log('║  PoS Minting: active (30s blocks)   ║');
+  console.log('║  Backup Sync: active                ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
 
