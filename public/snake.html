@@ -363,6 +363,7 @@
         }
         .mbtn-claim { background: var(--amber); color: #000; box-shadow: 0 5px 15px rgba(245,138,0,0.3); }
         .mbtn-retry { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+        .mbtn-exit { background: rgba(255,255,255,0.05); color: var(--mid); border: 1px solid var(--border); }
         .mbtn:active { transform: scale(0.96); }
         
         /* Cooldown & Toast */
@@ -431,7 +432,7 @@
                 <div class="game-title">Snake Faucet</div>
                 <p class="game-sub">Play and earn CC Points directly to your account.</p>
              
-                <!-- Reward Info Cards (đồng bộ với backend: 0.5 CC/táo Normal, 2.0 CC/táo Hardcore) -->
+                <!-- Reward Info Cards -->
                 <div class="reward-row">
                     <div class="rcard">
                         <div class="rcard-val" id="val-apple">0.5 CC</div>
@@ -562,6 +563,9 @@
             <div class="modal-btns">
                 <button class="mbtn mbtn-retry" onclick="restartGame()">↺ RETRY</button>
                 <button class="mbtn mbtn-claim" id="btn-claim" onclick="claimReward()">💰 CLAIM</button>
+            </div>
+            <div class="modal-btns" style="margin-top: 8px;">
+                <button class="mbtn mbtn-exit" onclick="exitToDashboard()">🏠 EXIT TO DASHBOARD</button>
             </div>
 
             <!-- Cooldown Bar (appears after claim) -->
