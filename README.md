@@ -26,7 +26,7 @@
 **CC** (Choco Coins) is the native digital currency of the ChocoHub ecosystem. 
 
 * **Exchange Ratio:** 10 CC = 1 DUCO.
-* **Utility:** Used for rewards in games, staking, and soon for swapping into other major micro-currencies.
+* **Utility:** Used for rewards in games, staking, mining, and soon for swapping into other major micro-currencies.
 
 ---
 
