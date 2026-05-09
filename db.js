@@ -196,6 +196,93 @@ function incrementSeq() {
   return db.prepare('SELECT seq FROM sync_seq WHERE id = 1').get().seq;
 }
 
+// Thêm vào cuối file db.js, TRƯỚC module.exports cuối cùng
+
+// 🟢 Các hàm hỗ trợ backup
+function getAllUsers() {
+  return db.prepare('SELECT username, balance FROM users').all();
+}
+
+function getAllStakes() {
+  return db.prepare('SELECT username, amount, pending_reward FROM stakes').all();
+}
+
+function applyDelta(deltaMsg) {
+  // Áp dụng delta từ backup server
+  const { action, username, payload } = deltaMsg;
+  
+  try {
+    switch (action) {
+      case 'user_created':
+        // User có thể đã tồn tại, bỏ qua nếu có
+        const existing = db.prepare('SELECT username FROM users WHERE username = ?').get(username);
+        if (!existing) {
+          db.prepare('INSERT INTO users (username, pin_hash, balance) VALUES (?, ?, ?)').run(
+            username, 
+            bcrypt.hashSync('backup_restore', 10), 
+            payload.balance || 0
+          );
+        }
+        break;
+        
+      case 'block_mined':
+        db.prepare(
+          'INSERT OR IGNORE INTO blocks_mined (username, bounty_id, reward) VALUES (?, ?, ?)'
+        ).run(username, payload.bounty_id, payload.reward || 0);
+        break;
+        
+      case 'snake_claim':
+        db.prepare(
+          'INSERT OR IGNORE INTO snake_claims (username, apples, mode, reward, claimed_at) VALUES (?, ?, ?, ?, datetime("now"))'
+        ).run(username, payload.apples, payload.mode || 'normal', payload.reward || 0);
+        break;
+        
+      case 'stake':
+        const existingStake = db.prepare('SELECT username FROM stakes WHERE username = ?').get(username);
+        if (existingStake) {
+          db.prepare('UPDATE stakes SET amount = amount + ? WHERE username = ?').run(payload.amount || 0, username);
+        } else {
+          db.prepare('INSERT INTO stakes (username, amount, pending_reward) VALUES (?, ?, 0)').run(username, payload.amount || 0);
+        }
+        break;
+        
+      case 'unstake':
+        db.prepare('UPDATE stakes SET amount = 0, pending_reward = 0 WHERE username = ?').run(username);
+        break;
+        
+      default:
+        console.log(`⚠️ Unknown delta action: ${action}`);
+    }
+  } catch (e) {
+    console.error(`❌ Error applying delta: ${e.message}`);
+  }
+}
+
+// Cập nhật module.exports, THAY THẾ PHẦN module.exports CUỐI CÙNG:
+module.exports = {
+  authenticate,
+  getUser,
+  updateBalance,
+  getRecentBlocks,
+  getActiveMiners,
+  getLastSnakeClaim,
+  insertSnakeClaim,
+  // PoS additions
+  getStake,
+  stake,
+  unstake,
+  getValidators,
+  addStakeReward,
+  // Leaderboard
+  getLeaderboard,
+  // 🟢 Backup seq
+  getSeq,
+  incrementSeq,
+  // 🟢 Backup support
+  getAllUsers,
+  getAllStakes,
+  applyDelta
+};
 // ─── CHỈ MỘT DÒNG MODULE.EXPORTS DUY NHẤT ─────────
 module.exports = {
   authenticate,
