@@ -51,6 +51,12 @@ db.exec(`
     pending_reward REAL NOT NULL DEFAULT 0,
     last_reward_block INTEGER DEFAULT 0
   );
+  -- 🟢 Bảng đồng bộ backup
+  CREATE TABLE IF NOT EXISTS sync_seq (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    seq INTEGER NOT NULL DEFAULT 0
+  );
+  INSERT OR IGNORE INTO sync_seq (id, seq) VALUES (1, 0);
 `);
 
 console.log('✅ Database ready (better-sqlite3)');
@@ -179,6 +185,17 @@ function getLeaderboard(mode, limit = 10) {
   `).all(mode, limit);
 }
 
+// 🟢 Hàm đồng bộ backup
+function getSeq() {
+  const row = db.prepare('SELECT seq FROM sync_seq WHERE id = 1').get();
+  return row ? row.seq : 0;
+}
+
+function incrementSeq() {
+  db.prepare('UPDATE sync_seq SET seq = seq + 1 WHERE id = 1').run();
+  return db.prepare('SELECT seq FROM sync_seq WHERE id = 1').get().seq;
+}
+
 // ─── CHỈ MỘT DÒNG MODULE.EXPORTS DUY NHẤT ─────────
 module.exports = {
   authenticate,
@@ -195,5 +212,8 @@ module.exports = {
   getValidators,
   addStakeReward,
   // Leaderboard
-  getLeaderboard
+  getLeaderboard,
+  // 🟢 Backup seq
+  getSeq,
+  incrementSeq
 };
