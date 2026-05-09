@@ -130,7 +130,7 @@
 <script>
 const API = window.location.origin;
 let miningActive = false;
-let autoMineEnabled = false;  // ← KHÓA AUTO: khi true thì luôn tự đào
+let autoMineEnabled = false;
 let currentBountyId = null;
 let currentJob = null;
 let totalHashes = 0;
@@ -139,24 +139,26 @@ let currentNonce = 0;
 let hashrateInterval = null;
 let allBounties = {};
 
-function getWorkerName() { return (localStorage.getItem('choco_user') || 'anonymous').toLowerCase(); }
+// ✅ FIX: Giữ nguyên hoa/thường của username
+function getWorkerName() { return localStorage.getItem('choco_user') || 'anonymous'; }
+
 function fmtHashrate(hps) { if (hps >= 1e6) return (hps/1e6).toFixed(2)+' MH/s'; if (hps>=1e3) return (hps/1e3).toFixed(2)+' kH/s'; return hps.toFixed(1)+' H/s'; }
 function fmtNum(n) { if (n>=1e9) return (n/1e9).toFixed(1)+'B'; if (n>=1e6) return (n/1e6).toFixed(1)+'M'; if (n>=1e3) return (n/1e3).toFixed(1)+'k'; return n.toString(); }
 
-function log(msg, cls='') {
+function log(msg, cls) {
     const con = document.getElementById('console');
     const line = document.createElement('div');
-    line.className = 'log-line ' + cls;
+    line.className = 'log-line ' + (cls || '');
     line.textContent = '> ' + msg;
     con.appendChild(line);
     con.scrollTop = con.scrollHeight;
     while (con.children.length > 100) con.removeChild(con.firstChild);
 }
 
-function toast(msg, type='') {
+function toast(msg, type) {
     const t = document.getElementById('toast');
     t.textContent = msg;
-    t.className = 'show ' + type;
+    t.className = 'show ' + (type || '');
     setTimeout(() => t.className = '', 3500);
 }
 
@@ -183,7 +185,7 @@ function meetsTarget(hashHex, targetBinStr) {
 // ── Fetch blocks ───────────────────────────────────
 async function fetchBlocks() {
     try {
-        const res = await fetch(`${API}/active_bounties_list`);
+        const res = await fetch(API + '/active_bounties_list');
         const data = await res.json();
         allBounties = data;
         updateBlockDisplay();
@@ -223,14 +225,12 @@ function displayBlockInfo(bountyId) {
 // ── Toggle Mining (1 nút) ──────────────────────────
 async function toggleMining() {
     if (miningActive) {
-        // Đang chạy → STOP
         autoMineEnabled = false;
         stopMining();
-        log('⏹️ Mining stopped.', 'log-info');
+        log('Mining stopped.', 'log-info');
     } else {
-        // Đang dừng → START
         autoMineEnabled = true;
-        log('🚀 Auto-mining enabled. Press STOP to pause.', 'log-info');
+        log('Auto-mining enabled. Press PAUSE to stop.', 'log-info');
         await startMiningLoop();
     }
 }
@@ -240,7 +240,7 @@ async function startMiningLoop() {
     if (!currentBountyId || !allBounties[currentBountyId]) {
         await fetchBlocks();
         if (!currentBountyId) {
-            log('⏳ No blocks available. Retrying...', 'log-warn');
+            log('No blocks available. Retrying...', 'log-warn');
             setTimeout(startMiningLoop, 5000);
             return;
         }
@@ -249,7 +249,7 @@ async function startMiningLoop() {
     stopMiningInternal();
     
     try {
-        const res = await fetch(`${API}/get_job/${currentBountyId}`);
+        const res = await fetch(API + '/get_job/' + currentBountyId);
         if (!res.ok) {
             log('Block expired, switching...', 'log-warn');
             await fetchBlocks();
@@ -279,7 +279,7 @@ async function startMiningLoop() {
     const diffBits = currentJob.difficulty_bits;
     const reward = allBounties[bountyId]?.reward || '?';
     
-    log(`⛏️ Mining #${bountyId.substring(0,10)}... (${diffBits} bits, ${reward} CC)`, 'log-info');
+    log('Mining #' + bountyId.substring(0,10) + '... (' + diffBits + ' bits, ' + reward + ' CC)', 'log-info');
     
     hashrateInterval = setInterval(() => {
         if (!miningActive) return;
@@ -303,11 +303,10 @@ async function startMiningLoop() {
             const hashed = await sha256(input);
             
             if (meetsTarget(hashed, targetBin)) {
-                log(`🎯 Nonce found: ${currentNonce}`, 'log-win');
+                log('Nonce found: ' + currentNonce, 'log-win');
                 document.getElementById('progress-bar').style.width = '100%';
                 miningActive = false;
                 await submitSolution(bountyId, currentNonce, workerName);
-                // Tự động đào block tiếp theo
                 if (autoMineEnabled) {
                     await fetchBlocks();
                     setTimeout(startMiningLoop, 2000);
@@ -342,13 +341,13 @@ function stopMining() {
     document.getElementById('btn-stop').disabled = true;
     document.getElementById('progress-bar').style.width = '0%';
     document.getElementById('stat-hashrate').textContent = '0 H/s';
-    log('⏹️ Miner stopped.', 'log-info');
+    log('Miner stopped.', 'log-info');
 }
 
 async function submitSolution(id, nonce, workerName) {
-    log(`📡 Submitting nonce ${nonce}...`, 'log-info');
+    log('Submitting nonce ' + nonce + '...', 'log-info');
     try {
-        const res = await fetch(`${API}/submit_solution`, {
+        const res = await fetch(API + '/submit_solution', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ bounty_id: id, nonce: nonce, worker_name: workerName, device_type: 'web_miner' })
@@ -356,11 +355,11 @@ async function submitSolution(id, nonce, workerName) {
         const result = await res.json();
         
         if (res.ok && result.status === 'success') {
-            log('🏆 BLOCK SOLVED! +' + (result.reward || '?') + ' CC', 'log-win');
-            toast('🏆 +' + (result.reward || '?') + ' CC!', 'win');
+            log('BLOCK SOLVED! +' + (result.reward || '?') + ' CC', 'log-win');
+            toast('+' + (result.reward || '?') + ' CC!', 'win');
         } else {
-            log('❌ ' + (result.reason || 'Rejected'), 'log-err');
-            toast('❌ Rejected', 'err');
+            log((result.reason || 'Rejected'), 'log-err');
+            toast('Rejected', 'err');
         }
     } catch (e) {
         log('Connection error: ' + e.message, 'log-err');
@@ -371,21 +370,19 @@ async function submitSolution(id, nonce, workerName) {
 window.onload = async () => {
     await fetchBlocks();
     
-    // Tự động start sau 1 giây
     setTimeout(async () => {
         if (!miningActive && currentBountyId) {
             autoMineEnabled = true;
-            log('🚀 Auto-starting miner...', 'log-info');
+            log('Auto-starting miner...', 'log-info');
             await startMiningLoop();
         }
     }, 1000);
     
     setInterval(fetchBlocks, 30000);
     
-    // Kiểm tra block bị solve bởi người khác
     setInterval(async () => {
         if (miningActive && currentBountyId && !allBounties[currentBountyId]) {
-            log('⚠️ Block solved by another miner. Switching...', 'log-warn');
+            log('Block solved by another miner. Switching...', 'log-warn');
             stopMiningInternal();
             await fetchBlocks();
             if (autoMineEnabled && currentBountyId) {
