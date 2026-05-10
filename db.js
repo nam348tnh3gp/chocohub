@@ -1,4 +1,4 @@
-// db.js – Full fix + PoS Staking + Leaderboard + Backup full snapshot
+// db.js – Full fix + PoS Staking + Leaderboard + Backup full snapshot + Transactions
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -55,6 +55,15 @@ db.exec(`
     seq INTEGER NOT NULL DEFAULT 0
   );
   INSERT OR IGNORE INTO sync_seq (id, seq) VALUES (1, 0);
+
+  -- Bảng lưu lịch sử gửi/nhận CC
+  CREATE TABLE IF NOT EXISTS transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_username TEXT NOT NULL,
+    to_username TEXT NOT NULL,
+    amount REAL NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 console.log('✅ Database ready (better-sqlite3)');
@@ -82,6 +91,21 @@ function getUser(username) {
 
 function updateBalance(username, amount) {
   db.prepare('UPDATE users SET balance = balance + ? WHERE username = ?').run(amount, username.trim());
+}
+
+// ─── Transactions ────────────────────────────────
+function addTransaction(from_username, to_username, amount) {
+  return db.prepare('INSERT INTO transactions (from_username, to_username, amount) VALUES (?, ?, ?)').run(from_username.trim(), to_username.trim(), amount);
+}
+
+function getTransactions(username, limit = 20) {
+  return db.prepare(`
+    SELECT from_username, to_username, amount, created_at 
+    FROM transactions 
+    WHERE from_username = ? OR to_username = ?
+    ORDER BY id DESC
+    LIMIT ?
+  `).all(username.trim(), username.trim(), limit);
 }
 
 // ─── Blocks & Miners ─────────────────────────────
@@ -196,7 +220,6 @@ function importFullState(state) {
   if (!state) return false;
 
   const transaction = db.transaction(() => {
-    // Xóa dữ liệu cũ (giữ cấu trúc bảng)
     db.exec('DELETE FROM users');
     db.exec('DELETE FROM stakes');
     db.exec('DELETE FROM blocks_mined');
@@ -204,37 +227,31 @@ function importFullState(state) {
     db.exec('DELETE FROM bounties');
     db.exec('DELETE FROM sync_seq');
 
-    // Insert users
     const insertUser = db.prepare('INSERT INTO users (username, pin_hash, balance) VALUES (?, ?, ?)');
     (state.users || []).forEach(u => {
       insertUser.run(u.username, u.pin_hash, u.balance);
     });
 
-    // Insert stakes
     const insertStake = db.prepare('INSERT INTO stakes (username, amount, pending_reward) VALUES (?, ?, ?)');
     (state.stakes || []).forEach(s => {
       insertStake.run(s.username, s.amount, s.pending_reward);
     });
 
-    // Insert blocks_mined
     const insertBlock = db.prepare('INSERT INTO blocks_mined (username, bounty_id, reward, mined_at) VALUES (?, ?, ?, ?)');
     (state.blocks_mined || []).forEach(b => {
       insertBlock.run(b.username, b.bounty_id, b.reward, b.mined_at);
     });
 
-    // Insert snake_claims
     const insertClaim = db.prepare('INSERT INTO snake_claims (username, apples, mode, reward, claimed_at) VALUES (?, ?, ?, ?, ?)');
     (state.snake_claims || []).forEach(c => {
       insertClaim.run(c.username, c.apples, c.mode, c.reward, c.claimed_at);
     });
 
-    // Insert bounties
     const insertBounty = db.prepare('INSERT INTO bounties (id, creator_username, target_device, difficulty, reward, cost, binary_target, last_hash, nonce, solver_username, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     (state.bounties || []).forEach(b => {
       insertBounty.run(b.id, b.creator_username, b.target_device, b.difficulty, b.reward, b.cost, b.binary_target, b.last_hash, b.nonce, b.solver_username, b.status, b.created_at);
     });
 
-    // Đặt lại sequence
     db.prepare('INSERT INTO sync_seq (id, seq) VALUES (1, 0)').run();
   });
 
@@ -261,6 +278,8 @@ module.exports = {
   incrementSeq,
   getAllUsers,
   getAllStakes,
-  exportFullState,    // 
-  importFullState     // 
+  exportFullState,
+  importFullState,
+  addTransaction,      // 🆕
+  getTransactions      // 🆕
 };
