@@ -1,4 +1,4 @@
-// backupSync.js – Client đồng bộ full-snapshot đến Backup Server (fix TLS ngrok, gọn nhẹ)
+// backupSync.js – Client đồng bộ full-snapshot, chờ tất cả backup server rồi khôi phục
 const net = require('net');
 const https = require('https');
 const http = require('http');
@@ -6,10 +6,11 @@ const crypto = require('crypto');
 const db = require('./db');
 
 const BACKUP_SERVERS = (process.env.BACKUP_SERVERS || '').split(',').filter(Boolean);
-const BACKUP_TOKEN = process.env.BACKUP_TOKEN || 'chocohub-default-token';
+const BACKUP_TOKEN = process.env.BACKUP_TOKEN || 'chocohub';
 const RECONNECT_DELAY = 5000;
 const HEARTBEAT_INTERVAL = 30000;        // 30 giây
 const SNAPSHOT_INTERVAL = 300000;        // 5 phút gửi snapshot
+const READY_TIMEOUT = 15000;             // chờ tất cả server phản hồi READY tối đa 15s
 
 // Agent TLS cho ngrok / chứng chỉ tự ký
 const httpsAgent = new https.Agent({
@@ -40,10 +41,10 @@ class BackupClient {
     });
 
     this.sockets = [];
-    this.httpClients = [];
-    this.readySent = new Set();
     this.heartbeats = {};
     this.snapshotTimers = {};
+    this.pendingReady = {};      // { serverKey: { type, state, userCount } }
+    this.readyTimer = null;      // setTimeout để force xử lý sau READY_TIMEOUT
   }
 
   start() {
@@ -51,7 +52,7 @@ class BackupClient {
       console.log('ℹ️ No backup servers configured. Skipping backup sync.');
       return;
     }
-    console.log(`🔁 Backup sync (full snapshot) starting to ${this.servers.length} server(s)...`);
+    console.log(`🔁 Backup sync (full snapshot, wait-all mode) starting to ${this.servers.length} server(s)...`);
     this.servers.forEach(srv => this.connect(srv));
   }
 
@@ -63,25 +64,19 @@ class BackupClient {
     }
   }
 
-  // ==================== TCP ====================
+  // ==================== TCP (giữ nguyên, không dùng logic chờ) ====================
   connectTcp(server) {
     const serverKey = `${server.host}:${server.port}`;
     const client = new net.Socket();
 
     client.connect(server.port, server.host, () => {
       console.log(`🔗 [TCP] Backup client connected to ${serverKey}`);
-      if (!this.readySent.has(serverKey)) {
-        this.sendReadyTcp(client, server.token);
-        this.readySent.add(serverKey);
-      } else {
-        // Khi reconnect, gửi ngay snapshot hiện tại
-        this.sendSnapshotTcp(client, server.token);
-      }
-      this.startTcpHeartbeat(client, serverKey, server);
+      this.sendReadyTcp(client, server.token);
+      this.startTcpHeartbeat(client, serverKey);
       this.startSnapshotIntervalTcp(client, server.token, serverKey);
     });
 
-    client.on('data', (data) => this.handleTcpData(client, data, server));
+    client.on('data', (data) => this.handleTcpData(client, data));
     client.on('close', () => {
       console.log(`🔌 [TCP] Disconnected from ${serverKey}, retrying in ${RECONNECT_DELAY/1000}s...`);
       this.cleanupTcp(serverKey);
@@ -89,7 +84,6 @@ class BackupClient {
     });
     client.on('error', (err) => {
       console.error(`❌ [TCP] Socket error (${serverKey}): ${err.message}`);
-      this.readySent.delete(serverKey);
       client.destroy();
     });
 
@@ -99,17 +93,15 @@ class BackupClient {
   sendReadyTcp(client, token) {
     const msg = { type: 'READY', token, empty: db.getSeq() === 0 };
     client.write(JSON.stringify(msg) + '\n');
-    console.log('📤 [TCP] Sent READY');
   }
 
   sendSnapshotTcp(client, token) {
     const state = db.exportFullState();
     const msg = { type: 'FULL_SNAPSHOT', token, state };
     client.write(JSON.stringify(msg) + '\n');
-    console.log('📤 [TCP] Sent FULL_SNAPSHOT');
   }
 
-  handleTcpData(client, data, server) {
+  handleTcpData(client, data) {
     const lines = data.toString().split('\n').filter(l => l.trim());
     for (const line of lines) {
       try {
@@ -161,7 +153,7 @@ class BackupClient {
     }
   }
 
-  // ==================== HTTP/HTTPS ====================
+  // ==================== HTTP/HTTPS (có logic chờ tất cả server) ====================
   connectHttp(server) {
     const serverKey = `${server.host}:${server.port}`;
     const httpModule = server.protocol === 'https' ? https : http;
@@ -197,43 +189,105 @@ class BackupClient {
           if (res.statusCode === 200 && body.trim()) {
             try {
               const msg = JSON.parse(body);
+
               if (msg.type === 'READY_ACK') {
-                console.log(`✅ [HTTP] ${serverKey} acknowledged READY`);
-                this.readySent.add(serverKey);
-                this.startHttpHeartbeat(server, serverKey);
-                this.startHttpSnapshot(server, serverKey);
+                this.pendingReady[serverKey] = { type: 'empty' };
               } else if (msg.type === 'FULL_SNAPSHOT' && msg.state) {
-                console.log(`📥 [HTTP] Received FULL_SNAPSHOT on READY, restoring...`);
-                db.importFullState(msg.state);
-                console.log('✅ Database restored');
-                this.readySent.add(serverKey);
-                this.startHttpHeartbeat(server, serverKey);
-                this.startHttpSnapshot(server, serverKey);
+                const userCount = Array.isArray(msg.state.users) ? msg.state.users.length : 0;
+                this.pendingReady[serverKey] = { type: 'snapshot', state: msg.state, userCount };
               } else {
-                console.error('❌ Unexpected response:', msg.type);
-                setTimeout(() => sendReady(), RECONNECT_DELAY);
+                console.error(`❌ Unexpected response from ${serverKey}:`, msg.type);
+                this.pendingReady[serverKey] = { type: 'empty' }; // coi như rỗng
               }
+
+              // Bắt đầu timer nếu chưa có
+              if (!this.readyTimer) {
+                this.readyTimer = setTimeout(() => this.checkAllReady(), READY_TIMEOUT);
+              }
+              this.checkAllReady();
+
             } catch (e) {
-              console.error('❌ Invalid JSON:', body.substring(0, 200));
-              setTimeout(() => sendReady(), RECONNECT_DELAY);
+              console.error(`❌ Invalid JSON from ${serverKey}:`, body.substring(0, 200));
+              this.pendingReady[serverKey] = { type: 'empty' };
+              if (!this.readyTimer) this.readyTimer = setTimeout(() => this.checkAllReady(), READY_TIMEOUT);
+              this.checkAllReady();
             }
           } else {
-            console.error(`❌ READY failed with status ${res.statusCode}`);
-            setTimeout(() => sendReady(), RECONNECT_DELAY);
+            console.error(`❌ READY failed (${serverKey}) with status ${res.statusCode}`);
+            // Server không phản hồi đúng, vẫn coi là đã trả lời (rỗng)
+            this.pendingReady[serverKey] = { type: 'empty' };
+            if (!this.readyTimer) this.readyTimer = setTimeout(() => this.checkAllReady(), READY_TIMEOUT);
+            this.checkAllReady();
           }
         });
       });
 
       req.on('error', (err) => {
         console.error(`❌ [HTTP] READY error (${serverKey}): ${err.message}`);
+        this.pendingReady[serverKey] = { type: 'empty' };
+        if (!this.readyTimer) this.readyTimer = setTimeout(() => this.checkAllReady(), READY_TIMEOUT);
+        this.checkAllReady();
+        // Sẽ thử lại sau
         setTimeout(() => sendReady(), RECONNECT_DELAY);
       });
+
       req.setTimeout(10000);
       req.write(payload);
       req.end();
     };
 
     sendReady();
+  }
+
+  // Kiểm tra tất cả server đã phản hồi READY chưa, chọn snapshot tốt nhất để restore
+  checkAllReady() {
+    const total = this.servers.length;
+    const received = Object.keys(this.pendingReady).length;
+
+    // Chưa đủ và chưa timeout → chờ
+    if (received < total && this.readyTimer) return;
+
+    // Đã đến lúc xử lý, xóa timer
+    if (this.readyTimer) {
+      clearTimeout(this.readyTimer);
+      this.readyTimer = null;
+    }
+
+    console.log('📋 Processing READY responses from backup servers...');
+
+    let bestSnapshot = null;
+    let bestUserCount = -1;
+
+    for (const [key, data] of Object.entries(this.pendingReady)) {
+      console.log(`   ${key}: ${data.type}${data.userCount !== undefined ? ` (${data.userCount} users)` : ''}`);
+      if (data.type === 'snapshot' && data.userCount > bestUserCount) {
+        bestSnapshot = data.state;
+        bestUserCount = data.userCount;
+      }
+    }
+
+    // Chỉ khôi phục nếu có snapshot có user > 0
+    if (bestSnapshot && bestUserCount > 0) {
+      console.log(`📥 Restoring from best snapshot (${bestUserCount} users)...`);
+      db.importFullState(bestSnapshot);
+      console.log('✅ Database restored');
+    } else {
+      console.log('ℹ️ No valid backup data found – starting fresh');
+    }
+
+    // Bắt đầu heartbeat & snapshot cho từng server đã phản hồi (và thành công)
+    for (const server of this.servers) {
+      const key = `${server.host}:${server.port}`;
+      // Chỉ bắt đầu nếu server đã có trong pendingReady (đã phản hồi hoặc lỗi)
+      if (this.pendingReady[key]) {
+        this.readySent.add(key);
+        this.startHttpHeartbeat(server, key);
+        this.startHttpSnapshot(server, key);
+      }
+    }
+
+    // Reset pending
+    this.pendingReady = {};
   }
 
   startHttpHeartbeat(server, serverKey) {
@@ -258,7 +312,6 @@ class BackupClient {
         res.resume();
         if (res.statusCode !== 200) {
           console.error(`⚠️ [HTTP] Heartbeat failed ${serverKey}: ${res.statusCode}`);
-          // Sẽ reconnect ở lần heartbeat tiếp theo
         }
       });
       req.on('error', (err) => {
@@ -269,7 +322,6 @@ class BackupClient {
       req.end();
     };
 
-    // Dọn dẹp nếu có timer cũ
     if (this.heartbeats[serverKey]) clearInterval(this.heartbeats[serverKey]);
     this.heartbeats[serverKey] = setInterval(heartbeat, HEARTBEAT_INTERVAL);
   }
@@ -316,8 +368,7 @@ class BackupClient {
 
     if (this.snapshotTimers[serverKey]) clearInterval(this.snapshotTimers[serverKey]);
     this.snapshotTimers[serverKey] = setInterval(sendSnapshot, SNAPSHOT_INTERVAL);
-    // Gửi ngay lần đầu
-    sendSnapshot();
+    sendSnapshot(); // gửi ngay lần đầu
   }
 }
 
