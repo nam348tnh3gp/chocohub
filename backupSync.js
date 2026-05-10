@@ -7,7 +7,7 @@ const db = require('./db');
 const BACKUP_SERVERS = (process.env.BACKUP_SERVERS || '').split(',').filter(Boolean);
 const BACKUP_TOKEN = process.env.BACKUP_TOKEN || 'chocohub-default-token';
 const RECONNECT_DELAY = 5000;
-const HEARTBEAT_INTERVAL = 30000; // 30 giây heartbeat thay vì poll 5s
+const HEARTBEAT_INTERVAL = 30000; // 30 giây heartbeat
 
 class BackupClient {
   constructor() {
@@ -31,7 +31,8 @@ class BackupClient {
     
     this.sockets = [];
     this.httpClients = [];
-    this.readySent = new Set(); // Track server nào đã gửi READY
+    this.readySent = new Set();
+    this.heartbeats = {}; // lưu interval cho TCP
   }
 
   start() {
@@ -59,16 +60,13 @@ class BackupClient {
     client.connect(server.port, server.host, () => {
       console.log(`🔗 [TCP] Backup client connected to ${serverKey}`);
       
-      // Chỉ gửi READY nếu chưa từng gửi hoặc reconnect
       if (!this.readySent.has(serverKey)) {
         this.sendReadyTcp(client, server.token);
         this.readySent.add(serverKey);
       } else {
-        // Gửi RESYNC nhẹ hơn khi reconnect
         this.sendResyncTcp(client, server.token);
       }
       
-      // Setup heartbeat để giữ connection alive
       this.startTcpHeartbeat(client, serverKey);
     });
 
@@ -80,7 +78,7 @@ class BackupClient {
     });
     client.on('error', (err) => {
       console.error(`❌ [TCP] Socket error (${serverKey}): ${err.message}`);
-      this.readySent.delete(serverKey); // Reset để gửi lại READY khi reconnect
+      this.readySent.delete(serverKey);
       client.destroy();
     });
     
@@ -103,10 +101,8 @@ class BackupClient {
   }
 
   startTcpHeartbeat(client, serverKey) {
-    // Clear heartbeat cũ nếu có
     this.stopHeartbeat(serverKey);
     
-    // Gửi PING mỗi 30s để giữ kết nối
     const interval = setInterval(() => {
       if (!client.destroyed) {
         const heartbeat = { type: 'PING', timestamp: Date.now() };
@@ -114,13 +110,11 @@ class BackupClient {
       }
     }, HEARTBEAT_INTERVAL);
     
-    // Lưu interval để cleanup
-    if (!this.heartbeats) this.heartbeats = {};
     this.heartbeats[serverKey] = interval;
   }
 
   stopHeartbeat(serverKey) {
-    if (this.heartbeats && this.heartbeats[serverKey]) {
+    if (this.heartbeats[serverKey]) {
       clearInterval(this.heartbeats[serverKey]);
       delete this.heartbeats[serverKey];
     }
@@ -131,11 +125,10 @@ class BackupClient {
     for (const line of lines) {
       try {
         const msg = JSON.parse(line);
-        // Bỏ qua PONG responses
-        if (msg.type === 'PONG') return;
+        if (msg.type === 'PONG') continue;
         this.processMessage(msg, server);
       } catch (e) {
-        if (line.includes('ngrok') || line.includes('HTTP/') || line.startsWith('X-')) return;
+        if (line.includes('ngrok') || line.includes('HTTP/') || line.startsWith('X-')) continue;
         console.error('❌ Invalid JSON from backup:', line.substring(0, 100));
       }
     }
@@ -146,7 +139,7 @@ class BackupClient {
     const serverKey = `${server.host}:${server.port}`;
     const httpModule = server.protocol === 'https' ? https : http;
     
-    const options = {
+    const baseOptions = {
       hostname: server.host,
       port: server.port,
       path: '/api/backup/sync',
@@ -163,7 +156,6 @@ class BackupClient {
 
     // Gửi READY lần đầu
     const sendReady = () => {
-      const readyOptions = { ...options };
       const currentSeq = db.getSeq();
       const isEmpty = currentSeq === 0;
       const payload = JSON.stringify({
@@ -173,7 +165,7 @@ class BackupClient {
         empty: isEmpty
       });
 
-      const req = httpModule.request(readyOptions, (res) => {
+      const req = httpModule.request({ ...baseOptions }, (res) => {
         let body = '';
         res.on('data', chunk => body += chunk);
         res.on('end', () => {
@@ -185,14 +177,23 @@ class BackupClient {
               if (msg.type === 'READY_ACK') {
                 console.log(`✅ [HTTP] Server ${serverKey} acknowledged READY`);
                 this.readySent.add(serverKey);
-                // Sau READY thành công, chuyển sang heartbeat
                 setTimeout(() => startHeartbeat(), HEARTBEAT_INTERVAL);
+              } else if (msg.type === 'FULL_BACKUP') {
+                // Backup server gửi ngay full backup
+                console.log(`📥 [HTTP] Received FULL_BACKUP in READY response`);
+                this.processMessage(msg, server);
+                this.readySent.add(serverKey);
+                setTimeout(() => startHeartbeat(), HEARTBEAT_INTERVAL);
+              } else {
+                console.error('❌ Unexpected READY response type:', msg.type);
+                setTimeout(() => sendReady(), RECONNECT_DELAY);
               }
             } catch (e) {
               console.error('❌ Invalid READY response:', body.substring(0, 200));
               setTimeout(() => sendReady(), RECONNECT_DELAY);
             }
           } else {
+            console.error(`❌ READY failed with status ${res.statusCode}`);
             setTimeout(() => sendReady(), RECONNECT_DELAY);
           }
         });
@@ -209,7 +210,7 @@ class BackupClient {
       console.log(`📤 [HTTP] Sent READY to ${serverKey} (seq=${currentSeq}, empty=${isEmpty})`);
     };
 
-    // Heartbeat nhẹ, chỉ kiểm tra sync
+    // Heartbeat định kỳ
     const startHeartbeat = () => {
       const doHeartbeat = () => {
         const currentSeq = db.getSeq();
@@ -219,14 +220,12 @@ class BackupClient {
           seq: currentSeq
         });
 
-        const req = httpModule.request(options, (res) => {
+        const req = httpModule.request({ ...baseOptions }, (res) => {
           let body = '';
           res.on('data', chunk => body += chunk);
           res.on('end', () => {
-            // Chỉ log khi cần debug
             if (res.statusCode !== 200) {
               console.error(`⚠️ [HTTP] Heartbeat failed (${serverKey}): ${res.statusCode}`);
-              // Nếu heartbeat fail liên tục, gửi lại READY
               this.readySent.delete(serverKey);
               setTimeout(() => sendReady(), RECONNECT_DELAY);
               return;
@@ -239,11 +238,8 @@ class BackupClient {
                   this.processMessage(msg, server);
                 }
               }
-            } catch (e) {
-              // Bỏ qua lỗi parse trong heartbeat
-            }
+            } catch (e) {}
             
-            // Lên lịch heartbeat tiếp theo
             setTimeout(() => doHeartbeat(), HEARTBEAT_INTERVAL);
           });
         });
@@ -260,12 +256,9 @@ class BackupClient {
       };
 
       doHeartbeat();
-      
-      // Lưu để cleanup nếu cần
       this.httpClients.push({ server, serverKey, startHeartbeat, sendReady });
     };
 
-    // Bắt đầu với READY
     sendReady();
   }
 
@@ -293,7 +286,6 @@ class BackupClient {
         break;
         
       case 'PONG':
-        // Heartbeat response, không cần log
         break;
         
       default:
@@ -303,7 +295,6 @@ class BackupClient {
 
   restoreFromBackup(rows) {
     console.log(`🔄 Restoring ${rows.length} items from backup...`);
-    
     let restored = 0;
     rows.forEach(row => {
       try {
@@ -319,7 +310,6 @@ class BackupClient {
         console.error(`❌ Error restoring row: ${e.message}`);
       }
     });
-    
     console.log(`✅ Restored ${restored}/${rows.length} items from backup`);
   }
 
@@ -327,18 +317,16 @@ class BackupClient {
   broadcast(deltaMsg) {
     const data = JSON.stringify(deltaMsg) + '\n';
     
-    // Gửi qua TCP
+    // TCP
     this.sockets.forEach(({ socket }) => {
       if (!socket.destroyed) {
-        try { 
-          socket.write(data); 
-        } catch (e) {
+        try { socket.write(data); } catch (e) {
           console.error(`❌ TCP broadcast error: ${e.message}`);
         }
       }
     });
 
-    // Gửi qua HTTP ngay lập tức (không đợi heartbeat)
+    // HTTP/HTTPS
     this.httpClients.forEach(({ server }) => {
       this.sendDeltaHttp(server, deltaMsg);
     });
@@ -363,13 +351,15 @@ class BackupClient {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'ChocoHub-BackupClient/1.0'
+        'User-Agent': 'ChocoHub-BackupClient/1.0',
+        'ngrok-skip-browser-warning': '1',   // Quan trọng cho ngrok
+        'Accept': 'application/json',
+        'Connection': 'keep-alive'
       },
       rejectUnauthorized: false
     };
     
     const req = httpModule.request(options, (res) => {
-      // Không cần xử lý response, chỉ log nếu lỗi
       if (res.statusCode !== 200) {
         console.error(`⚠️ HTTP delta failed: ${res.statusCode}`);
       }
