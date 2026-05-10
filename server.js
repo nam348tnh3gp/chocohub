@@ -1,4 +1,4 @@
-// server.js – Hybrid PoW + PoS (case-sensitive fix + all features + backup broadcast)
+// server.js – Hybrid PoW + PoS (case-sensitive fix + all features + backup sync tự động)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -58,22 +58,7 @@ app.post('/auth', (req, res) => {
   if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing fields' });
   try {
     const result = db.authenticate(username, pin);
-
-    if (result.message === 'Account created') {
-      const userRecord = db.getUserWithHash(username);
-      backupClient.broadcast({
-        type: 'DELTA',
-        seq: db.incrementSeq(),
-        action: 'user_created',
-        username: username,
-        payload: {
-          balance: 0,
-          pin_hash: userRecord.pin_hash
-        },
-        dbHash: getDbHash()
-      });
-    }
-
+    // Không cần broadcast nữa – backupSync sẽ gửi snapshot toàn bộ DB
     res.json(result);
   } catch (e) {
     res.status(401).json({ status: 'error', message: e.message });
@@ -121,14 +106,6 @@ app.post('/snake/claim', (req, res) => {
   if (!username || !pin || apples == null) return res.status(400).json({ status: 'error', message: 'Missing fields' });
   try {
     const result = snake.processClaim(username, pin, apples, mode);
-    backupClient.broadcast({
-      type: 'DELTA',
-      seq: db.incrementSeq(),
-      action: 'snake_claim',
-      username: username,
-      payload: { apples, mode, reward: result.reward },
-      dbHash: getDbHash()
-    });
     res.json(result);
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
@@ -192,14 +169,6 @@ app.post('/pos/stake', (req, res) => {
     const stakeAmount = parseFloat(amount);
     if (isNaN(stakeAmount) || stakeAmount < 10) throw new Error('Minimum stake is 10 CC');
     const result = db.stake(username, stakeAmount);
-    backupClient.broadcast({
-      type: 'DELTA',
-      seq: db.incrementSeq(),
-      action: 'stake',
-      username: username,
-      payload: { amount: stakeAmount, staked: Number(result.amount) || 0 },
-      dbHash: getDbHash()
-    });
     res.json({ status: 'success', message: 'Staked ' + stakeAmount + ' CC', staked: Number(result.amount) || 0 });
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
@@ -214,14 +183,6 @@ app.post('/pos/unstake', (req, res) => {
     const currentStake = db.getStake(username);
     const totalAmount = (currentStake.amount || 0) + (currentStake.pending_reward || 0);
     db.unstake(username);
-    backupClient.broadcast({
-      type: 'DELTA',
-      seq: db.incrementSeq(),
-      action: 'unstake',
-      username: username,
-      payload: { amount: totalAmount },
-      dbHash: getDbHash()
-    });
     res.json({ status: 'success', message: 'Unstaked successfully. All funds returned.', staked: 0 });
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
@@ -263,14 +224,6 @@ app.post('/submit_solution', (req, res) => {
     const result = blockchain.submitSolution(bounty_id, nonce, worker_name, device_type);
     if (result && result.status === 'success') {
       sendMinerWebhook(worker_name, bounty_id, device_type);
-      backupClient.broadcast({
-        type: 'DELTA',
-        seq: db.incrementSeq(),
-        action: 'block_mined',
-        username: worker_name,
-        payload: { bounty_id: bounty_id, reward: result.reward || 0, device: device_type },
-        dbHash: getDbHash()
-      });
     }
     res.json(result);
   } catch (e) {
@@ -303,7 +256,7 @@ app.get('/health', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// BACKUP RECEIVE ENDPOINT - Nhận backup từ backup server
+// BACKUP RECEIVE ENDPOINT - Nhận snapshot từ backup server
 // ═══════════════════════════════════════════════════════
 app.post('/api/backup/sync', (req, res) => {
   try {
@@ -314,31 +267,17 @@ app.post('/api/backup/sync', (req, res) => {
       return res.status(401).json({ status: 'error', message: 'Invalid token' });
     }
     
-    console.log(`📥 Received from backup: type=${data.type}, seq=${data.seq}`);
+    console.log(`📥 Received from backup: type=${data.type}`);
     
-    if (data.type === 'FULL_BACKUP') {
-      console.log(`📥 Receiving full backup (${data.rows ? data.rows.length : 0} items)...`);
-      
-      if (data.rows && Array.isArray(data.rows)) {
-        backupClient.restoreFromBackup(data.rows);
-        console.log('✅ Full backup restored from backup server');
-      } else {
-        console.log('⚠️ FULL_BACKUP received but no rows found');
-      }
-      
-      return res.json({
-        type: 'BACKUP_ACK',
-        seq: data.seq,
-        status: 'success',
-        message: 'Backup restored'
-      });
+    // Nhận snapshot đầy đủ (FULL_SNAPSHOT) từ backup server
+    if (data.type === 'FULL_SNAPSHOT' && data.state) {
+      console.log('📥 Receiving full DB snapshot from backup server...');
+      db.importFullState(data.state);  // Hàm này cần được thêm vào db.js
+      console.log('✅ Full database restored from backup');
+      return res.json({ type: 'SNAPSHOT_ACK', status: 'success' });
     }
     
-    res.json({
-      type: 'ACK',
-      seq: data.seq || 0,
-      status: 'received'
-    });
+    res.json({ type: 'ACK', status: 'received' });
     
   } catch (e) {
     console.error('❌ Error receiving backup:', e.message);
@@ -385,7 +324,7 @@ app.listen(PORT, () => {
   console.log('║  Leaderboard: /leaderboard          ║');
   console.log('║  PoW Auto-Bounty: active            ║');
   console.log('║  PoS Minting: active (30s blocks)   ║');
-  console.log('║  Backup Sync: active                ║');
+  console.log('║  Backup Sync: active (full snapshot)║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
 
