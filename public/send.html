@@ -160,6 +160,7 @@
             position: relative;
             overflow: hidden;
             transition: border-color 0.4s var(--ease-smooth), box-shadow 0.4s var(--ease-smooth);
+            margin-bottom: 28px;
         }
         .send-card:hover {
             border-color: var(--border-hi);
@@ -275,6 +276,74 @@
             transform: none;
         }
 
+        /* History Card */
+        .history-card {
+            background: var(--surface);
+            backdrop-filter: blur(14px) saturate(160%);
+            -webkit-backdrop-filter: blur(14px) saturate(160%);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 28px 24px;
+            box-shadow: var(--shadow-card);
+            position: relative;
+            overflow: hidden;
+        }
+        .history-card h3 {
+            font-size: 1.2rem;
+            font-weight: 800;
+            margin-bottom: 18px;
+            color: var(--amber);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .history-list {
+            list-style: none;
+            max-height: 260px;
+            overflow-y: auto;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.78rem;
+            color: var(--mid);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .history-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+        }
+        .history-item .tx-type {
+            font-weight: 700;
+            color: var(--amber);
+            min-width: 45px;
+        }
+        .history-item .tx-type.receive {
+            color: var(--green);
+        }
+        .history-item .tx-details {
+            flex: 1;
+            text-align: center;
+            color: var(--text);
+        }
+        .history-item .tx-amount {
+            font-weight: 700;
+        }
+        .history-item .tx-time {
+            font-size: 0.7rem;
+            color: var(--dim);
+        }
+        .empty-history {
+            color: var(--dim);
+            text-align: center;
+            padding: 20px 0;
+            font-style: italic;
+        }
+
         /* Toast */
         #toast {
             position: fixed; bottom: 30px; left: 50%;
@@ -290,6 +359,7 @@
 
         @media (max-width: 400px) {
             .send-card { padding: 22px 16px; }
+            .history-card { padding: 20px 16px; }
         }
     </style>
 </head>
@@ -332,6 +402,14 @@
             <!-- Send Button -->
             <button class="btn-send" id="send-btn">SEND CC</button>
         </div>
+
+        <!-- Transaction History -->
+        <div class="history-card">
+            <h3>📋 Transaction History</h3>
+            <div id="history-container">
+                <p class="empty-history">Loading history...</p>
+            </div>
+        </div>
     </div>
 
     <!-- Toast -->
@@ -343,6 +421,7 @@
         const amountEl = document.getElementById('amount');
         const pinEl = document.getElementById('pin');
         const balanceEl = document.getElementById('current-balance');
+        const historyContainer = document.getElementById('history-container');
 
         let currentBalance = 0;
 
@@ -387,6 +466,53 @@
             }
         }
 
+        async function loadHistory() {
+            const user = localStorage.getItem('choco_user');
+            if (!user) {
+                historyContainer.innerHTML = '<p class="empty-history">Login to see history.</p>';
+                return;
+            }
+            try {
+                // 🔧 Endpoint này cần được thêm vào server.js (xem hướng dẫn bên dưới)
+                const res = await fetch('/get_transactions?username=' + encodeURIComponent(user));
+                if (!res.ok) throw new Error('Failed to fetch');
+                const data = await res.json();
+                const transactions = data.transactions || [];
+
+                if (transactions.length === 0) {
+                    historyContainer.innerHTML = '<p class="empty-history">No transactions yet.</p>';
+                    return;
+                }
+
+                const list = document.createElement('div');
+                list.className = 'history-list';
+
+                transactions.forEach(tx => {
+                    const isSender = tx.from_username === user;
+                    const type = isSender ? 'Sent' : 'Received';
+                    const counterpart = isSender ? tx.to_username : tx.from_username;
+                    const amount = parseFloat(tx.amount).toFixed(4);
+                    const time = tx.created_at ? new Date(tx.created_at + ' UTC').toLocaleString() : '—';
+
+                    const item = document.createElement('div');
+                    item.className = 'history-item';
+                    item.innerHTML = `
+                        <span class="tx-type ${isSender ? '' : 'receive'}">${type}</span>
+                        <span class="tx-details">${isSender ? 'To' : 'From'} <strong>${counterpart}</strong></span>
+                        <span class="tx-amount" style="color: ${isSender ? 'var(--red)' : 'var(--green)'}">${isSender ? '-' : '+'}${amount} CC</span>
+                        <span class="tx-time">${time}</span>
+                    `;
+                    list.appendChild(item);
+                });
+
+                historyContainer.textContent = '';
+                historyContainer.appendChild(list);
+            } catch (e) {
+                console.error('History load failed:', e.message);
+                historyContainer.innerHTML = '<p class="empty-history">Could not load history.</p>';
+            }
+        }
+
         async function handleSend() {
             const user = localStorage.getItem('choco_user');
             if (!user) return showToast('Please login first', 'error');
@@ -424,6 +550,8 @@
                     recipientEl.value = '';
                     amountEl.value = '';
                     pinEl.value = '';
+                    // Refresh lịch sử sau khi gửi thành công
+                    loadHistory();
                 } else {
                     showToast(data.message || 'Transfer failed', 'error');
                 }
@@ -438,6 +566,7 @@
 
         // Init
         loadBalance();
+        loadHistory();
     </script>
 </body>
 </html>
