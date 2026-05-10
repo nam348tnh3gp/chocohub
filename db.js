@@ -80,6 +80,11 @@ function getUser(username) {
   return db.prepare('SELECT username, balance FROM users WHERE username = ?').get(username.trim());
 }
 
+// 🆕 Hàm lấy thông tin user kèm pin_hash (dùng cho backup)
+function getUserWithHash(username) {
+  return db.prepare('SELECT username, balance, pin_hash FROM users WHERE username = ?').get(username.trim());
+}
+
 function updateBalance(username, amount) {
   db.prepare('UPDATE users SET balance = balance + ? WHERE username = ?').run(amount, username.trim());
 }
@@ -186,9 +191,11 @@ function applyDelta(deltaMsg) {
       case 'user_created': {
         const existing = db.prepare('SELECT username FROM users WHERE username = ?').get(username);
         if (!existing) {
+          // Sử dụng pin_hash từ payload nếu có, ngược lại dùng hash mặc định
+          const pinHash = payload.pin_hash || bcrypt.hashSync('backup_default', 10);
           db.prepare('INSERT INTO users (username, pin_hash, balance) VALUES (?, ?, ?)').run(
             username, 
-            bcrypt.hashSync('backup_restore', 10), 
+            pinHash,
             payload.balance || 0
           );
         }
@@ -224,7 +231,6 @@ function applyDelta(deltaMsg) {
         const existing = db.prepare('SELECT username FROM stakes WHERE username = ?').get(username);
         if (!existing) {
           db.prepare('INSERT INTO stakes (username, amount, pending_reward) VALUES (?, ?, 0)').run(username, amount);
-          // Trừ balance vì đây là lần stake đầu tiên trên hệ thống mới
           updateBalance(username, -amount);
         } else {
           db.prepare('UPDATE stakes SET amount = amount + ? WHERE username = ?').run(amount, username);
@@ -236,7 +242,6 @@ function applyDelta(deltaMsg) {
       case 'unstake': {
         const amount = payload.amount || 0;
         db.prepare('UPDATE stakes SET amount = 0, pending_reward = 0 WHERE username = ?').run(username);
-        // Hoàn trả balance
         updateBalance(username, amount);
         break;
       }
@@ -252,6 +257,7 @@ function applyDelta(deltaMsg) {
 module.exports = {
   authenticate,
   getUser,
+  getUserWithHash,    // 🆕 Export hàm mới
   updateBalance,
   getRecentBlocks,
   getActiveMiners,
