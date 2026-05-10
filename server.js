@@ -233,15 +233,20 @@ app.post('/pos/unstake', (req, res) => {
     if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing fields' });
 
     db.authenticate(username, pin);
+    
+    // Lấy thông tin stake trước khi unstake để broadcast chính xác
+    const currentStake = db.getStake(username);
+    const totalAmount = (currentStake.amount || 0) + (currentStake.pending_reward || 0);
+    
     db.unstake(username);
 
-    // 🟢 Broadcast unstake
+    // 🟢 Broadcast unstake với amount thực tế
     backupClient.broadcast({
       type: 'DELTA',
       seq: db.incrementSeq(),
       action: 'unstake',
       username: username,
-      payload: { staked: 0 },
+      payload: { amount: totalAmount },
       dbHash: getDbHash()
     });
     
