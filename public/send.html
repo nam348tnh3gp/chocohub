@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>CHOCO HUB · Send CC</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+    <style>
+        /* ═══════════════════════════════════════════
+           CHOCO HUB · GLOBAL DESIGN SYSTEM
+           ═══════════════════════════════════════════ */
+        :root {
+            --void:        #0a0a12;
+            --deep:        #0d0b0a;
+            --surface:     rgba(20, 20, 35, 0.7);
+            --raised:      #1d1d2e;
+            --overlay:     rgba(8, 8, 16, 0.94);
+            --border:      rgba(255, 149, 0, 0.08);
+            --border-mid:  rgba(255, 149, 0, 0.18);
+            --border-hi:   rgba(255, 149, 0, 0.35);
+            --text:        #eee4d8;
+            --mid:         #8b8296;
+            --dim:         #4a4458;
+            --amber:       #f58a00;
+            --amber-soft:  #ffb347;
+            --amber-glow:  rgba(245, 138, 0, 0.25);
+            --amber-faint: rgba(245, 138, 0, 0.04);
+            --gold:        #f2c94c;
+            --green:       #40c057;
+            --red:         #fa5252;
+            --pink:        #f06292;
+
+            --bg: var(--void);
+            --radius-sm: 12px;
+            --radius-md: 20px;
+            --radius-lg: 28px;
+            --radius-full: 99px;
+            --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.4);
+            --shadow-card-hover: 0 20px 48px rgba(0, 0, 0, 0.55);
+            --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
+            --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+            --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { font-size: 14px; }
+
+        body {
+            margin: 0; padding: 0; background-color: #0a0807;
+            background-image:
+                radial-gradient(circle at 50% 40%, rgba(255, 120, 0, 0.08) 0%, transparent 70%),
+                radial-gradient(circle at 50% 50%, #140d0a 0%, #0a0807 100%);
+            background-attachment: fixed; color: var(--text); font-family: 'Outfit', sans-serif;
+            overflow-x: hidden; min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+        }
+
+        button { font-family: inherit; cursor: pointer; border: none; outline: none; }
+        a { color: var(--amber); text-decoration: none; }
+
+        @keyframes pulseGlow {
+            0% { box-shadow: 0 0 5px rgba(255, 149, 0, 0.05); }
+            50% { box-shadow: 0 0 15px rgba(255, 149, 0, 0.2); }
+            100% { box-shadow: 0 0 5px rgba(255, 149, 0, 0.05); }
+        }
+        @keyframes liquidMove {
+            0% { transform: translate(0, 0) scale(1) rotate(30deg); }
+            50% { transform: translate(-5%, 5%) scale(1.3) rotate(100deg); }
+            100% { transform: translate(5%, -5%) scale(1) rotate(-2deg); }
+        }
+        @keyframes logoBounce {
+            0%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-6px); }
+            50% { transform: translateY(0); }
+            70% { transform: translateY(-3px); }
+        }
+        @keyframes shimmerRotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .liquid-bg {
+            position: fixed; top: -25%; left: -25%; width: 150%; height: 150%;
+            background: radial-gradient(circle at center, rgba(255, 149, 0, 0.04) 0%, rgba(30, 20, 10, 0.2) 30%, transparent 60%);
+            z-index: -1; pointer-events: none; filter: blur(60px);
+            animation: liquidMove 20s ease-in-out infinite alternate;
+        }
+
+        /* Send Container */
+        .send-container {
+            width: min(520px, 94vw);
+            margin: 40px auto 60px;
+            padding: 0 16px;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Header */
+        .send-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 28px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .logo {
+            font-size: 1.4rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            color: var(--amber);
+            text-shadow: 0 0 16px var(--amber-glow);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            user-select: none;
+        }
+        .logo .logo-icon {
+            display: inline-block;
+            font-size: 1.6rem;
+            animation: logoBounce 3s ease-in-out infinite;
+        }
+
+        .btn-back {
+            background: rgba(255,255,255,0.06);
+            color: var(--mid);
+            border: 1px solid var(--border);
+            padding: 8px 16px;
+            border-radius: var(--radius-full);
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            cursor: pointer;
+            transition: all 0.2s var(--ease-smooth);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-back:hover {
+            color: var(--amber);
+            border-color: var(--border-hi);
+            background: rgba(255,149,0,0.08);
+        }
+
+        /* Send Card */
+        .send-card {
+            background: var(--surface);
+            backdrop-filter: blur(14px) saturate(160%);
+            -webkit-backdrop-filter: blur(14px) saturate(160%);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 32px 28px;
+            box-shadow: var(--shadow-card);
+            position: relative;
+            overflow: hidden;
+            transition: border-color 0.4s var(--ease-smooth), box-shadow 0.4s var(--ease-smooth);
+        }
+        .send-card:hover {
+            border-color: var(--border-hi);
+            box-shadow: var(--shadow-card-hover), 0 0 20px rgba(245,166,35,0.08);
+        }
+        .send-card::after {
+            content: ''; position: absolute; top: -50%; left: -50%;
+            width: 200%; height: 200%;
+            background: radial-gradient(circle at 30% 40%, rgba(255,255,255,0.03) 0%, transparent 50%);
+            pointer-events: none;
+            animation: shimmerRotate 20s linear infinite;
+        }
+
+        .send-title {
+            font-size: 1.5rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            margin-bottom: 6px;
+            position: relative;
+            z-index: 1;
+        }
+        .send-subtitle {
+            color: var(--mid);
+            font-size: 0.85rem;
+            margin-bottom: 28px;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Balance display */
+        .balance-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: rgba(255,149,0,0.06);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            margin-bottom: 24px;
+            font-size: 0.85rem;
+            position: relative;
+            z-index: 1;
+        }
+        .balance-label {
+            color: var(--mid);
+            font-weight: 600;
+            letter-spacing: 0.03em;
+        }
+        .balance-value {
+            font-family: 'Space Mono', monospace;
+            color: var(--amber);
+            font-weight: 700;
+            font-size: 1rem;
+        }
+
+        /* Field */
+        .field-lbl {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.65rem;
+            color: var(--dim);
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            margin-bottom: 7px;
+            display: block;
+            position: relative;
+            z-index: 1;
+        }
+        .field-inp {
+            width: 100%;
+            padding: 14px 16px;
+            background: rgba(10, 10, 20, 0.5);
+            border: 1px solid var(--border-mid);
+            border-radius: var(--radius-sm);
+            color: var(--text);
+            font-family: 'Space Mono', monospace;
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.2s;
+            position: relative;
+            z-index: 1;
+            margin-bottom: 18px;
+        }
+        .field-inp:focus {
+            border-color: var(--border-hi);
+        }
+
+        /* Send button */
+        .btn-send {
+            width: 100%;
+            background: linear-gradient(135deg, var(--amber) 0%, #ff6d00 100%);
+            color: #000;
+            border-radius: var(--radius-md);
+            padding: 16px;
+            font-weight: 800;
+            font-size: 1rem;
+            letter-spacing: 1px;
+            box-shadow: 0 4px 22px rgba(255,149,0,.3);
+            transition: all 0.25s var(--ease-out-expo);
+            position: relative;
+            z-index: 1;
+            margin-top: 8px;
+        }
+        .btn-send:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 32px rgba(255,149,0,.45);
+        }
+        .btn-send:active {
+            transform: scale(0.96);
+        }
+        .btn-send:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Toast */
+        #toast {
+            position: fixed; bottom: 30px; left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: #111; padding: 14px 28px; border-radius: 50px;
+            border: 1px solid var(--amber); color: #fff; font-weight: 600;
+            font-size: 0.9rem; opacity: 0; transition: 0.3s; z-index: 10005;
+            pointer-events: none;
+        }
+        #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        #toast.success { border-color: var(--green); color: var(--green); }
+        #toast.error { border-color: var(--red); color: var(--red); }
+
+        @media (max-width: 400px) {
+            .send-card { padding: 22px 16px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="liquid-bg" aria-hidden="true"></div>
+
+    <div class="send-container">
+        <!-- Header -->
+        <div class="send-header">
+            <div class="logo">
+                <span class="logo-icon" aria-hidden="true">💸</span> SEND CC
+            </div>
+            <a href="index.html" class="btn-back">← Dashboard</a>
+        </div>
+
+        <!-- Send Card -->
+        <div class="send-card">
+            <h1 class="send-title">Transfer Choco Coins</h1>
+            <p class="send-subtitle">Send CC to any ChocoHub user instantly.</p>
+
+            <!-- Current Balance -->
+            <div class="balance-row">
+                <span class="balance-label">Your Balance</span>
+                <span class="balance-value" id="current-balance">— CC</span>
+            </div>
+
+            <!-- Recipient -->
+            <label class="field-lbl">Recipient Username</label>
+            <input type="text" id="recipient" class="field-inp" placeholder="e.g. ChocoKing" spellcheck="false">
+
+            <!-- Amount -->
+            <label class="field-lbl">Amount (CC)</label>
+            <input type="number" id="amount" class="field-inp" placeholder="0.0" min="0.001" step="any">
+
+            <!-- PIN (for security) -->
+            <label class="field-lbl">Your PIN</label>
+            <input type="password" id="pin" class="field-inp" placeholder="4 to 8 digits" maxlength="8">
+
+            <!-- Send Button -->
+            <button class="btn-send" id="send-btn">SEND CC</button>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" role="status" aria-live="polite"></div>
+
+    <script>
+        const sendBtn = document.getElementById('send-btn');
+        const recipientEl = document.getElementById('recipient');
+        const amountEl = document.getElementById('amount');
+        const pinEl = document.getElementById('pin');
+        const balanceEl = document.getElementById('current-balance');
+
+        let currentBalance = 0;
+
+        function showToast(msg, type) {
+            const t = document.getElementById('toast');
+            if (!t) return;
+            t.textContent = msg;
+            t.className = 'show ' + (type || '');
+            clearTimeout(t._timeout);
+            t._timeout = setTimeout(() => { t.className = ''; }, 3000);
+        }
+
+        async function loadBalance() {
+            const user = localStorage.getItem('choco_user');
+            const token = localStorage.getItem('choco_token');
+            if (!user || !token) {
+                balanceEl.textContent = '— CC';
+                sendBtn.disabled = true;
+                sendBtn.textContent = 'LOGIN REQUIRED';
+                sendBtn.onclick = () => { window.location.href = 'index.html'; };
+                return;
+            }
+            try {
+                const res = await fetch('/get_user/' + encodeURIComponent(user), {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.status !== 'error' && typeof data.balance === 'number') {
+                        currentBalance = data.balance;
+                        balanceEl.textContent = currentBalance.toFixed(4) + ' CC';
+                        sendBtn.disabled = false;
+                        sendBtn.textContent = 'SEND CC';
+                        sendBtn.onclick = handleSend;
+                    }
+                } else {
+                    balanceEl.textContent = '— CC';
+                }
+            } catch (e) {
+                console.warn('Balance load failed:', e.message);
+                balanceEl.textContent = '— CC';
+            }
+        }
+
+        async function handleSend() {
+            const user = localStorage.getItem('choco_user');
+            if (!user) return showToast('Please login first', 'error');
+
+            const recipient = recipientEl.value.trim();
+            const amount = parseFloat(amountEl.value);
+            const pin = pinEl.value.trim();
+
+            if (!recipient) return showToast('Enter recipient username', 'error');
+            if (recipient === user) return showToast('Cannot send to yourself', 'error');
+            if (isNaN(amount) || amount <= 0) return showToast('Enter a valid amount', 'error');
+            if (amount > currentBalance) return showToast('Insufficient balance', 'error');
+            if (pin.length < 4) return showToast('Enter your PIN (min 4 digits)', 'error');
+
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'SENDING...';
+
+            try {
+                const res = await fetch('/send_cc', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        from_username: user,
+                        pin: pin,
+                        to_username: recipient,
+                        amount: amount
+                    })
+                });
+
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showToast(`Sent ${amount} CC to ${recipient}!`, 'success');
+                    currentBalance = data.new_balance;
+                    balanceEl.textContent = currentBalance.toFixed(4) + ' CC';
+                    recipientEl.value = '';
+                    amountEl.value = '';
+                    pinEl.value = '';
+                } else {
+                    showToast(data.message || 'Transfer failed', 'error');
+                }
+            } catch (e) {
+                showToast('Network error', 'error');
+                console.error(e);
+            }
+
+            sendBtn.disabled = false;
+            sendBtn.textContent = 'SEND CC';
+        }
+
+        // Init
+        loadBalance();
+    </script>
+</body>
+</html>
