@@ -46,6 +46,7 @@ class BackupClient {
     this.snapshotTimers = {};
     this.restored = false;               // Đã restore chưa?
     this.activeServers = new Set();      // Server đã kết nối thành công
+    this.heartbeatLogCounter = {};       // Đếm số lần heartbeat để giảm log spam
   }
 
   start() {
@@ -133,6 +134,7 @@ class BackupClient {
     this.snapshotTimers[serverKey] = setInterval(() => {
       if (!client.destroyed) {
         client.write(JSON.stringify({ type: 'FULL_SNAPSHOT', token: server.token, state: db.exportFullState() }) + '\n');
+        console.log(`📤 [TCP] Snapshot sent to ${serverKey}`);
       }
     }, SNAPSHOT_INTERVAL);
   }
@@ -241,9 +243,24 @@ class BackupClient {
       rejectUnauthorized: false
     };
 
+    if (!this.heartbeatLogCounter[serverKey]) this.heartbeatLogCounter[serverKey] = 0;
+
     const heartbeat = () => {
-      const req = httpModule.request(options, (res) => { res.resume(); });
-      req.on('error', () => {});
+      const req = httpModule.request(options, (res) => {
+        res.resume();
+        if (res.statusCode === 200) {
+          this.heartbeatLogCounter[serverKey]++;
+          // Log mỗi 10 lần heartbeat (tức ~5 phút) để không spam
+          if (this.heartbeatLogCounter[serverKey] % 10 === 0) {
+            console.log(`💚 Heartbeat OK (${serverKey})`);
+          }
+        } else {
+          console.error(`⚠️ [HTTP] Heartbeat failed ${serverKey}: ${res.statusCode}`);
+        }
+      });
+      req.on('error', (err) => {
+        console.error(`❌ [HTTP] Heartbeat error ${serverKey}: ${err.message}`);
+      });
       req.setTimeout(10000);
       req.write(JSON.stringify({ type: 'PING', token: server.token }));
       req.end();
@@ -251,6 +268,7 @@ class BackupClient {
 
     if (this.heartbeats[serverKey]) clearInterval(this.heartbeats[serverKey]);
     this.heartbeats[serverKey] = setInterval(heartbeat, HEARTBEAT_INTERVAL);
+    heartbeat(); // gửi ngay lần đầu
   }
 
   startHttpSnapshot(server, serverKey) {
@@ -273,7 +291,11 @@ class BackupClient {
     const sendSnapshot = () => {
       const state = db.exportFullState();
       const req = httpModule.request(options, (res) => {
-        if (res.statusCode === 200) console.log(`📤 Snapshot sent to ${serverKey}`);
+        if (res.statusCode === 200) {
+          console.log(`📤 Snapshot sent to ${serverKey}`);
+        } else {
+          console.error(`⚠️ Snapshot send failed ${serverKey}: ${res.statusCode}`);
+        }
       });
       req.on('error', (err) => console.error(`❌ Snapshot error ${serverKey}: ${err.message}`));
       req.setTimeout(15000);
