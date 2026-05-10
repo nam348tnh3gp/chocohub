@@ -58,7 +58,6 @@ app.post('/auth', (req, res) => {
   if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing fields' });
   try {
     const result = db.authenticate(username, pin);
-    // Không cần broadcast nữa – backupSync sẽ gửi snapshot toàn bộ DB
     res.json(result);
   } catch (e) {
     res.status(401).json({ status: 'error', message: e.message });
@@ -86,6 +85,44 @@ app.get('/get_balance', (req, res) => {
     res.json({ status: 'success', balance: user.balance });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+// ─── Send CC (Transfer) ──────────────────────────────
+app.post('/send_cc', (req, res) => {
+  const { from_username, pin, to_username, amount } = req.body;
+  if (!from_username || !pin || !to_username || !amount) {
+    return res.status(400).json({ status: 'error', message: 'Missing fields' });
+  }
+  try {
+    // Xác thực người gửi
+    db.authenticate(from_username, pin);
+    const sendAmount = parseFloat(amount);
+    if (isNaN(sendAmount) || sendAmount <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Invalid amount' });
+    }
+
+    const sender = db.getUser(from_username);
+    if (!sender) return res.status(404).json({ status: 'error', message: 'Sender not found' });
+    if (sender.balance < sendAmount) {
+      return res.status(400).json({ status: 'error', message: 'Insufficient balance' });
+    }
+
+    const receiver = db.getUser(to_username);
+    if (!receiver) return res.status(404).json({ status: 'error', message: 'Receiver not found' });
+
+    // Thực hiện chuyển
+    db.updateBalance(from_username, -sendAmount);
+    db.updateBalance(to_username, sendAmount);
+
+    const newBalance = db.getUser(from_username).balance;
+    res.json({
+      status: 'success',
+      message: `Sent ${sendAmount} CC to ${to_username}`,
+      new_balance: newBalance
+    });
+  } catch (e) {
+    res.status(400).json({ status: 'error', message: e.message });
   }
 });
 
@@ -269,10 +306,9 @@ app.post('/api/backup/sync', (req, res) => {
     
     console.log(`📥 Received from backup: type=${data.type}`);
     
-    // Nhận snapshot đầy đủ (FULL_SNAPSHOT) từ backup server
     if (data.type === 'FULL_SNAPSHOT' && data.state) {
       console.log('📥 Receiving full DB snapshot from backup server...');
-      db.importFullState(data.state);  // Hàm này cần được thêm vào db.js
+      db.importFullState(data.state);
       console.log('✅ Full database restored from backup');
       return res.json({ type: 'SNAPSHOT_ACK', status: 'success' });
     }
@@ -325,6 +361,7 @@ app.listen(PORT, () => {
   console.log('║  PoW Auto-Bounty: active            ║');
   console.log('║  PoS Minting: active (30s blocks)   ║');
   console.log('║  Backup Sync: active (full snapshot)║');
+  console.log('║  Send CC: /send_cc                  ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
 
