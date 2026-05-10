@@ -203,28 +203,30 @@ class BackupClient {
                 console.error(`❌ Unexpected response from ${serverKey}:`, msg.type);
                 this.pendingReady[serverKey] = { type: 'empty' };
               }
+
+              // ✅ Thành công: khởi tạo timer nếu chưa có, rồi kiểm tra đủ chưa
+              if (!this.readyTimer) {
+                this.readyTimer = setTimeout(() => this.checkAllReady(), READY_TIMEOUT);
+              }
+              this.checkAllReady();
+
             } catch (e) {
               console.error(`❌ Invalid JSON from ${serverKey}:`, body.substring(0, 200));
-              this.pendingReady[serverKey] = { type: 'empty' };
+              // ❌ Lỗi parse: không thêm vào pendingReady, retry sau
+              setTimeout(() => sendReady(), RECONNECT_DELAY);
             }
           } else {
             console.error(`❌ READY failed (${serverKey}) with status ${res.statusCode}`);
-            this.pendingReady[serverKey] = { type: 'empty' };
+            // ❌ Lỗi HTTP: không thêm vào pendingReady, retry sau
+            setTimeout(() => sendReady(), RECONNECT_DELAY);
           }
-
-          if (!this.readyTimer) {
-            this.readyTimer = setTimeout(() => this.checkAllReady(), READY_TIMEOUT);
-          }
-          this.checkAllReady();
         });
       });
 
       req.on('error', (err) => {
         if (this.readyProcessed) return;
         console.error(`❌ [HTTP] READY error (${serverKey}): ${err.message}`);
-        this.pendingReady[serverKey] = { type: 'empty' };
-        if (!this.readyTimer) this.readyTimer = setTimeout(() => this.checkAllReady(), READY_TIMEOUT);
-        this.checkAllReady();
+        // ❌ Lỗi mạng: không thêm vào pendingReady, retry sau
         setTimeout(() => sendReady(), RECONNECT_DELAY);
       });
 
@@ -242,8 +244,10 @@ class BackupClient {
     const total = this.servers.length;
     const received = Object.keys(this.pendingReady).length;
 
+    // Nếu chưa đủ và timer vẫn còn (chưa timeout) thì chờ
     if (received < total && this.readyTimer) return;
 
+    // Đến lúc xử lý: dọn timer và đánh dấu đã xử lý
     this.readyProcessed = true;
     if (this.readyTimer) {
       clearTimeout(this.readyTimer);
@@ -281,6 +285,7 @@ class BackupClient {
       console.log('ℹ️ No valid backup data found – starting fresh');
     }
 
+    // Bắt đầu heartbeat & snapshot cho tất cả server (kể cả server lỗi, vì chúng sẽ tự retry kết nối)
     for (const server of this.servers) {
       const key = `${server.host}:${server.port}`;
       this.readySent.add(key);
