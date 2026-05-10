@@ -43,10 +43,10 @@ class BackupClient {
     this.sockets = [];
     this.heartbeats = {};
     this.snapshotTimers = {};
-    this.readySent = new Set();          // 🆕 Khởi tạo readySent
+    this.readySent = new Set();
     this.pendingReady = {};
     this.readyTimer = null;
-    this.readyProcessed = false;         // 🆕 Flag tránh chạy 2 lần
+    this.readyProcessed = false;
   }
 
   start() {
@@ -188,7 +188,6 @@ class BackupClient {
         let body = '';
         res.on('data', chunk => body += chunk);
         res.on('end', () => {
-          // 🆕 Bỏ qua nếu đã xử lý xong
           if (this.readyProcessed) return;
 
           if (res.statusCode === 200 && body.trim()) {
@@ -238,7 +237,6 @@ class BackupClient {
   }
 
   checkAllReady() {
-    // 🆕 Chỉ chạy 1 lần
     if (this.readyProcessed) return;
 
     const total = this.servers.length;
@@ -256,17 +254,27 @@ class BackupClient {
 
     let bestSnapshot = null;
     let bestUserCount = -1;
+    let bestSize = 0;
 
     for (const [key, data] of Object.entries(this.pendingReady)) {
-      console.log(`   ${key}: ${data.type}${data.userCount !== undefined ? ` (${data.userCount} users)` : ''}`);
-      if (data.type === 'snapshot' && data.userCount > bestUserCount) {
-        bestSnapshot = data.state;
-        bestUserCount = data.userCount;
+      if (data.type === 'snapshot' && data.state) {
+        const userCount = Array.isArray(data.state.users) ? data.state.users.length : 0;
+        const size = JSON.stringify(data.state).length;
+        
+        console.log(`   ${key}: ${userCount} users, ${(size/1024).toFixed(1)}KB`);
+        
+        if (userCount > bestUserCount || (userCount === bestUserCount && size > bestSize)) {
+          bestSnapshot = data.state;
+          bestUserCount = userCount;
+          bestSize = size;
+        }
+      } else {
+        console.log(`   ${key}: ${data.type}`);
       }
     }
 
     if (bestSnapshot && bestUserCount > 0) {
-      console.log(`📥 Restoring from best snapshot (${bestUserCount} users)...`);
+      console.log(`📥 Restoring from best snapshot (${bestUserCount} users, ${(bestSize/1024).toFixed(1)}KB)...`);
       db.importFullState(bestSnapshot);
       console.log('✅ Database restored');
     } else {
