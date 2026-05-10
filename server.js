@@ -115,6 +115,9 @@ app.post('/send_cc', (req, res) => {
     db.updateBalance(from_username, -sendAmount);
     db.updateBalance(to_username, sendAmount);
 
+    // 🆕 Lưu lịch sử giao dịch
+    db.addTransaction(from_username, to_username, sendAmount);
+
     const newBalance = db.getUser(from_username).balance;
     res.json({
       status: 'success',
@@ -123,6 +126,18 @@ app.post('/send_cc', (req, res) => {
     });
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
+  }
+});
+
+// 🆕 Lấy lịch sử giao dịch của một user
+app.get('/get_transactions', (req, res) => {
+  const username = req.query.username;
+  if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
+  try {
+    const transactions = db.getTransactions(username, 20);
+    res.json({ status: 'success', transactions });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
   }
 });
 
@@ -362,6 +377,7 @@ app.listen(PORT, () => {
   console.log('║  PoS Minting: active (30s blocks)   ║');
   console.log('║  Backup Sync: active (full snapshot)║');
   console.log('║  Send CC: /send_cc                  ║');
+  console.log('║  Transactions: /get_transactions    ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
 
