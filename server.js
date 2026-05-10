@@ -59,9 +59,8 @@ app.post('/auth', (req, res) => {
   try {
     const result = db.authenticate(username, pin);
 
-    // 🔐 Khi tạo user mới, lấy pin_hash để backup đồng bộ đầy đủ
     if (result.message === 'Account created') {
-      const userRecord = db.getUserWithHash(username); // sẽ thêm hàm này trong db.js
+      const userRecord = db.getUserWithHash(username);
       backupClient.broadcast({
         type: 'DELTA',
         seq: db.incrementSeq(),
@@ -69,7 +68,7 @@ app.post('/auth', (req, res) => {
         username: username,
         payload: {
           balance: 0,
-          pin_hash: userRecord.pin_hash      // gửi kèm hash của pin gốc
+          pin_hash: userRecord.pin_hash
         },
         dbHash: getDbHash()
       });
@@ -303,55 +302,79 @@ app.get('/health', (req, res) => {
   });
 });
 
-// BACKUP RECEIVE ENDPOINT
+// ═══════════════════════════════════════════════════════
+// BACKUP RECEIVE ENDPOINT - Nhận backup từ backup server
+// ═══════════════════════════════════════════════════════
 app.post('/api/backup/sync', (req, res) => {
   try {
     const data = req.body;
     const token = data.token || '';
+    
     if (token !== (process.env.BACKUP_TOKEN || 'chocohub-default-token')) {
       return res.status(401).json({ status: 'error', message: 'Invalid token' });
     }
+    
     console.log(`📥 Received from backup: type=${data.type}, seq=${data.seq}`);
+    
     if (data.type === 'FULL_BACKUP') {
       console.log(`📥 Receiving full backup (${data.rows ? data.rows.length : 0} items)...`);
+      
       if (data.rows && Array.isArray(data.rows)) {
         backupClient.restoreFromBackup(data.rows);
         console.log('✅ Full backup restored from backup server');
       } else {
         console.log('⚠️ FULL_BACKUP received but no rows found');
       }
-      return res.json({ type: 'BACKUP_ACK', seq: data.seq, status: 'success', message: 'Backup restored' });
+      
+      return res.json({
+        type: 'BACKUP_ACK',
+        seq: data.seq,
+        status: 'success',
+        message: 'Backup restored'
+      });
     }
-    res.json({ type: 'ACK', seq: data.seq || 0, status: 'received' });
+    
+    res.json({
+      type: 'ACK',
+      seq: data.seq || 0,
+      status: 'received'
+    });
+    
   } catch (e) {
     console.error('❌ Error receiving backup:', e.message);
     res.status(500).json({ status: 'error', message: e.message });
   }
 });
 
-// SPA fallback
+// ─── SPA fallback ─────────────────────────────────────
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, 'public', 'index.html');
   try {
     if (fs.existsSync(indexPath)) {
       res.sendFile(indexPath);
     } else {
-      res.status(200).send('<!DOCTYPE html><html>...');
+      res.status(200).send('<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>ChocoHub</title><style>body{background:#0a0a12;color:#eee4d8;font-family:"Outfit",sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;text-align:center}h1{color:#f58a00;font-size:2.5rem}p{color:#8b8296;margin-top:10px}</style></head><body><div><h1>ChocoHub</h1><p>Server is running. Please upload frontend files to continue.</p><p style="font-size:0.8rem;margin-top:20px;">API: <code style="color:#f58a00;">/api/test</code></p></div></body></html>');
     }
   } catch(e) {
     res.status(500).send('Server error');
   }
 });
 
-// Error handler
+// ─── Error handler ─────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error('Server error:', err.message);
   res.status(500).json({ status: 'error', message: 'Internal server error' });
 });
 
+// ═══════════════════════════════════════════════════════
+// START AUTO-BOUNTY (PoW) + PoS MINTING
+// ═══════════════════════════════════════════════════════
 blockchain.startAutoBounty();
 blockchain.startPoSMinting();
 
+// ═══════════════════════════════════════════════════════
+// START SERVER
+// ═══════════════════════════════════════════════════════
 app.listen(PORT, () => {
   console.log('');
   console.log('╔══════════════════════════════════════╗');
@@ -365,5 +388,6 @@ app.listen(PORT, () => {
   console.log('║  Backup Sync: active                ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
+
   backupClient.start();
 });
