@@ -194,28 +194,53 @@ function applyDelta(deltaMsg) {
         }
         break;
       }
-      case 'block_mined':
-        db.prepare(
+
+      case 'block_mined': {
+        const info = db.prepare(
           'INSERT OR IGNORE INTO blocks_mined (username, bounty_id, reward) VALUES (?, ?, ?)'
         ).run(username, payload.bounty_id, payload.reward || 0);
-        break;
-      case 'snake_claim':
-        db.prepare(
-          'INSERT OR IGNORE INTO snake_claims (username, apples, mode, reward, claimed_at) VALUES (?, ?, ?, ?, datetime("now"))'
-        ).run(username, payload.apples, payload.mode || 'normal', payload.reward || 0);
-        break;
-      case 'stake': {
-        const existingStake = db.prepare('SELECT username FROM stakes WHERE username = ?').get(username);
-        if (existingStake) {
-          db.prepare('UPDATE stakes SET amount = amount + ? WHERE username = ?').run(payload.amount || 0, username);
-        } else {
-          db.prepare('INSERT INTO stakes (username, amount, pending_reward) VALUES (?, ?, 0)').run(username, payload.amount || 0);
+        
+        // Nếu insert thành công, cộng balance
+        if (info.changes > 0) {
+          updateBalance(username, payload.reward || 0);
         }
         break;
       }
-      case 'unstake':
-        db.prepare('UPDATE stakes SET amount = 0, pending_reward = 0 WHERE username = ?').run(username);
+
+      case 'snake_claim': {
+        const info = db.prepare(
+          `INSERT OR IGNORE INTO snake_claims (username, apples, mode, reward, claimed_at) 
+           VALUES (?, ?, ?, ?, datetime('now'))`
+        ).run(username, payload.apples, payload.mode || 'normal', payload.reward || 0);
+        
+        if (info.changes > 0) {
+          updateBalance(username, payload.reward || 0);
+        }
         break;
+      }
+
+      case 'stake': {
+        const amount = payload.amount || 0;
+        const existing = db.prepare('SELECT username FROM stakes WHERE username = ?').get(username);
+        if (!existing) {
+          db.prepare('INSERT INTO stakes (username, amount, pending_reward) VALUES (?, ?, 0)').run(username, amount);
+          // Trừ balance vì đây là lần stake đầu tiên trên hệ thống mới
+          updateBalance(username, -amount);
+        } else {
+          db.prepare('UPDATE stakes SET amount = amount + ? WHERE username = ?').run(amount, username);
+          updateBalance(username, -amount);
+        }
+        break;
+      }
+
+      case 'unstake': {
+        const amount = payload.amount || 0;
+        db.prepare('UPDATE stakes SET amount = 0, pending_reward = 0 WHERE username = ?').run(username);
+        // Hoàn trả balance
+        updateBalance(username, amount);
+        break;
+      }
+
       default:
         console.log(`⚠️ Unknown delta action: ${action}`);
     }
@@ -224,7 +249,6 @@ function applyDelta(deltaMsg) {
   }
 }
 
-// ✅ MỘT module.exports DUY NHẤT bao gồm tất cả hàm
 module.exports = {
   authenticate,
   getUser,
@@ -233,18 +257,14 @@ module.exports = {
   getActiveMiners,
   getLastSnakeClaim,
   insertSnakeClaim,
-  // PoS
   getStake,
   stake,
   unstake,
   getValidators,
   addStakeReward,
-  // Leaderboard
   getLeaderboard,
-  // Backup sync
   getSeq,
   incrementSeq,
-  // Backup support
   getAllUsers,
   getAllStakes,
   applyDelta
