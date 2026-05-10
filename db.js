@@ -1,4 +1,4 @@
-// db.js – Full fix + PoS Staking support + Leaderboard (Case-Sensitive Username) + Backup sync
+// db.js – Full fix + PoS Staking + Leaderboard + Backup full snapshot
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -59,7 +59,7 @@ db.exec(`
 
 console.log('✅ Database ready (better-sqlite3)');
 
-// ─── Helper functions ─────────────────────────────
+// ─── Auth ─────────────────────────────────────────
 function authenticate(username, pin) {
   username = username.trim();
   let user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
@@ -80,15 +80,11 @@ function getUser(username) {
   return db.prepare('SELECT username, balance FROM users WHERE username = ?').get(username.trim());
 }
 
-// 🆕 Hàm lấy thông tin user kèm pin_hash (dùng cho backup)
-function getUserWithHash(username) {
-  return db.prepare('SELECT username, balance, pin_hash FROM users WHERE username = ?').get(username.trim());
-}
-
 function updateBalance(username, amount) {
   db.prepare('UPDATE users SET balance = balance + ? WHERE username = ?').run(amount, username.trim());
 }
 
+// ─── Blocks & Miners ─────────────────────────────
 function getRecentBlocks(limit = 10) {
   return db.prepare('SELECT bounty_id as id, username, reward FROM blocks_mined ORDER BY mined_at DESC LIMIT ?').all(limit);
 }
@@ -97,7 +93,7 @@ function getActiveMiners(limit = 5) {
   return db.prepare('SELECT DISTINCT username, "web" as device FROM blocks_mined ORDER BY mined_at DESC LIMIT ?').all(limit);
 }
 
-// ─── Staking functions ────────────────────────────
+// ─── Staking ─────────────────────────────────────
 function getStake(username) {
   username = username.trim();
   let row = db.prepare('SELECT * FROM stakes WHERE username = ?').get(username);
@@ -114,9 +110,7 @@ function stake(username, amount) {
   if (!user) throw new Error('User not found');
   if (user.balance < amount) throw new Error('Insufficient balance');
   updateBalance(username, -amount);
-  const current = getStake(username);
-  db.prepare('UPDATE stakes SET amount = amount + ?, pending_reward = pending_reward WHERE username = ?')
-    .run(amount, username);
+  db.prepare('UPDATE stakes SET amount = amount + ?, pending_reward = pending_reward WHERE username = ?').run(amount, username);
   return getStake(username);
 }
 
@@ -135,21 +129,16 @@ function getValidators(minStake = 10) {
 }
 
 function addStakeReward(username, reward) {
-  db.prepare('UPDATE stakes SET pending_reward = pending_reward + ? WHERE username = ?')
-    .run(reward, username.trim());
+  db.prepare('UPDATE stakes SET pending_reward = pending_reward + ? WHERE username = ?').run(reward, username.trim());
 }
 
 // ─── Snake claim ─────────────────────────────────
 function getLastSnakeClaim(username) {
-  return db.prepare(
-    'SELECT claimed_at FROM snake_claims WHERE username=? ORDER BY claimed_at DESC LIMIT 1'
-  ).get(username.trim());
+  return db.prepare('SELECT claimed_at FROM snake_claims WHERE username=? ORDER BY claimed_at DESC LIMIT 1').get(username.trim());
 }
 
 function insertSnakeClaim(username, apples, mode, reward) {
-  return db.prepare(
-    'INSERT INTO snake_claims (username, apples, mode, reward) VALUES (?, ?, ?, ?)'
-  ).run(username.trim(), apples, mode || 'normal', reward);
+  return db.prepare('INSERT INTO snake_claims (username, apples, mode, reward) VALUES (?, ?, ?, ?)').run(username.trim(), apples, mode || 'normal', reward);
 }
 
 // ─── Leaderboard ─────────────────────────────────
@@ -164,7 +153,7 @@ function getLeaderboard(mode, limit = 10) {
   `).all(mode, limit);
 }
 
-// 🟢 Backup sync sequence
+// ─── Sequence (giữ lại nếu cần) ──────────────────
 function getSeq() {
   const row = db.prepare('SELECT seq FROM sync_seq WHERE id = 1').get();
   return row ? row.seq : 0;
@@ -175,7 +164,7 @@ function incrementSeq() {
   return db.prepare('SELECT seq FROM sync_seq WHERE id = 1').get().seq;
 }
 
-// 🟢 Backup support: export full data & apply delta
+// 🟢 Hỗ trợ hash nhanh cho health check
 function getAllUsers() {
   return db.prepare('SELECT username, balance FROM users').all();
 }
@@ -184,80 +173,79 @@ function getAllStakes() {
   return db.prepare('SELECT username, amount, pending_reward FROM stakes').all();
 }
 
-function applyDelta(deltaMsg) {
-  const { action, username, payload } = deltaMsg;
-  try {
-    switch (action) {
-      case 'user_created': {
-        const existing = db.prepare('SELECT username FROM users WHERE username = ?').get(username);
-        if (!existing) {
-          // Sử dụng pin_hash từ payload nếu có, ngược lại dùng hash mặc định
-          const pinHash = payload.pin_hash || bcrypt.hashSync('backup_default', 10);
-          db.prepare('INSERT INTO users (username, pin_hash, balance) VALUES (?, ?, ?)').run(
-            username, 
-            pinHash,
-            payload.balance || 0
-          );
-        }
-        break;
-      }
-
-      case 'block_mined': {
-        const info = db.prepare(
-          'INSERT OR IGNORE INTO blocks_mined (username, bounty_id, reward) VALUES (?, ?, ?)'
-        ).run(username, payload.bounty_id, payload.reward || 0);
-        
-        // Nếu insert thành công, cộng balance
-        if (info.changes > 0) {
-          updateBalance(username, payload.reward || 0);
-        }
-        break;
-      }
-
-      case 'snake_claim': {
-        const info = db.prepare(
-          `INSERT OR IGNORE INTO snake_claims (username, apples, mode, reward, claimed_at) 
-           VALUES (?, ?, ?, ?, datetime('now'))`
-        ).run(username, payload.apples, payload.mode || 'normal', payload.reward || 0);
-        
-        if (info.changes > 0) {
-          updateBalance(username, payload.reward || 0);
-        }
-        break;
-      }
-
-      case 'stake': {
-        const amount = payload.amount || 0;
-        const existing = db.prepare('SELECT username FROM stakes WHERE username = ?').get(username);
-        if (!existing) {
-          db.prepare('INSERT INTO stakes (username, amount, pending_reward) VALUES (?, ?, 0)').run(username, amount);
-          updateBalance(username, -amount);
-        } else {
-          db.prepare('UPDATE stakes SET amount = amount + ? WHERE username = ?').run(amount, username);
-          updateBalance(username, -amount);
-        }
-        break;
-      }
-
-      case 'unstake': {
-        const amount = payload.amount || 0;
-        db.prepare('UPDATE stakes SET amount = 0, pending_reward = 0 WHERE username = ?').run(username);
-        updateBalance(username, amount);
-        break;
-      }
-
-      default:
-        console.log(`⚠️ Unknown delta action: ${action}`);
-    }
-  } catch (e) {
-    console.error(`❌ Error applying delta: ${e.message}`);
-  }
+// ═══════════════════════════════════════════════════
+// 🆕 FULL DATABASE SNAPSHOT (dùng cho backup)
+// ═══════════════════════════════════════════════════
+function exportFullState() {
+  const users = db.prepare('SELECT username, pin_hash, balance FROM users').all();
+  const stakes = db.prepare('SELECT username, amount, pending_reward FROM stakes').all();
+  const blocks = db.prepare('SELECT username, bounty_id, reward, mined_at FROM blocks_mined ORDER BY mined_at ASC').all();
+  const claims = db.prepare('SELECT username, apples, mode, reward, claimed_at FROM snake_claims ORDER BY claimed_at ASC').all();
+  const bounties = db.prepare('SELECT id, creator_username, target_device, difficulty, reward, cost, binary_target, last_hash, nonce, solver_username, status, created_at FROM bounties').all();
+  
+  return {
+    users,
+    stakes,
+    blocks_mined: blocks,
+    snake_claims: claims,
+    bounties
+  };
 }
 
+function importFullState(state) {
+  if (!state) return false;
+
+  const transaction = db.transaction(() => {
+    // Xóa dữ liệu cũ (giữ cấu trúc bảng)
+    db.exec('DELETE FROM users');
+    db.exec('DELETE FROM stakes');
+    db.exec('DELETE FROM blocks_mined');
+    db.exec('DELETE FROM snake_claims');
+    db.exec('DELETE FROM bounties');
+    db.exec('DELETE FROM sync_seq');
+
+    // Insert users
+    const insertUser = db.prepare('INSERT INTO users (username, pin_hash, balance) VALUES (?, ?, ?)');
+    (state.users || []).forEach(u => {
+      insertUser.run(u.username, u.pin_hash, u.balance);
+    });
+
+    // Insert stakes
+    const insertStake = db.prepare('INSERT INTO stakes (username, amount, pending_reward) VALUES (?, ?, ?)');
+    (state.stakes || []).forEach(s => {
+      insertStake.run(s.username, s.amount, s.pending_reward);
+    });
+
+    // Insert blocks_mined
+    const insertBlock = db.prepare('INSERT INTO blocks_mined (username, bounty_id, reward, mined_at) VALUES (?, ?, ?, ?)');
+    (state.blocks_mined || []).forEach(b => {
+      insertBlock.run(b.username, b.bounty_id, b.reward, b.mined_at);
+    });
+
+    // Insert snake_claims
+    const insertClaim = db.prepare('INSERT INTO snake_claims (username, apples, mode, reward, claimed_at) VALUES (?, ?, ?, ?, ?)');
+    (state.snake_claims || []).forEach(c => {
+      insertClaim.run(c.username, c.apples, c.mode, c.reward, c.claimed_at);
+    });
+
+    // Insert bounties
+    const insertBounty = db.prepare('INSERT INTO bounties (id, creator_username, target_device, difficulty, reward, cost, binary_target, last_hash, nonce, solver_username, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    (state.bounties || []).forEach(b => {
+      insertBounty.run(b.id, b.creator_username, b.target_device, b.difficulty, b.reward, b.cost, b.binary_target, b.last_hash, b.nonce, b.solver_username, b.status, b.created_at);
+    });
+
+    // Đặt lại sequence
+    db.prepare('INSERT INTO sync_seq (id, seq) VALUES (1, 0)').run();
+  });
+
+  transaction();
+  return true;
+}
+
+// ─── Exports ─────────────────────────────────────
 module.exports = {
   authenticate,
   getUser,
-  getUserWithHash,    // 🆕 Export hàm mới
   updateBalance,
   getRecentBlocks,
   getActiveMiners,
@@ -273,5 +261,6 @@ module.exports = {
   incrementSeq,
   getAllUsers,
   getAllStakes,
-  applyDelta
+  exportFullState,    // 
+  importFullState     // 
 };
