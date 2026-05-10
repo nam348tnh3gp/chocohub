@@ -1,13 +1,22 @@
-// backupSync.js – Client đồng bộ real-time đến Backup Server
+// backupSync.js – Client đồng bộ real-time đến Backup Server (fix TLS ngrok)
 const net = require('net');
 const https = require('https');
 const http = require('http');
+const crypto = require('crypto');
 const db = require('./db');
 
 const BACKUP_SERVERS = (process.env.BACKUP_SERVERS || '').split(',').filter(Boolean);
 const BACKUP_TOKEN = process.env.BACKUP_TOKEN || 'chocohub-default-token';
 const RECONNECT_DELAY = 5000;
-const HEARTBEAT_INTERVAL = 30000; // 30 giây heartbeat
+const HEARTBEAT_INTERVAL = 30000;
+
+// Agent TLS chuyên dụng cho ngrok và chứng chỉ tự ký
+const httpsAgent = new https.Agent({
+  rejectUnauthorized: false,              // Bỏ qua lỗi chứng chỉ
+  minVersion: 'TLSv1.2',                 // Ép dùng TLS 1.2+
+  secureOptions: crypto.constants.SSL_OP_NO_TICKET, // Tắt session ticket
+  checkServerIdentity: () => undefined,  // Không kiểm tra hostname
+});
 
 class BackupClient {
   constructor() {
@@ -32,7 +41,7 @@ class BackupClient {
     this.sockets = [];
     this.httpClients = [];
     this.readySent = new Set();
-    this.heartbeats = {}; // lưu interval cho TCP
+    this.heartbeats = {};
   }
 
   start() {
@@ -52,7 +61,7 @@ class BackupClient {
     }
   }
 
-  // ==================== TCP Connection ====================
+  // ==================== TCP (giữ nguyên) ====================
   connectTcp(server) {
     const serverKey = `${server.host}:${server.port}`;
     const client = new net.Socket();
@@ -102,14 +111,12 @@ class BackupClient {
 
   startTcpHeartbeat(client, serverKey) {
     this.stopHeartbeat(serverKey);
-    
     const interval = setInterval(() => {
       if (!client.destroyed) {
         const heartbeat = { type: 'PING', timestamp: Date.now() };
         client.write(JSON.stringify(heartbeat) + '\n');
       }
     }, HEARTBEAT_INTERVAL);
-    
     this.heartbeats[serverKey] = interval;
   }
 
@@ -134,11 +141,12 @@ class BackupClient {
     }
   }
 
-  // ==================== HTTP/HTTPS Connection ====================
+  // ==================== HTTP/HTTPS (đã fix TLS) ====================
   connectHttp(server) {
     const serverKey = `${server.host}:${server.port}`;
     const httpModule = server.protocol === 'https' ? https : http;
-    
+    const agent = server.protocol === 'https' ? httpsAgent : undefined;
+
     const baseOptions = {
       hostname: server.host,
       port: server.port,
@@ -151,10 +159,10 @@ class BackupClient {
         'Accept': 'application/json',
         'Connection': 'keep-alive'
       },
+      agent,  // <-- Dùng agent TLS nếu là HTTPS
       rejectUnauthorized: false
     };
 
-    // Gửi READY lần đầu
     const sendReady = () => {
       const currentSeq = db.getSeq();
       const isEmpty = currentSeq === 0;
@@ -170,7 +178,6 @@ class BackupClient {
         res.on('data', chunk => body += chunk);
         res.on('end', () => {
           console.log(`🔗 [HTTP] Initial connection to ${serverKey}, status: ${res.statusCode}`);
-          
           if (res.statusCode === 200 && body.trim()) {
             try {
               const msg = JSON.parse(body);
@@ -179,7 +186,6 @@ class BackupClient {
                 this.readySent.add(serverKey);
                 setTimeout(() => startHeartbeat(), HEARTBEAT_INTERVAL);
               } else if (msg.type === 'FULL_BACKUP') {
-                // Backup server gửi ngay full backup
                 console.log(`📥 [HTTP] Received FULL_BACKUP in READY response`);
                 this.processMessage(msg, server);
                 this.readySent.add(serverKey);
@@ -210,7 +216,6 @@ class BackupClient {
       console.log(`📤 [HTTP] Sent READY to ${serverKey} (seq=${currentSeq}, empty=${isEmpty})`);
     };
 
-    // Heartbeat định kỳ
     const startHeartbeat = () => {
       const doHeartbeat = () => {
         const currentSeq = db.getSeq();
@@ -230,7 +235,6 @@ class BackupClient {
               setTimeout(() => sendReady(), RECONNECT_DELAY);
               return;
             }
-            
             try {
               if (body.trim()) {
                 const msg = JSON.parse(body);
@@ -239,7 +243,6 @@ class BackupClient {
                 }
               }
             } catch (e) {}
-            
             setTimeout(() => doHeartbeat(), HEARTBEAT_INTERVAL);
           });
         });
@@ -268,26 +271,18 @@ class BackupClient {
       case 'READY_ACK':
         console.log(`✅ Backup server ${server.host}:${server.port} ack, last seq=${msg.seq}`);
         break;
-        
       case 'FULL_BACKUP':
         console.log(`📥 Receiving full backup (${msg.rows ? msg.rows.length : 0} items)...`);
         this.restoreFromBackup(msg.rows || []);
         break;
-        
       case 'DELTA':
         console.log(`🔄 Received delta from backup: ${msg.action || 'unknown'}`);
         if (msg.action && msg.payload) {
-          db.applyDelta({
-            action: msg.action,
-            username: msg.username,
-            payload: msg.payload
-          });
+          db.applyDelta({ action: msg.action, username: msg.username, payload: msg.payload });
         }
         break;
-        
       case 'PONG':
         break;
-        
       default:
         console.log('❓ Unknown message from backup:', msg.type);
     }
@@ -316,8 +311,6 @@ class BackupClient {
   // ==================== Broadcast ====================
   broadcast(deltaMsg) {
     const data = JSON.stringify(deltaMsg) + '\n';
-    
-    // TCP
     this.sockets.forEach(({ socket }) => {
       if (!socket.destroyed) {
         try { socket.write(data); } catch (e) {
@@ -325,15 +318,14 @@ class BackupClient {
         }
       }
     });
-
-    // HTTP/HTTPS
     this.httpClients.forEach(({ server }) => {
       this.sendDeltaHttp(server, deltaMsg);
     });
   }
-  
+
   sendDeltaHttp(server, deltaMsg) {
     const httpModule = server.protocol === 'https' ? https : http;
+    const agent = server.protocol === 'https' ? httpsAgent : undefined;
     const payload = JSON.stringify({
       type: 'DELTA',
       token: server.token,
@@ -343,7 +335,7 @@ class BackupClient {
       payload: deltaMsg.payload,
       dbHash: deltaMsg.dbHash
     });
-    
+
     const options = {
       hostname: server.host,
       port: server.port,
@@ -352,23 +344,24 @@ class BackupClient {
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 'ChocoHub-BackupClient/1.0',
-        'ngrok-skip-browser-warning': '1',   // Quan trọng cho ngrok
+        'ngrok-skip-browser-warning': '1',
         'Accept': 'application/json',
         'Connection': 'keep-alive'
       },
+      agent,                       // Dùng agent TLS đặc biệt
       rejectUnauthorized: false
     };
-    
+
     const req = httpModule.request(options, (res) => {
       if (res.statusCode !== 200) {
         console.error(`⚠️ HTTP delta failed: ${res.statusCode}`);
       }
     });
-    
+
     req.on('error', (err) => {
       console.error(`❌ HTTP delta error: ${err.message}`);
     });
-    
+
     req.setTimeout(5000);
     req.write(payload);
     req.end();
