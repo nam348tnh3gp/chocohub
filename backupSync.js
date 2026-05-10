@@ -1,4 +1,4 @@
-// backupSync.js – Client đồng bộ full-snapshot, chờ tất cả backup server rồi khôi phục
+// backupSync.js – Client đồng bộ full-snapshot. Chỉ cần 1 server online là restore ngay.
 const net = require('net');
 const https = require('https');
 const http = require('http');
@@ -10,7 +10,8 @@ const BACKUP_TOKEN = process.env.BACKUP_TOKEN || 'chocohub';
 const RECONNECT_DELAY = 5000;
 const HEARTBEAT_INTERVAL = 30000;        // 30 giây
 const SNAPSHOT_INTERVAL = 300000;        // 5 phút gửi snapshot
-const READY_TIMEOUT = 15000;             // chờ tối đa 15s cho các server phản hồi
+const READY_TIMEOUT = 10000;             // 10s cho 1 request READY
+const RETRY_INTERVAL = 30000;            // 30s thử lại server lỗi
 
 // Agent TLS cho ngrok / chứng chỉ tự ký
 const httpsAgent = new https.Agent({
@@ -43,10 +44,8 @@ class BackupClient {
     this.sockets = [];
     this.heartbeats = {};
     this.snapshotTimers = {};
-    this.readySent = new Set();
-    this.pendingReady = {};
-    this.readyTimer = null;
-    this.readyProcessed = false;
+    this.restored = false;               // Đã restore chưa?
+    this.activeServers = new Set();      // Server đã kết nối thành công
   }
 
   start() {
@@ -54,7 +53,7 @@ class BackupClient {
       console.log('ℹ️ No backup servers configured. Skipping backup sync.');
       return;
     }
-    console.log(`🔁 Backup sync (full snapshot, wait-all mode) starting to ${this.servers.length} server(s)...`);
+    console.log(`🔁 Backup sync starting to ${this.servers.length} server(s)...`);
     this.servers.forEach(srv => this.connect(srv));
   }
 
@@ -72,35 +71,28 @@ class BackupClient {
     const client = new net.Socket();
 
     client.connect(server.port, server.host, () => {
-      console.log(`🔗 [TCP] Backup client connected to ${serverKey}`);
-      this.sendReadyTcp(client, server.token);
+      console.log(`🔗 [TCP] Connected to ${serverKey}`);
+      this.sendReadyTcp(client, server);
       this.startTcpHeartbeat(client, serverKey);
-      this.startSnapshotIntervalTcp(client, server.token, serverKey);
+      this.startSnapshotIntervalTcp(client, server, serverKey);
     });
 
     client.on('data', (data) => this.handleTcpData(client, data));
     client.on('close', () => {
-      console.log(`🔌 [TCP] Disconnected from ${serverKey}, retrying in ${RECONNECT_DELAY/1000}s...`);
+      console.log(`🔌 [TCP] Disconnected ${serverKey}, retry in ${RECONNECT_DELAY/1000}s...`);
       this.cleanupTcp(serverKey);
       setTimeout(() => this.connect(server), RECONNECT_DELAY);
     });
     client.on('error', (err) => {
-      console.error(`❌ [TCP] Socket error (${serverKey}): ${err.message}`);
+      console.error(`❌ [TCP] Error ${serverKey}: ${err.message}`);
       client.destroy();
     });
 
     this.sockets.push({ socket: client, server, serverKey, type: 'tcp' });
   }
 
-  sendReadyTcp(client, token) {
-    const msg = { type: 'READY', token, empty: db.getSeq() === 0 };
-    client.write(JSON.stringify(msg) + '\n');
-  }
-
-  sendSnapshotTcp(client, token) {
-    const state = db.exportFullState();
-    const msg = { type: 'FULL_SNAPSHOT', token, state };
-    client.write(JSON.stringify(msg) + '\n');
+  sendReadyTcp(client, server) {
+    client.write(JSON.stringify({ type: 'READY', token: server.token, empty: db.getSeq() === 0 }) + '\n');
   }
 
   handleTcpData(client, data) {
@@ -109,10 +101,14 @@ class BackupClient {
       try {
         const msg = JSON.parse(line);
         if (msg.type === 'PONG') continue;
-        if (msg.type === 'FULL_SNAPSHOT' && msg.state) {
-          console.log('📥 [TCP] Received FULL_SNAPSHOT, restoring...');
-          db.importFullState(msg.state);
-          console.log('✅ Database restored from snapshot');
+        if (msg.type === 'FULL_SNAPSHOT' && msg.state && !this.restored) {
+          const users = Array.isArray(msg.state.users) ? msg.state.users.length : 0;
+          if (users > 0) {
+            console.log(`📥 [TCP] Restoring from backup (${users} users)...`);
+            db.importFullState(msg.state);
+            this.restored = true;
+            console.log('✅ Database restored');
+          }
         }
       } catch (e) {
         if (!line.includes('ngrok') && !line.includes('HTTP/') && !line.startsWith('X-'))
@@ -123,36 +119,27 @@ class BackupClient {
 
   startTcpHeartbeat(client, serverKey) {
     this.stopHeartbeat(serverKey);
-    const interval = setInterval(() => {
-      if (!client.destroyed) {
-        client.write(JSON.stringify({ type: 'PING' }) + '\n');
-      }
+    this.heartbeats[serverKey] = setInterval(() => {
+      if (!client.destroyed) client.write(JSON.stringify({ type: 'PING' }) + '\n');
     }, HEARTBEAT_INTERVAL);
-    this.heartbeats[serverKey] = interval;
   }
 
   stopHeartbeat(serverKey) {
-    if (this.heartbeats[serverKey]) {
-      clearInterval(this.heartbeats[serverKey]);
-      delete this.heartbeats[serverKey];
-    }
+    if (this.heartbeats[serverKey]) { clearInterval(this.heartbeats[serverKey]); delete this.heartbeats[serverKey]; }
   }
 
-  startSnapshotIntervalTcp(client, token, serverKey) {
+  startSnapshotIntervalTcp(client, server, serverKey) {
     if (this.snapshotTimers[serverKey]) clearInterval(this.snapshotTimers[serverKey]);
     this.snapshotTimers[serverKey] = setInterval(() => {
       if (!client.destroyed) {
-        this.sendSnapshotTcp(client, token);
+        client.write(JSON.stringify({ type: 'FULL_SNAPSHOT', token: server.token, state: db.exportFullState() }) + '\n');
       }
     }, SNAPSHOT_INTERVAL);
   }
 
   cleanupTcp(serverKey) {
     this.stopHeartbeat(serverKey);
-    if (this.snapshotTimers[serverKey]) {
-      clearInterval(this.snapshotTimers[serverKey]);
-      delete this.snapshotTimers[serverKey];
-    }
+    if (this.snapshotTimers[serverKey]) { clearInterval(this.snapshotTimers[serverKey]); delete this.snapshotTimers[serverKey]; }
   }
 
   // ==================== HTTP/HTTPS ====================
@@ -161,138 +148,80 @@ class BackupClient {
     const httpModule = server.protocol === 'https' ? https : http;
     const agent = server.protocol === 'https' ? httpsAgent : undefined;
 
-    const baseOptions = {
-      hostname: server.host,
-      port: server.port,
-      path: '/api/backup/sync',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': '1',
-        'User-Agent': 'ChocoHub-BackupClient/1.0',
-        'Accept': 'application/json',
-        'Connection': 'keep-alive'
-      },
-      agent,
-      rejectUnauthorized: false
-    };
+    const tryReady = () => {
+      // Nếu đã restore rồi thì chỉ cần heartbeat + snapshot
+      if (this.restored) {
+        this.startHttpHeartbeat(server, serverKey);
+        this.startHttpSnapshot(server, serverKey);
+        return;
+      }
 
-    const sendReady = () => {
       const payload = JSON.stringify({
         type: 'READY',
         token: server.token,
         empty: db.getSeq() === 0
       });
 
-      const req = httpModule.request({ ...baseOptions }, (res) => {
+      const req = httpModule.request({
+        hostname: server.host,
+        port: server.port,
+        path: '/api/backup/sync',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': '1',
+          'User-Agent': 'ChocoHub-BackupClient/1.0',
+          'Accept': 'application/json',
+          'Connection': 'keep-alive'
+        },
+        agent,
+        rejectUnauthorized: false
+      }, (res) => {
         let body = '';
         res.on('data', chunk => body += chunk);
         res.on('end', () => {
-          if (this.readyProcessed) return;
+          // Nếu đã restore từ server khác thì thôi
+          if (this.restored) return;
 
           if (res.statusCode === 200 && body.trim()) {
             try {
               const msg = JSON.parse(body);
-
-              if (msg.type === 'READY_ACK') {
-                this.pendingReady[serverKey] = { type: 'empty' };
-              } else if (msg.type === 'FULL_SNAPSHOT' && msg.state) {
-                const userCount = Array.isArray(msg.state.users) ? msg.state.users.length : 0;
-                this.pendingReady[serverKey] = { type: 'snapshot', state: msg.state, userCount };
-              } else {
-                console.error(`❌ Unexpected response from ${serverKey}:`, msg.type);
-                this.pendingReady[serverKey] = { type: 'empty' };
+              if (msg.type === 'FULL_SNAPSHOT' && msg.state) {
+                const users = Array.isArray(msg.state.users) ? msg.state.users.length : 0;
+                if (users > 0) {
+                  console.log(`📥 [HTTP] Restoring from ${serverKey} (${users} users)...`);
+                  db.importFullState(msg.state);
+                  this.restored = true;
+                  console.log('✅ Database restored');
+                  this.startHttpHeartbeat(server, serverKey);
+                  this.startHttpSnapshot(server, serverKey);
+                  return;
+                }
               }
-
-              // Bắt đầu timer nếu chưa có
-              if (!this.readyTimer) {
-                this.readyTimer = setTimeout(() => this.checkAllReady(), READY_TIMEOUT);
-              }
-              this.checkAllReady();
-
             } catch (e) {
-              console.error(`❌ Invalid JSON from ${serverKey}:`, body.substring(0, 200));
-              setTimeout(() => sendReady(), RECONNECT_DELAY);
+              console.error(`❌ Parse error ${serverKey}:`, body.substring(0, 100));
             }
           } else {
-            console.error(`❌ READY failed (${serverKey}) with status ${res.statusCode}`);
-            setTimeout(() => sendReady(), RECONNECT_DELAY);
+            console.error(`❌ ${serverKey} status ${res.statusCode}, retry in ${RETRY_INTERVAL/1000}s...`);
           }
+
+          // Chưa restore được → thử lại sau 30s
+          setTimeout(() => tryReady(), RETRY_INTERVAL);
         });
       });
 
       req.on('error', (err) => {
-        if (this.readyProcessed) return;
-        console.error(`❌ [HTTP] READY error (${serverKey}): ${err.message}`);
-        setTimeout(() => sendReady(), RECONNECT_DELAY);
+        if (this.restored) return;
+        console.error(`❌ ${serverKey} error: ${err.message}, retry in ${RETRY_INTERVAL/1000}s...`);
+        setTimeout(() => tryReady(), RETRY_INTERVAL);
       });
 
-      req.setTimeout(10000);
+      req.setTimeout(READY_TIMEOUT);
       req.write(payload);
       req.end();
     };
 
-    sendReady();
-  }
-
-  checkAllReady() {
-    if (this.readyProcessed) return;
-
-    const total = this.servers.length;
-    const received = Object.keys(this.pendingReady).length;
-
-    // Nếu chưa đủ VÀ timer vẫn còn → chờ thêm
-    if (received < total && this.readyTimer) return;
-
-    // Đã nhận đủ hoặc timer hết → xử lý ngay
-    this.readyProcessed = true;
-    if (this.readyTimer) {
-      clearTimeout(this.readyTimer);
-      this.readyTimer = null;
-    }
-
-    console.log(`📋 Processing READY responses (${received}/${total} servers responded)...`);
-
-    let bestSnapshot = null;
-    let bestUserCount = -1;
-    let bestSize = 0;
-
-    for (const [key, data] of Object.entries(this.pendingReady)) {
-      if (data.type === 'snapshot' && data.state) {
-        const userCount = Array.isArray(data.state.users) ? data.state.users.length : 0;
-        const size = JSON.stringify(data.state).length;
-        
-        console.log(`   ${key}: ${userCount} users, ${(size/1024).toFixed(1)}KB`);
-        
-        if (userCount > bestUserCount || (userCount === bestUserCount && size > bestSize)) {
-          bestSnapshot = data.state;
-          bestUserCount = userCount;
-          bestSize = size;
-        }
-      } else {
-        console.log(`   ${key}: ${data.type}`);
-      }
-    }
-
-    if (bestSnapshot && bestUserCount > 0) {
-      console.log(`📥 Restoring from best snapshot (${bestUserCount} users, ${(bestSize/1024).toFixed(1)}KB)...`);
-      db.importFullState(bestSnapshot);
-      console.log('✅ Database restored');
-    } else {
-      console.log('ℹ️ No valid backup data found – starting fresh');
-    }
-
-    // Bắt đầu heartbeat & snapshot cho server ĐÃ phản hồi thành công
-    for (const [key] of Object.entries(this.pendingReady)) {
-      const server = this.servers.find(s => `${s.host}:${s.port}` === key);
-      if (server) {
-        this.readySent.add(key);
-        this.startHttpHeartbeat(server, key);
-        this.startHttpSnapshot(server, key);
-      }
-    }
-
-    this.pendingReady = {};
+    tryReady();
   }
 
   startHttpHeartbeat(server, serverKey) {
@@ -313,15 +242,8 @@ class BackupClient {
     };
 
     const heartbeat = () => {
-      const req = httpModule.request(options, (res) => {
-        res.resume();
-        if (res.statusCode !== 200) {
-          console.error(`⚠️ [HTTP] Heartbeat failed ${serverKey}: ${res.statusCode}`);
-        }
-      });
-      req.on('error', (err) => {
-        console.error(`❌ [HTTP] Heartbeat error ${serverKey}: ${err.message}`);
-      });
+      const req = httpModule.request(options, (res) => { res.resume(); });
+      req.on('error', () => {});
       req.setTimeout(10000);
       req.write(JSON.stringify({ type: 'PING', token: server.token }));
       req.end();
@@ -350,24 +272,12 @@ class BackupClient {
 
     const sendSnapshot = () => {
       const state = db.exportFullState();
-      const payload = JSON.stringify({
-        type: 'FULL_SNAPSHOT',
-        token: server.token,
-        state
-      });
-
       const req = httpModule.request(options, (res) => {
-        if (res.statusCode !== 200) {
-          console.error(`⚠️ Snapshot send failed ${serverKey}: ${res.statusCode}`);
-        } else {
-          console.log(`📤 Snapshot sent to ${serverKey}`);
-        }
+        if (res.statusCode === 200) console.log(`📤 Snapshot sent to ${serverKey}`);
       });
-      req.on('error', (err) => {
-        console.error(`❌ Snapshot error ${serverKey}: ${err.message}`);
-      });
+      req.on('error', (err) => console.error(`❌ Snapshot error ${serverKey}: ${err.message}`));
       req.setTimeout(15000);
-      req.write(payload);
+      req.write(JSON.stringify({ type: 'FULL_SNAPSHOT', token: server.token, state }));
       req.end();
     };
 
