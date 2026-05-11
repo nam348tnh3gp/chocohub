@@ -13,6 +13,7 @@ const SNAPSHOT_INTERVAL = 300000;        // 5 phút gửi snapshot
 const READY_TIMEOUT = 10000;             // 10s cho 1 request READY
 const RETRY_INTERVAL = 30000;            // 30s thử lại server lỗi
 const NODE_SYNC_INTERVAL = 300000;       // 5 phút đồng bộ danh sách node từ server.js
+const MAX_RETRIES = 5;                  // Số lần thử lại tối đa trước khi xóa node động
 
 // Creates a fresh TLS agent per request — keepAlive: false prevents
 // "bad record mac" errors caused by reusing TCP connections with stale TLS state
@@ -29,9 +30,9 @@ function makeHttpsAgent(hostname) {
 
 class BackupClient {
   constructor() {
-    this.servers = BACKUP_SERVERS.map(cfg => {
+    // Phân biệt server tĩnh (.env) và server động (từ backup.py)
+    this.staticServers = BACKUP_SERVERS.map(cfg => {
       const [token, hostPort] = cfg.includes('@') ? cfg.split('@') : [BACKUP_TOKEN, cfg];
-
       if (hostPort.startsWith('https://') || hostPort.startsWith('http://')) {
         const url = new URL(hostPort);
         return {
@@ -39,21 +40,24 @@ class BackupClient {
           protocol: url.protocol.replace(':', ''),
           host: url.hostname,
           port: url.port || (url.protocol === 'https:' ? 443 : 80),
-          path: url.pathname || '/'
+          path: url.pathname || '/',
+          isDynamic: false
         };
       }
-
       const [host, port] = hostPort.split(':');
-      return { token, protocol: 'tcp', host, port: parseInt(port) || 3001 };
+      return { token, protocol: 'tcp', host, port: parseInt(port) || 3001, isDynamic: false };
     });
 
+    this.servers = [...this.staticServers]; // Mảng tổng hợp để duyệt kết nối
     this.sockets = [];
     this.heartbeats = {};
     this.snapshotTimers = {};
-    this.restored = false;               // Đã restore chưa?
-    this.activeServers = new Set();      // Server đã kết nối thành công
-    this.heartbeatLogCounter = {};       // Đếm số lần heartbeat để giảm log spam
-    this.knownHosts = new Set(this.servers.map(s => s.host)); // Theo dõi host đã biết
+    this.restored = false;
+    this.activeServers = new Set();
+    this.heartbeatLogCounter = {};
+    this.knownHosts = new Set(this.servers.map(s => s.host));
+    this.retryCount = {}; // Đếm số lần retry cho mỗi node
+    this.failedNodes = new Set(); // Lưu host đã bị xóa để không thêm lại
   }
 
   start() {
@@ -64,12 +68,10 @@ class BackupClient {
       this.servers.forEach(srv => this.connect(srv));
     }
 
-    // Định kỳ kiểm tra node mới từ server.js
     this.nodeSyncInterval = setInterval(() => this.syncNodesFromServer(), NODE_SYNC_INTERVAL);
-    this.syncNodesFromServer(); // Kiểm tra ngay lần đầu
+    this.syncNodesFromServer();
   }
 
-  // Lấy danh sách backup node từ API /api/backup/nodes của chính server.js
   syncNodesFromServer() {
     const port = process.env.PORT || 3000;
     console.log('🔍 Scanning for dynamic backup nodes...');
@@ -85,13 +87,17 @@ class BackupClient {
             for (const url of urls) {
               const parsedUrl = new URL(url);
               const host = parsedUrl.hostname;
-              if (!this.knownHosts.has(host)) {
+              if (!this.knownHosts.has(host) && !this.failedNodes.has(host)) {
+                const isStatic = this.staticServers.some(s => s.host === host);
+                if (isStatic) continue;
+
                 const newServer = {
                   token: BACKUP_TOKEN,
                   protocol: parsedUrl.protocol.replace(':', ''),
                   host: host,
                   port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
-                  path: parsedUrl.pathname || '/'
+                  path: parsedUrl.pathname || '/',
+                  isDynamic: true
                 };
                 console.log(`🆕 New backup node discovered: ${host} (from dynamic registration)`);
                 this.servers.push(newServer);
@@ -111,9 +117,7 @@ class BackupClient {
         }
       });
     });
-    req.on('error', (err) => {
-      console.error('❌ Failed to fetch dynamic nodes:', err.message);
-    });
+    req.on('error', () => {});
     req.setTimeout(5000);
   }
 
@@ -135,13 +139,14 @@ class BackupClient {
       this.sendReadyTcp(client, server);
       this.startTcpHeartbeat(client, serverKey);
       this.startSnapshotIntervalTcp(client, server, serverKey);
+      if (server.isDynamic) this.retryCount[serverKey] = 0;
     });
 
     client.on('data', (data) => this.handleTcpData(client, data));
     client.on('close', () => {
       console.log(`🔌 [TCP] Disconnected ${serverKey}, retry in ${RECONNECT_DELAY/1000}s...`);
       this.cleanupTcp(serverKey);
-      setTimeout(() => this.connect(server), RECONNECT_DELAY);
+      this.handleConnectionFailure(server);
     });
     client.on('error', (err) => {
       console.error(`❌ [TCP] Error ${serverKey}: ${err.message}`);
@@ -209,13 +214,7 @@ class BackupClient {
     const httpModule = server.protocol === 'https' ? https : http;
     const agent = server.protocol === 'https' ? makeHttpsAgent(server.host) : undefined;
 
-    // Log ngay khi bắt đầu kết nối tới node mới
-    if (!this.knownHosts.has(server.host)) {
-      console.log(`🔗 [HTTP] Initiating connection to new node: ${serverKey}`);
-    }
-
     const tryReady = () => {
-      // Already restored — only need heartbeat + snapshot
       if (this.restored) {
         if (!this.heartbeats[serverKey]) {
           console.log(`💓 Starting heartbeat for ${serverKey}`);
@@ -280,6 +279,7 @@ class BackupClient {
                 this.startHttpHeartbeat(server, serverKey, agent);
                 console.log(`📸 Starting snapshot for ${serverKey}`);
                 this.startHttpSnapshot(server, serverKey, agent);
+                if (server.isDynamic) this.retryCount[serverKey] = 0;
                 return;
               }
 
@@ -290,6 +290,7 @@ class BackupClient {
                 this.startHttpHeartbeat(server, serverKey, agent);
                 console.log(`📸 Starting snapshot for ${serverKey}`);
                 this.startHttpSnapshot(server, serverKey, agent);
+                if (server.isDynamic) this.retryCount[serverKey] = 0;
                 return;
               }
 
@@ -297,10 +298,10 @@ class BackupClient {
               console.error(`❌ Parse error ${serverKey}:`, body.substring(0, 120));
             }
           } else {
-            console.error(`❌ ${serverKey} status ${res.statusCode}, retry in ${RETRY_INTERVAL/1000}s...`);
+            console.error(`❌ ${serverKey} status ${res.statusCode}, retry...`);
           }
 
-          setTimeout(() => tryReady(), RETRY_INTERVAL);
+          this.handleConnectionFailure(server, tryReady);
         });
       });
 
@@ -316,8 +317,8 @@ class BackupClient {
           }
           return;
         }
-        console.error(`❌ ${serverKey} error: ${err.message}, retry in ${RETRY_INTERVAL/1000}s...`);
-        setTimeout(() => tryReady(), RETRY_INTERVAL);
+        console.error(`❌ ${serverKey} error: ${err.message}, retry...`);
+        this.handleConnectionFailure(server, tryReady);
       });
 
       req.on('timeout', () => {
@@ -330,6 +331,42 @@ class BackupClient {
     };
 
     tryReady();
+  }
+
+  // Xử lý khi kết nối thất bại: tăng retry count, xóa node nếu quá hạn
+  handleConnectionFailure(server, retryFn) {
+    if (!server.isDynamic) {
+      // Server tĩnh: luôn thử lại, không xóa
+      if (retryFn) setTimeout(retryFn, RETRY_INTERVAL);
+      else setTimeout(() => this.connect(server), RECONNECT_DELAY);
+      return;
+    }
+
+    const serverKey = `${server.host}:${server.port}`;
+    this.retryCount[serverKey] = (this.retryCount[serverKey] || 0) + 1;
+
+    if (this.retryCount[serverKey] >= MAX_RETRIES) {
+      console.log(`🗑️ Removing dead dynamic node ${serverKey} after ${MAX_RETRIES} failed retries.`);
+      this.failedNodes.add(server.host);
+      // Xóa khỏi danh sách servers
+      this.servers = this.servers.filter(s => `${s.host}:${s.port}` !== serverKey);
+      // Xóa heartbeat & snapshot timers nếu có
+      if (this.heartbeats[serverKey]) {
+        clearInterval(this.heartbeats[serverKey]);
+        delete this.heartbeats[serverKey];
+      }
+      if (this.snapshotTimers[serverKey]) {
+        clearInterval(this.snapshotTimers[serverKey]);
+        delete this.snapshotTimers[serverKey];
+      }
+      // Xóa socket nếu có
+      this.sockets = this.sockets.filter(s => s.serverKey !== serverKey);
+      console.log(`🧹 Cleaned up resources for ${serverKey}`);
+    } else {
+      console.log(`🔄 Retry ${this.retryCount[serverKey]}/${MAX_RETRIES} for ${serverKey} in ${RETRY_INTERVAL/1000}s...`);
+      if (retryFn) setTimeout(retryFn, RETRY_INTERVAL);
+      else setTimeout(() => this.connect(server), RECONNECT_DELAY);
+    }
   }
 
   startHttpHeartbeat(server, serverKey, agent) {
@@ -356,7 +393,6 @@ class BackupClient {
         res.resume();
         if (res.statusCode === 200) {
           this.heartbeatLogCounter[serverKey]++;
-          // Log mỗi 5 lần (2.5 phút) để sớm thấy trạng thái
           if (this.heartbeatLogCounter[serverKey] % 5 === 0) {
             console.log(`💚 Heartbeat OK (${serverKey})`);
           }
