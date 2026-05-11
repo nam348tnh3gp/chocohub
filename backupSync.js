@@ -13,16 +13,16 @@ const SNAPSHOT_INTERVAL = 300000;        // 5 phút gửi snapshot
 const READY_TIMEOUT = 10000;             // 10s cho 1 request READY
 const RETRY_INTERVAL = 30000;            // 30s thử lại server lỗi
 
-// Cria agent TLS por hostname (SNI correto por servidor)
-// servername: undefined quebrava SNI no Render/ngrok — corrigido
+// Creates a fresh TLS agent per request — keepAlive: false prevents
+// "bad record mac" errors caused by reusing TCP connections with stale TLS state
 function makeHttpsAgent(hostname) {
   return new https.Agent({
     rejectUnauthorized: false,
     minVersion: 'TLSv1.2',
+    maxVersion: 'TLSv1.3',
     checkServerIdentity: () => undefined,
-    servername: hostname,   // SNI obrigatório
-    keepAlive: true,
-    timeout: 20000
+    servername: hostname,   // correct SNI per server
+    keepAlive: false,       // fresh TLS handshake on every request
   });
 }
 
@@ -153,13 +153,13 @@ class BackupClient {
   connectHttp(server) {
     const serverKey = `${server.host}:${server.port}`;
     const httpModule = server.protocol === 'https' ? https : http;
-    // FIX: agent por hostname garante SNI correto
+    // Fresh agent per server ensures correct SNI hostname
     const agent = server.protocol === 'https' ? makeHttpsAgent(server.host) : undefined;
 
     const tryReady = () => {
-      // Se já restaurou, só precisa de heartbeat + snapshot
+      // Already restored — only need heartbeat + snapshot
       if (this.restored) {
-        if (!this.heartbeats[serverKey])    this.startHttpHeartbeat(server, serverKey, agent);
+        if (!this.heartbeats[serverKey])     this.startHttpHeartbeat(server, serverKey, agent);
         if (!this.snapshotTimers[serverKey]) this.startHttpSnapshot(server, serverKey, agent);
         return;
       }
@@ -188,9 +188,9 @@ class BackupClient {
         let body = '';
         res.on('data', chunk => body += chunk);
         res.on('end', () => {
-          // Outro servidor já restaurou enquanto esperávamos
+          // Another server already restored while we were waiting
           if (this.restored) {
-            if (!this.heartbeats[serverKey])    this.startHttpHeartbeat(server, serverKey, agent);
+            if (!this.heartbeats[serverKey])     this.startHttpHeartbeat(server, serverKey, agent);
             if (!this.snapshotTimers[serverKey]) this.startHttpSnapshot(server, serverKey, agent);
             return;
           }
@@ -199,25 +199,25 @@ class BackupClient {
             try {
               const msg = JSON.parse(body);
 
-              // Backup tem dados e main está vazio → restaura
+              // Backup has data and main is empty → restore
               if (msg.type === 'FULL_SNAPSHOT' && msg.state) {
                 const users = Array.isArray(msg.state.users) ? msg.state.users.length : 0;
                 if (users > 0) {
-                  console.log(`📥 [HTTP] Restaurando de ${serverKey} (${users} users)...`);
+                  console.log(`📥 [HTTP] Restoring from ${serverKey} (${users} users)...`);
                   db.importFullState(msg.state);
                   this.restored = true;
-                  console.log('✅ Database restaurado');
+                  console.log('✅ Database restored');
                 }
-                // Mesmo com 0 users, inicia sync normal
+                // Even with 0 users, start normal sync
                 this.startHttpHeartbeat(server, serverKey, agent);
                 this.startHttpSnapshot(server, serverKey, agent);
                 return;
               }
 
-              // FIX BUG 2: READY_ACK = main já tem dados → inicia heartbeat+snapshot imediatamente
-              // Antes caia no setTimeout(tryReady) = loop eterno sem nunca enviar snapshots
+              // FIX: READY_ACK = main already has data → start heartbeat+snapshot immediately
+              // Previously fell through to setTimeout(tryReady) = infinite loop, never syncing
               if (msg.type === 'READY_ACK') {
-                console.log(`🔗 [HTTP] Conectado a ${serverKey} (main já tem dados)`);
+                console.log(`🔗 [HTTP] Connected to ${serverKey} (main already has data)`);
                 this.restored = true;
                 this.startHttpHeartbeat(server, serverKey, agent);
                 this.startHttpSnapshot(server, serverKey, agent);
@@ -228,27 +228,27 @@ class BackupClient {
               console.error(`❌ Parse error ${serverKey}:`, body.substring(0, 120));
             }
           } else {
-            console.error(`❌ ${serverKey} status ${res.statusCode}, retry em ${RETRY_INTERVAL/1000}s...`);
+            console.error(`❌ ${serverKey} status ${res.statusCode}, retry in ${RETRY_INTERVAL/1000}s...`);
           }
 
-          // Falhou → tenta novamente
+          // Failed → retry
           setTimeout(() => tryReady(), RETRY_INTERVAL);
         });
       });
 
       req.on('error', (err) => {
         if (this.restored) {
-          if (!this.heartbeats[serverKey])    this.startHttpHeartbeat(server, serverKey, agent);
+          if (!this.heartbeats[serverKey])     this.startHttpHeartbeat(server, serverKey, agent);
           if (!this.snapshotTimers[serverKey]) this.startHttpSnapshot(server, serverKey, agent);
           return;
         }
-        console.error(`❌ ${serverKey} erro: ${err.message}, retry em ${RETRY_INTERVAL/1000}s...`);
+        console.error(`❌ ${serverKey} error: ${err.message}, retry in ${RETRY_INTERVAL/1000}s...`);
         setTimeout(() => tryReady(), RETRY_INTERVAL);
       });
 
-      // FIX BUG 1: handler obrigatório para o timeout não travar o request
+      // FIX: timeout handler required — without it the request hangs forever
       req.on('timeout', () => {
-        console.error(`⏱ ${serverKey} READY timeout (${READY_TIMEOUT/1000}s), abortando...`);
+        console.error(`⏱ ${serverKey} READY timeout (${READY_TIMEOUT/1000}s), aborting...`);
         req.destroy(new Error('READY timeout'));
       });
       req.setTimeout(READY_TIMEOUT);
@@ -291,7 +291,7 @@ class BackupClient {
         }
       });
       req.on('error', (err) => console.error(`❌ [HTTP] Heartbeat error ${serverKey}: ${err.message}`));
-      // FIX: handler de timeout obrigatório
+      // timeout handler required — prevents request from hanging
       req.on('timeout', () => req.destroy(new Error('heartbeat timeout')));
       req.setTimeout(10000);
       req.write(payload);
@@ -319,7 +319,7 @@ class BackupClient {
       rejectUnauthorized: false
     };
 
-    // FIX BUG 4: deduplicação — não envia se snapshot não mudou
+    // Deduplication — skip send if snapshot content hasn't changed
     let lastSnapshotHash = null;
 
     const sendSnapshot = () => {
@@ -328,7 +328,7 @@ class BackupClient {
       const hash    = crypto.createHash('sha256').update(payload).digest('hex').substring(0, 16);
 
       if (hash === lastSnapshotHash) {
-        console.log(`⏭ Snapshot inalterado, pulando envio para ${serverKey}`);
+        console.log(`⏭ Snapshot unchanged, skipping send to ${serverKey}`);
         return;
       }
 
@@ -337,13 +337,13 @@ class BackupClient {
         res.resume();
         if (res.statusCode === 200) {
           lastSnapshotHash = hash;
-          console.log(`📤 Snapshot enviado a ${serverKey} (hash ${hash})`);
+          console.log(`📤 Snapshot sent to ${serverKey} (hash ${hash})`);
         } else {
-          console.error(`⚠️ Snapshot falhou ${serverKey}: ${res.statusCode}`);
+          console.error(`⚠️ Snapshot failed ${serverKey}: ${res.statusCode}`);
         }
       });
-      req.on('error', (err) => console.error(`❌ Snapshot erro ${serverKey}: ${err.message}`));
-      // FIX: handler de timeout
+      req.on('error', (err) => console.error(`❌ Snapshot error ${serverKey}: ${err.message}`));
+      // timeout handler required
       req.on('timeout', () => req.destroy(new Error('snapshot timeout')));
       req.setTimeout(20000);
       req.write(payload);
@@ -352,7 +352,7 @@ class BackupClient {
 
     if (this.snapshotTimers[serverKey]) clearInterval(this.snapshotTimers[serverKey]);
     this.snapshotTimers[serverKey] = setInterval(sendSnapshot, SNAPSHOT_INTERVAL);
-    sendSnapshot(); // envia imediatamente na conexão
+    sendSnapshot(); // send immediately on connect
   }
 }
 
