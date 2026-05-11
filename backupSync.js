@@ -13,14 +13,18 @@ const SNAPSHOT_INTERVAL = 300000;        // 5 phút gửi snapshot
 const READY_TIMEOUT = 10000;             // 10s cho 1 request READY
 const RETRY_INTERVAL = 30000;            // 30s thử lại server lỗi
 
-// Agent TLS cho ngrok / chứng chỉ tự ký
-const httpsAgent = new https.Agent({
-  rejectUnauthorized: false,
-  minVersion: 'TLSv1.2',
-  secureOptions: crypto.constants.SSL_OP_NO_TICKET,
-  checkServerIdentity: () => undefined,
-  servername: undefined // Ajuda o handshake em alguns provedores de túnel
-});
+// Cria agent TLS por hostname (SNI correto por servidor)
+// servername: undefined quebrava SNI no Render/ngrok — corrigido
+function makeHttpsAgent(hostname) {
+  return new https.Agent({
+    rejectUnauthorized: false,
+    minVersion: 'TLSv1.2',
+    checkServerIdentity: () => undefined,
+    servername: hostname,   // SNI obrigatório
+    keepAlive: true,
+    timeout: 20000
+  });
+}
 
 class BackupClient {
   constructor() {
@@ -149,13 +153,14 @@ class BackupClient {
   connectHttp(server) {
     const serverKey = `${server.host}:${server.port}`;
     const httpModule = server.protocol === 'https' ? https : http;
-    const agent = server.protocol === 'https' ? httpsAgent : undefined;
+    // FIX: agent por hostname garante SNI correto
+    const agent = server.protocol === 'https' ? makeHttpsAgent(server.host) : undefined;
 
     const tryReady = () => {
-      // Nếu đã restore rồi thì chỉ cần heartbeat + snapshot
+      // Se já restaurou, só precisa de heartbeat + snapshot
       if (this.restored) {
-        this.startHttpHeartbeat(server, serverKey);
-        this.startHttpSnapshot(server, serverKey);
+        if (!this.heartbeats[serverKey])    this.startHttpHeartbeat(server, serverKey, agent);
+        if (!this.snapshotTimers[serverKey]) this.startHttpSnapshot(server, serverKey, agent);
         return;
       }
 
@@ -172,63 +177,80 @@ class BackupClient {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
           'ngrok-skip-browser-warning': '1',
           'User-Agent': 'ChocoHub-BackupClient/1.0',
-          'Accept': 'application/json',
-          'Connection': 'keep-alive'
+          'Accept': 'application/json'
         },
-      agent,
-      servername: server.host,
+        agent,
         rejectUnauthorized: false
       }, (res) => {
         let body = '';
         res.on('data', chunk => body += chunk);
         res.on('end', () => {
-          // ===== FIX: Nếu đã restore từ server khác, vẫn kích hoạt heartbeat + snapshot =====
+          // Outro servidor já restaurou enquanto esperávamos
           if (this.restored) {
-            this.startHttpHeartbeat(server, serverKey);
-            this.startHttpSnapshot(server, serverKey);
+            if (!this.heartbeats[serverKey])    this.startHttpHeartbeat(server, serverKey, agent);
+            if (!this.snapshotTimers[serverKey]) this.startHttpSnapshot(server, serverKey, agent);
             return;
           }
 
           if (res.statusCode === 200 && body.trim()) {
             try {
               const msg = JSON.parse(body);
+
+              // Backup tem dados e main está vazio → restaura
               if (msg.type === 'FULL_SNAPSHOT' && msg.state) {
                 const users = Array.isArray(msg.state.users) ? msg.state.users.length : 0;
                 if (users > 0) {
-                  console.log(`📥 [HTTP] Restoring from ${serverKey} (${users} users)...`);
+                  console.log(`📥 [HTTP] Restaurando de ${serverKey} (${users} users)...`);
                   db.importFullState(msg.state);
                   this.restored = true;
-                  console.log('✅ Database restored');
-                  this.startHttpHeartbeat(server, serverKey);
-                  this.startHttpSnapshot(server, serverKey);
-                  return;
+                  console.log('✅ Database restaurado');
                 }
+                // Mesmo com 0 users, inicia sync normal
+                this.startHttpHeartbeat(server, serverKey, agent);
+                this.startHttpSnapshot(server, serverKey, agent);
+                return;
               }
+
+              // FIX BUG 2: READY_ACK = main já tem dados → inicia heartbeat+snapshot imediatamente
+              // Antes caia no setTimeout(tryReady) = loop eterno sem nunca enviar snapshots
+              if (msg.type === 'READY_ACK') {
+                console.log(`🔗 [HTTP] Conectado a ${serverKey} (main já tem dados)`);
+                this.restored = true;
+                this.startHttpHeartbeat(server, serverKey, agent);
+                this.startHttpSnapshot(server, serverKey, agent);
+                return;
+              }
+
             } catch (e) {
-              console.error(`❌ Parse error ${serverKey}:`, body.substring(0, 100));
+              console.error(`❌ Parse error ${serverKey}:`, body.substring(0, 120));
             }
           } else {
-            console.error(`❌ ${serverKey} status ${res.statusCode}, retry in ${RETRY_INTERVAL/1000}s...`);
+            console.error(`❌ ${serverKey} status ${res.statusCode}, retry em ${RETRY_INTERVAL/1000}s...`);
           }
 
-          // Chưa restore được → thử lại sau 30s
+          // Falhou → tenta novamente
           setTimeout(() => tryReady(), RETRY_INTERVAL);
         });
       });
 
       req.on('error', (err) => {
-        // ===== FIX: Nếu đã restore, lỗi cũng không sao, vẫn thử lại kích hoạt =====
         if (this.restored) {
-          this.startHttpHeartbeat(server, serverKey);
-          this.startHttpSnapshot(server, serverKey);
+          if (!this.heartbeats[serverKey])    this.startHttpHeartbeat(server, serverKey, agent);
+          if (!this.snapshotTimers[serverKey]) this.startHttpSnapshot(server, serverKey, agent);
           return;
         }
-        console.error(`❌ ${serverKey} error: ${err.message}, retry in ${RETRY_INTERVAL/1000}s...`);
+        console.error(`❌ ${serverKey} erro: ${err.message}, retry em ${RETRY_INTERVAL/1000}s...`);
         setTimeout(() => tryReady(), RETRY_INTERVAL);
       });
 
+      // FIX BUG 1: handler obrigatório para o timeout não travar o request
+      req.on('timeout', () => {
+        console.error(`⏱ ${serverKey} READY timeout (${READY_TIMEOUT/1000}s), abortando...`);
+        req.destroy(new Error('READY timeout'));
+      });
       req.setTimeout(READY_TIMEOUT);
       req.write(payload);
       req.end();
@@ -237,9 +259,8 @@ class BackupClient {
     tryReady();
   }
 
-  startHttpHeartbeat(server, serverKey) {
+  startHttpHeartbeat(server, serverKey, agent) {
     const httpModule = server.protocol === 'https' ? https : http;
-    const agent = server.protocol === 'https' ? httpsAgent : undefined;
     const options = {
       hostname: server.host,
       port: server.port,
@@ -251,18 +272,17 @@ class BackupClient {
         'User-Agent': 'ChocoHub-BackupClient/1.0'
       },
       agent,
-      servername: server.host,
       rejectUnauthorized: false
     };
 
     if (!this.heartbeatLogCounter[serverKey]) this.heartbeatLogCounter[serverKey] = 0;
 
     const heartbeat = () => {
+      const payload = JSON.stringify({ type: 'PING', token: server.token });
       const req = httpModule.request(options, (res) => {
         res.resume();
         if (res.statusCode === 200) {
           this.heartbeatLogCounter[serverKey]++;
-          // Log mỗi 10 lần heartbeat (tức ~5 phút) để không spam
           if (this.heartbeatLogCounter[serverKey] % 10 === 0) {
             console.log(`💚 Heartbeat OK (${serverKey})`);
           }
@@ -270,22 +290,21 @@ class BackupClient {
           console.error(`⚠️ [HTTP] Heartbeat failed ${serverKey}: ${res.statusCode}`);
         }
       });
-      req.on('error', (err) => {
-        console.error(`❌ [HTTP] Heartbeat error ${serverKey}: ${err.message}`);
-      });
+      req.on('error', (err) => console.error(`❌ [HTTP] Heartbeat error ${serverKey}: ${err.message}`));
+      // FIX: handler de timeout obrigatório
+      req.on('timeout', () => req.destroy(new Error('heartbeat timeout')));
       req.setTimeout(10000);
-      req.write(JSON.stringify({ type: 'PING', token: server.token }));
+      req.write(payload);
       req.end();
     };
 
     if (this.heartbeats[serverKey]) clearInterval(this.heartbeats[serverKey]);
     this.heartbeats[serverKey] = setInterval(heartbeat, HEARTBEAT_INTERVAL);
-    heartbeat(); // gửi ngay lần đầu
+    heartbeat();
   }
 
-  startHttpSnapshot(server, serverKey) {
+  startHttpSnapshot(server, serverKey, agent) {
     const httpModule = server.protocol === 'https' ? https : http;
-    const agent = server.protocol === 'https' ? httpsAgent : undefined;
     const options = {
       hostname: server.host,
       port: server.port,
@@ -297,28 +316,43 @@ class BackupClient {
         'User-Agent': 'ChocoHub-BackupClient/1.0'
       },
       agent,
-      servername: server.host,
       rejectUnauthorized: false
     };
 
+    // FIX BUG 4: deduplicação — não envia se snapshot não mudou
+    let lastSnapshotHash = null;
+
     const sendSnapshot = () => {
-      const state = db.exportFullState();
-      const req = httpModule.request(options, (res) => {
+      const state   = db.exportFullState();
+      const payload = JSON.stringify({ type: 'FULL_SNAPSHOT', token: server.token, state });
+      const hash    = crypto.createHash('sha256').update(payload).digest('hex').substring(0, 16);
+
+      if (hash === lastSnapshotHash) {
+        console.log(`⏭ Snapshot inalterado, pulando envio para ${serverKey}`);
+        return;
+      }
+
+      const reqOpts = { ...options, headers: { ...options.headers, 'Content-Length': Buffer.byteLength(payload) } };
+      const req = httpModule.request(reqOpts, (res) => {
+        res.resume();
         if (res.statusCode === 200) {
-          console.log(`📤 Snapshot sent to ${serverKey}`);
+          lastSnapshotHash = hash;
+          console.log(`📤 Snapshot enviado a ${serverKey} (hash ${hash})`);
         } else {
-          console.error(`⚠️ Snapshot send failed ${serverKey}: ${res.statusCode}`);
+          console.error(`⚠️ Snapshot falhou ${serverKey}: ${res.statusCode}`);
         }
       });
-      req.on('error', (err) => console.error(`❌ Snapshot error ${serverKey}: ${err.message}`));
-      req.setTimeout(15000);
-      req.write(JSON.stringify({ type: 'FULL_SNAPSHOT', token: server.token, state }));
+      req.on('error', (err) => console.error(`❌ Snapshot erro ${serverKey}: ${err.message}`));
+      // FIX: handler de timeout
+      req.on('timeout', () => req.destroy(new Error('snapshot timeout')));
+      req.setTimeout(20000);
+      req.write(payload);
       req.end();
     };
 
     if (this.snapshotTimers[serverKey]) clearInterval(this.snapshotTimers[serverKey]);
     this.snapshotTimers[serverKey] = setInterval(sendSnapshot, SNAPSHOT_INTERVAL);
-    sendSnapshot();
+    sendSnapshot(); // envia imediatamente na conexão
   }
 }
 
