@@ -182,8 +182,12 @@ class BackupClient {
         let body = '';
         res.on('data', chunk => body += chunk);
         res.on('end', () => {
-          // Nếu đã restore từ server khác thì thôi
-          if (this.restored) return;
+          // ===== FIX: Nếu đã restore từ server khác, vẫn kích hoạt heartbeat + snapshot =====
+          if (this.restored) {
+            this.startHttpHeartbeat(server, serverKey);
+            this.startHttpSnapshot(server, serverKey);
+            return;
+          }
 
           if (res.statusCode === 200 && body.trim()) {
             try {
@@ -213,7 +217,12 @@ class BackupClient {
       });
 
       req.on('error', (err) => {
-        if (this.restored) return;
+        // ===== FIX: Nếu đã restore, lỗi cũng không sao, vẫn thử lại kích hoạt =====
+        if (this.restored) {
+          this.startHttpHeartbeat(server, serverKey);
+          this.startHttpSnapshot(server, serverKey);
+          return;
+        }
         console.error(`❌ ${serverKey} error: ${err.message}, retry in ${RETRY_INTERVAL/1000}s...`);
         setTimeout(() => tryReady(), RETRY_INTERVAL);
       });
