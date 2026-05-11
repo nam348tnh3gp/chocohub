@@ -19,6 +19,7 @@ const httpsAgent = new https.Agent({
   minVersion: 'TLSv1.2',
   secureOptions: crypto.constants.SSL_OP_NO_TICKET,
   checkServerIdentity: () => undefined,
+  servername: undefined
 });
 
 class BackupClient {
