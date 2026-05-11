@@ -1,5 +1,8 @@
-# backup.py – Backup Server nhận full snapshot từ ChocoHub (gọn nhẹ, đồng bộ nhanh)
+# backup.py – Backup Server nhận full snapshot từ ChocoHub (bất đồng bộ, chống timeout)
+# Tất cả cấu hình đều lấy từ file .env trong thư mục hiện tại.
+# KHÔNG có giá trị mặc định cứng trong code — thiếu biến sẽ báo lỗi ngay.
 import os
+import sys
 import json
 import time
 import threading
@@ -9,22 +12,34 @@ from dotenv import load_dotenv
 from datetime import datetime
 import sqlite3
 
+# Nạp file .env từ thư mục hiện tại (chocohub/Backup)
 load_dotenv()
 
 app = Flask(__name__)
 
-# ─── Config từ .env ─────────────────────────────────
-BACKUP_PORT = int(os.getenv('BACKUP_PORT', 5000))
-BACKUP_TOKEN = os.getenv('BACKUP_TOKEN', 'chocohub-default-token')
-MAIN_SERVER_URL = os.getenv('MAIN_SERVER_URL', 'https://chocohub-r011.onrender.com')
-CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL', 10))
-DB_PATH = os.getenv('BACKUP_DB_PATH', 'backup.db')
+# ─── Config từ .env (không có giá trị mặc định) ────────
+BACKUP_PORT     = int(os.getenv('BACKUP_PORT'))          # bắt buộc, VD: 5000
+BACKUP_TOKEN    = os.getenv('BACKUP_TOKEN')              # bắt buộc
+MAIN_SERVER_URL = os.getenv('MAIN_SERVER_URL')           # bắt buộc
+CHECK_INTERVAL  = int(os.getenv('CHECK_INTERVAL'))       # bắt buộc, VD: 10
+DB_PATH         = os.getenv('BACKUP_DB_PATH')            # bắt buộc, VD: backup.db
+
+# Kiểm tra nhanh các biến bắt buộc
+for var, val in [
+    ('BACKUP_PORT', BACKUP_PORT),
+    ('BACKUP_TOKEN', BACKUP_TOKEN),
+    ('MAIN_SERVER_URL', MAIN_SERVER_URL),
+    ('CHECK_INTERVAL', CHECK_INTERVAL),
+    ('BACKUP_DB_PATH', DB_PATH),
+]:
+    if val is None:
+        print(f'❌ Biến môi trường {var} chưa được đặt trong file .env')
+        sys.exit(1)
 
 # ─── Khởi tạo SQLite ───────────────────────────────
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    # Bảng lưu snapshot mới nhất (chỉ 1 dòng)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS snapshot (
             id INTEGER PRIMARY KEY CHECK(id = 1),
@@ -37,17 +52,21 @@ def init_db():
     conn.close()
     print('✅ Backup database ready (snapshot mode)')
 
-# ─── Lưu snapshot ──────────────────────────────────
+# ─── Lưu snapshot (bất đồng bộ) ────────────────────
 def save_snapshot(state):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT OR REPLACE INTO snapshot (id, state, updated_at)
-        VALUES (1, ?, datetime('now'))
-    ''', (json.dumps(state),))
-    conn.commit()
-    conn.close()
-    print('💾 Snapshot saved')
+    try:
+        json_data = json.dumps(state)
+        conn = sqlite3.connect(DB_PATH, timeout=10)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT OR REPLACE INTO snapshot (id, state, updated_at)
+            VALUES (1, ?, datetime('now'))
+        ''', (json_data,))
+        conn.commit()
+        conn.close()
+        print(f'💾 Snapshot saved ({len(state.get("users", []))} users)')
+    except Exception as e:
+        print(f'❌ Save error: {e}')
 
 # ─── Lấy snapshot ──────────────────────────────────
 def get_snapshot():
@@ -93,7 +112,7 @@ def receive_sync():
             empty = data.get('empty', False)
             if empty:
                 snap = get_snapshot()
-                if snap and snap.get('users') is not None:  # snapshot có dữ liệu
+                if snap and snap.get('users') is not None:
                     print(f'📤 Main server is empty, sending full snapshot ({len(snap.get("users", []))} users)')
                     return jsonify({
                         'type': 'FULL_SNAPSHOT',
@@ -104,20 +123,29 @@ def receive_sync():
                     print('ℹ️ Backup server also empty – nothing to send')
                     return jsonify({'type': 'READY_ACK', 'status': 'success', 'message': 'ready but empty'})
             else:
-                # Main server đã có dữ liệu, chỉ cần ack
                 return jsonify({'type': 'READY_ACK', 'status': 'success', 'message': 'ack'})
 
         # ─── PING: heartbeat ────────────────────────────
         elif msg_type == 'PING':
             return jsonify({'type': 'PONG', 'timestamp': datetime.now().isoformat()})
 
-        # ─── FULL_SNAPSHOT: nhận snapshot từ main server ──
+        # ─── FULL_SNAPSHOT: nhận snapshot từ main server (bất đồng bộ) ──
         elif msg_type == 'FULL_SNAPSHOT':
             if 'state' not in data:
                 return jsonify({'status': 'error', 'message': 'Missing state'}), 400
-            save_snapshot(data['state'])
-            print(f'📥 Received snapshot ({len(data["state"].get("users", []))} users)')
-            return jsonify({'type': 'SNAPSHOT_ACK', 'status': 'success'})
+
+            state = data['state']
+            user_count = len(state.get('users', []))
+            print(f'📥 Receiving snapshot ({user_count} users)...')
+
+            # 🔧 Lưu trong thread riêng, trả response ngay lập tức
+            threading.Thread(target=save_snapshot, args=(state,), daemon=True).start()
+
+            return jsonify({
+                'type': 'SNAPSHOT_ACK',
+                'status': 'success',
+                'message': f'OK ({user_count} users)'
+            })
 
         else:
             print(f'⚠️ Unknown message type: {msg_type}')
