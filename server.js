@@ -43,6 +43,9 @@ async function sendMinerWebhook(worker, bountyId, device) {
   }
 }
 
+// 🆕 Lưu danh sách backup node đã đăng ký (từ backup.py)
+const registeredBackupNodes = {};
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -308,6 +311,42 @@ app.get('/health', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
+// BACKUP NODE REGISTRATION – Nhận đăng ký từ backup.py
+// ═══════════════════════════════════════════════════════
+app.post('/api/backup/register', (req, res) => {
+  const { url, token, name, description, owner, platform } = req.body;
+  if (!url || !token) {
+    return res.status(400).json({ status: 'error', message: 'Missing url or token' });
+  }
+  if (token !== (process.env.BACKUP_TOKEN || 'chocohub-default-token')) {
+    return res.status(401).json({ status: 'error', message: 'Invalid token' });
+  }
+  
+  registeredBackupNodes[url] = {
+    name: name || 'Unknown',
+    description: description || '',
+    owner: owner || '',
+    platform: platform || 'Unknown',
+    last_seen: new Date().toISOString()
+  };
+  
+  console.log(`📡 Backup node registered: ${name || url} (${url})`);
+  res.json({ status: 'success', message: 'Node registered' });
+});
+
+// 🆕 Lấy danh sách backup node đã đăng ký (cho backupSync.js tự động lấy)
+app.get('/api/backup/nodes', (req, res) => {
+  // Dọn các node đã quá 10 phút không thấy
+  const now = Date.now();
+  for (const [url, info] of Object.entries(registeredBackupNodes)) {
+    if (now - new Date(info.last_seen).getTime() > 600000) {
+      delete registeredBackupNodes[url];
+    }
+  }
+  res.json({ status: 'success', nodes: registeredBackupNodes });
+});
+
+// ═══════════════════════════════════════════════════════
 // BACKUP RECEIVE ENDPOINT - Nhận snapshot từ backup server
 // ═══════════════════════════════════════════════════════
 app.post('/api/backup/sync', (req, res) => {
@@ -378,6 +417,7 @@ app.listen(PORT, () => {
   console.log('║  Backup Sync: active (full snapshot)║');
   console.log('║  Send CC: /send_cc                  ║');
   console.log('║  Transactions: /get_transactions    ║');
+  console.log('║  Backup Nodes: /api/backup/nodes    ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
 
