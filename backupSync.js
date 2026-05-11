@@ -72,6 +72,7 @@ class BackupClient {
   // Lấy danh sách backup node từ API /api/backup/nodes của chính server.js
   syncNodesFromServer() {
     const port = process.env.PORT || 3000;
+    console.log('🔍 Scanning for dynamic backup nodes...');
     const req = http.get(`http://localhost:${port}/api/backup/nodes`, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
@@ -80,8 +81,8 @@ class BackupClient {
           const parsed = JSON.parse(data);
           if (parsed.status === 'success' && parsed.nodes) {
             const urls = Object.keys(parsed.nodes);
+            let found = 0;
             for (const url of urls) {
-              // Nếu host chưa có trong danh sách, thêm mới
               const parsedUrl = new URL(url);
               const host = parsedUrl.hostname;
               if (!this.knownHosts.has(host)) {
@@ -92,19 +93,27 @@ class BackupClient {
                   port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
                   path: parsedUrl.pathname || '/'
                 };
-                console.log(`🆕 New backup node discovered: ${host}`);
+                console.log(`🆕 New backup node discovered: ${host} (from dynamic registration)`);
                 this.servers.push(newServer);
                 this.knownHosts.add(host);
                 this.connect(newServer);
+                found++;
               }
+            }
+            if (found === 0) {
+              console.log('ℹ️ No new dynamic nodes found.');
+            } else {
+              console.log(`✅ Added ${found} new dynamic node(s).`);
             }
           }
         } catch (e) {
-          // Bỏ qua lỗi parse
+          console.error('❌ Failed to parse dynamic nodes:', e.message);
         }
       });
     });
-    req.on('error', () => {});
+    req.on('error', (err) => {
+      console.error('❌ Failed to fetch dynamic nodes:', err.message);
+    });
     req.setTimeout(5000);
   }
 
@@ -200,10 +209,22 @@ class BackupClient {
     const httpModule = server.protocol === 'https' ? https : http;
     const agent = server.protocol === 'https' ? makeHttpsAgent(server.host) : undefined;
 
+    // Log ngay khi bắt đầu kết nối tới node mới
+    if (!this.knownHosts.has(server.host)) {
+      console.log(`🔗 [HTTP] Initiating connection to new node: ${serverKey}`);
+    }
+
     const tryReady = () => {
+      // Already restored — only need heartbeat + snapshot
       if (this.restored) {
-        if (!this.heartbeats[serverKey])     this.startHttpHeartbeat(server, serverKey, agent);
-        if (!this.snapshotTimers[serverKey]) this.startHttpSnapshot(server, serverKey, agent);
+        if (!this.heartbeats[serverKey]) {
+          console.log(`💓 Starting heartbeat for ${serverKey}`);
+          this.startHttpHeartbeat(server, serverKey, agent);
+        }
+        if (!this.snapshotTimers[serverKey]) {
+          console.log(`📸 Starting snapshot for ${serverKey}`);
+          this.startHttpSnapshot(server, serverKey, agent);
+        }
         return;
       }
 
@@ -232,8 +253,14 @@ class BackupClient {
         res.on('data', chunk => body += chunk);
         res.on('end', () => {
           if (this.restored) {
-            if (!this.heartbeats[serverKey])     this.startHttpHeartbeat(server, serverKey, agent);
-            if (!this.snapshotTimers[serverKey]) this.startHttpSnapshot(server, serverKey, agent);
+            if (!this.heartbeats[serverKey]) {
+              console.log(`💓 Starting heartbeat for ${serverKey} (post-restore)`);
+              this.startHttpHeartbeat(server, serverKey, agent);
+            }
+            if (!this.snapshotTimers[serverKey]) {
+              console.log(`📸 Starting snapshot for ${serverKey} (post-restore)`);
+              this.startHttpSnapshot(server, serverKey, agent);
+            }
             return;
           }
 
@@ -249,7 +276,9 @@ class BackupClient {
                   this.restored = true;
                   console.log('✅ Database restored');
                 }
+                console.log(`💓 Starting heartbeat for ${serverKey}`);
                 this.startHttpHeartbeat(server, serverKey, agent);
+                console.log(`📸 Starting snapshot for ${serverKey}`);
                 this.startHttpSnapshot(server, serverKey, agent);
                 return;
               }
@@ -257,7 +286,9 @@ class BackupClient {
               if (msg.type === 'READY_ACK') {
                 console.log(`🔗 [HTTP] Connected to ${serverKey} (main already has data)`);
                 this.restored = true;
+                console.log(`💓 Starting heartbeat for ${serverKey}`);
                 this.startHttpHeartbeat(server, serverKey, agent);
+                console.log(`📸 Starting snapshot for ${serverKey}`);
                 this.startHttpSnapshot(server, serverKey, agent);
                 return;
               }
@@ -275,8 +306,14 @@ class BackupClient {
 
       req.on('error', (err) => {
         if (this.restored) {
-          if (!this.heartbeats[serverKey])     this.startHttpHeartbeat(server, serverKey, agent);
-          if (!this.snapshotTimers[serverKey]) this.startHttpSnapshot(server, serverKey, agent);
+          if (!this.heartbeats[serverKey]) {
+            console.log(`💓 Starting heartbeat for ${serverKey} (error path)`);
+            this.startHttpHeartbeat(server, serverKey, agent);
+          }
+          if (!this.snapshotTimers[serverKey]) {
+            console.log(`📸 Starting snapshot for ${serverKey} (error path)`);
+            this.startHttpSnapshot(server, serverKey, agent);
+          }
           return;
         }
         console.error(`❌ ${serverKey} error: ${err.message}, retry in ${RETRY_INTERVAL/1000}s...`);
@@ -319,7 +356,8 @@ class BackupClient {
         res.resume();
         if (res.statusCode === 200) {
           this.heartbeatLogCounter[serverKey]++;
-          if (this.heartbeatLogCounter[serverKey] % 10 === 0) {
+          // Log mỗi 5 lần (2.5 phút) để sớm thấy trạng thái
+          if (this.heartbeatLogCounter[serverKey] % 5 === 0) {
             console.log(`💚 Heartbeat OK (${serverKey})`);
           }
         } else {
