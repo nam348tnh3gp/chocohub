@@ -19,7 +19,7 @@ const httpsAgent = new https.Agent({
   minVersion: 'TLSv1.2',
   secureOptions: crypto.constants.SSL_OP_NO_TICKET,
   checkServerIdentity: () => undefined,
-  servername: undefined
+  servername: undefined // Ajuda o handshake em alguns provedores de túnel
 });
 
 class BackupClient {
@@ -177,7 +177,8 @@ class BackupClient {
           'Accept': 'application/json',
           'Connection': 'keep-alive'
         },
-        agent,
+      agent,
+      servername: server.host,
         rejectUnauthorized: false
       }, (res) => {
         let body = '';
@@ -250,6 +251,7 @@ class BackupClient {
         'User-Agent': 'ChocoHub-BackupClient/1.0'
       },
       agent,
+      servername: server.host,
       rejectUnauthorized: false
     };
 
@@ -295,6 +297,7 @@ class BackupClient {
         'User-Agent': 'ChocoHub-BackupClient/1.0'
       },
       agent,
+      servername: server.host,
       rejectUnauthorized: false
     };
 
