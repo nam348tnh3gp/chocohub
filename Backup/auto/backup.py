@@ -26,11 +26,11 @@ BACKUP_TOKEN     = os.getenv('BACKUP_TOKEN', 'chocohub-default-token')
 MAIN_SERVER_URL  = os.getenv('MAIN_SERVER_URL', 'https://chocohub-r011.onrender.com')
 CHECK_INTERVAL   = int(os.getenv('CHECK_INTERVAL', 10))
 DB_PATH          = os.getenv('BACKUP_DB_PATH', 'backup.db')
-PUBLIC_URL       = os.getenv('PUBLIC_URL', 'https://chocohubbackup.serveousercontent.com')  # URL atual do Cloudflare/Tunnel
+PUBLIC_URL       = os.getenv('PUBLIC_URL', 'https://chocohub-7jmy.onrender.com')  # URL atual do Cloudflare/Tunnel
 NODE_NAME        = os.getenv('NODE_NAME', 'ChocoNode')
-NODE_DESCRIPTION = os.getenv('NODE_DESCRIPTION', 'DINAMIC URLS ARE BETTER :<')
-NODE_OWNER       = os.getenv('NODE_OWNER', '@BloodFell')
-NODE_PLATFORM    = os.getenv('NODE_PLATFORM', 'Serveo')
+NODE_DESCRIPTION = os.getenv('NODE_DESCRIPTION', 'hmmmmm')
+NODE_OWNER       = os.getenv('NODE_OWNER', '@ruvyzvat')
+NODE_PLATFORM    = os.getenv('NODE_PLATFORM', 'render')
 
 # FIX: Session com retry automático (resolve hangs e erros TLS intermitentes)
 def make_session():
