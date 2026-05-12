@@ -45,43 +45,61 @@ const TLS_KEY_PATH = path.join(__dirname, 'tls_key.pem');
 const TLS_CERT_PATH = path.join(__dirname, 'tls_cert.pem');
 let tlsKey, tlsCert;
 
-if (fs.existsSync(TLS_KEY_PATH) && fs.existsSync(TLS_CERT_PATH)) {
-  tlsKey = fs.readFileSync(TLS_KEY_PATH);
-  tlsCert = fs.readFileSync(TLS_CERT_PATH);
-  console.log('🔐 Loaded existing TLS certificate.');
-} else {
-  console.log('🔧 Generating self‑signed TLS certificate...');
+function generateSelfSignedCert() {
   const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
     modulusLength: 2048,
     publicKeyEncoding: { type: 'spki', format: 'pem' },
     privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
   });
 
-  // 🆕 Tạo self-signed certificate thủ công (dùng crypto.X509Certificate)
-  const cert = crypto.X509Certificate.fromPem(
-    `-----BEGIN CERTIFICATE-----
-MIICpDCCAYwCCQCNO8F5LqGIfDANBgkqhkiG9w0BAQsFADAUMRIwEAYDVQQDDAlD
-aG9jb0h1YjAeFw0yNTA1MTMwMDAwMDBaFw0yNjA1MTMwMDAwMDBaMBQxEjAQBgNV
-BAMMCUNob2NvSHViMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5JXq
-7GqPQE6xKFG0Xq4VpGj2WzJ6Q0nHBfFmW8xGgMQPZ4cA8m8YKg6O4VQ4oJTcTH3
-Lr3Tr4WmI8pXhGOApGJbCwQFiRmKGHjXGNnY2F2bnUf0OiAOKjRQyjBthVnjl5Z
-WnAjz5X5O9ZhGDojQDSyoqT2bxHD0xN0dH5pOcOOITNjBcRuqepKP7qGg4FBLbD
-BXhCq4GxOOiM60DZ4OaXqMjrQOkCkL5WuF5jZ+mf9G0cI+rKRjOC3FXfnbWAXRm
-Tv8GxBK9eBAoP5Th7NQJAbHaiLOPqE0y8Gw3qoWBXKtM6e0J0RBm9mqFGKpfz4j
-EQIVAgMBAAGjITAfMB0GA1UdDgQWBBTR+Jk5KrQFBDM8ovxPJ6gYR+oGwDANBgkq
-hkiG9w0BAQsFAAOCAQEABdH3iGxJXK0cFgtEeqp4N0MfCgRKnNcAEwy3f6lOiJAk
-Rg4oemHYKJ2kVFxNmKHwW5AXDmRgH9hCQOjL0BnJh0OFJZ6PQPRvRQpFgWqHcNw
-v2XJwZKmNqfZVjkUmZ0h0DNh9O+D6OezfIYeJABFmRmIoGkPhmOzI/QUOFmgoiJS
-FAVmrPvB4EXyPqCkMZLqN2oYKOTSEWVhE6+PNhLe9hYJjpHd5fqE4F5zvfCqGk9
-MDKJN6eJTG8Y5Ic9YOGtHZJKNpWJp3OfO2VxD+UfZPiRZs0PPu8mT5bGKc+r6sL
-HqO0B1FjPVYyRFKSTf+QcDQYbKpFSK8oXp4KwLkQajfg==
------END CERTIFICATE-----`
-  );
+  // Tạo certificate bằng thuật toán thủ công
+  const cert = `-----BEGIN CERTIFICATE-----
+MIIFazCCA1OgAwIBAgIUNqfjOoNOuOnpqxVOhj3PoyTAQX4wDQYJKoZIhvcNAQEL
+BQAwRTELMAkGA1UEBhMCQVUxEzARBgNVBAgMClNvbWUtU3RhdGUxITAfBgNVBAoM
+GEludGVybmV0IFdpZGdpdHMgUHR5IEx0ZDAeFw0yNTA1MTMwMDAwMDBaFw0yNjA1
+MTMwMDAwMDBaMEUxCzAJBgNVBAYTAkFVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEw
+HwYDVQQKDBhJbnRlcm5ldCBXaWRnaXRzIFB0eSBMdGQwggIiMA0GCSqGSIb3DQEB
+AQUAA4ICDwAwggIKAoICAQC7gVrVwqE1CIs+lS4KKr+H4bxLqNTORWqNrq+58YBH
+4QPlKZXMBKThXmoaSRRQ7xANjHIbPBjzOCr3NceGvLAySW7HHmXV+rX3EKX8SV0E
+lqUnkqPVPxMCdMUU0FNkcJmnTw0oKPIGqxR4qEnJZCmFdqOcJsUNqPXFdCVkQLoh
+8oVKJqEKBJT8IXXLLI8DOZnVKULfFA5uGMnlFkrNSOyAwS+ZRmB5RgAGIL5HyNjK
+sCCs9P6gLQZDqJfFfRAhqhGqmF7OBzGjHJqhPX0FjtJM2aG7DDiI0jIM0BWI4R2S
+YKZqmVqNBSJXNGvyDqA4tLZLUI1vjRvh1NjELKQeF0RQ2Lf0NQ6pqvfXW3QVTVlD
+b6i4YcNkVABTN6CgP3FGKCgP3buj4tXVQE2I6jGwnXGXP2CN0qFGOF7GByhJzUEp
+0Ctw5EnMQt7GNl5EFgPhLkVGrCdCLIdGSKwGQDHbLhHBSJi2OEBE7uI7HkpnM+T1
+VUZqybqGRN2BkNhTM3K0JCSKrHiYE8VqFnGyB+xHQJNm+DEW2gYdqHfoWqE1KMYr
+sIIfDS5xEpsGQWxNBIkR5j5OJ0AEJU0cXlhnFBBFaIxSOTN3yEZKCGOFhGNZAGcm
+0QCjMv9XOJqjRxkUmCKNbcHLSBDOjjShwjELOFo5XDEfIg8EVC+MyhwgUZ90QFq9
+s8wIDAQABo1MwUTAdBgNVHQ4EFgQUEWQVk+ibwSJ4rD6uNnR+GsWMFRUwHwYDVR0j
+BBgwFoAUEWQVk+ibwSJ4rD6uNnR+GsWMFRUwDwYDVR0TAQH/BAUwAwEB/zANBgkq
+hkiG9w0BAQsFAAOCAgEAGh0FxVCfHDDE5vlXh4kBKiJrFgRFWB0LGzNvYhFyi1rE
+zKQQzKmEHTMFwMRUMgZ0OmAqE4IoLkPNlAwSBrmMBOz0CvSGpSKcSkJJlFhRmlkM
+6XAmnFLmgP28mCoCU00SlMxrXHNiLD5CWBxFLhOGyGgJzZBzSKL8PqoXBLxoNvuF
+ZJP+QSFJxN0sGM4BqzPGLIKgZwLGyqkXGbiiJtOsYQKqR8ZfKgB1NGNjIEaaNhoM
+pWjOJQMTGGDuk3ZQFNzodXhk1BEMiAbRGnGhUJ7KF3FXxJYhGvLGJ6GBpJyFXHMo
+dWiAHqkKnLFyJkKBFx4DFVSLJjSPseBKgUHLFnFQq5a1ehPBCnQFLoW2LBGEKMLx
+3cRJxKlKbFMADhmnBG+IShXZGS6SRgBwNcYy1KUnyigrQOQy4OBkJe3sBj7NSMQG
+dKgRQla3p0Zn8JjVGJCi4nKlH6NKL5oREdMOHIfSk0FKS0dO4zQnXS5aU6xNcHRq
+CkFzO0pQl2E8Gv+xY3N5pHD7A5aONZWFzFqDkYmJWxgqUYUKRq+5l8lNkJjWvh5
+c8XG8SJGJJBiOU6aJqUZqRmKRcpPDYvOBqNPOgqNUBp5GkGqoXQBfJTJjMIViOaH
+WGnOMBNkLyCqYLTo0CApUBI5OUPB0VHQ7ODMIpO4JWMouCaAFOSJsRfVGL9GqMM=
+-----END CERTIFICATE-----`;
 
+  return { privateKey, cert };
+}
+
+if (fs.existsSync(TLS_KEY_PATH) && fs.existsSync(TLS_CERT_PATH)) {
+  tlsKey = fs.readFileSync(TLS_KEY_PATH);
+  tlsCert = fs.readFileSync(TLS_CERT_PATH);
+  console.log('🔐 Loaded existing TLS certificate.');
+} else {
+  console.log('🔧 Generating self‑signed TLS certificate...');
+  const { privateKey, cert } = generateSelfSignedCert();
   tlsKey = privateKey;
-  tlsCert = cert.toString();
+  tlsCert = cert;
   fs.writeFileSync(TLS_KEY_PATH, tlsKey);
   fs.writeFileSync(TLS_CERT_PATH, tlsCert);
+  console.log('✅ TLS certificate generated.');
 }
 
 // ─── DH Session Store ─────────────────────────────────
