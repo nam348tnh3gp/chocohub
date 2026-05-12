@@ -1,6 +1,5 @@
 # backup.py – Backup Server nhận full snapshot từ ChocoHub (bất đồng bộ, chống timeout)
-# Tất cả cấu hình đều lấy từ file .env trong thư mục hiện tại.
-# KHÔNG có giá trị mặc định cứng trong code — thiếu biến sẽ báo lỗi ngay.
+# Hỗ trợ cả Windows & Linux. Nạp .env từ thư mục chứa file backup.py.
 import os
 import sys
 import json
@@ -12,8 +11,11 @@ from dotenv import load_dotenv
 from datetime import datetime
 import sqlite3
 
-# Nạp file .env từ thư mục hiện tại (chocohub/Backup)
-load_dotenv()
+# Lấy đường dẫn tuyệt đối thư mục chứa backup.py (hoạt động trên cả Windows & Linux)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Nạp file .env từ cùng thư mục với backup.py
+load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 app = Flask(__name__)
 
@@ -22,7 +24,7 @@ BACKUP_PORT     = int(os.getenv('BACKUP_PORT'))          # bắt buộc, VD: 500
 BACKUP_TOKEN    = os.getenv('BACKUP_TOKEN')              # bắt buộc
 MAIN_SERVER_URL = os.getenv('MAIN_SERVER_URL')           # bắt buộc
 CHECK_INTERVAL  = int(os.getenv('CHECK_INTERVAL'))       # bắt buộc, VD: 10
-DB_PATH         = os.getenv('BACKUP_DB_PATH')            # bắt buộc, VD: backup.db
+DB_PATH         = os.path.join(BASE_DIR, os.getenv('BACKUP_DB_PATH'))  # đảm bảo DB luôn nằm cùng thư mục
 
 # Kiểm tra nhanh các biến bắt buộc
 for var, val in [
@@ -35,6 +37,10 @@ for var, val in [
     if val is None:
         print(f'❌ Biến môi trường {var} chưa được đặt trong file .env')
         sys.exit(1)
+
+print(f'📁 Working directory: {BASE_DIR}')
+print(f'📄 .env loaded: {os.path.join(BASE_DIR, ".env")}')
+print(f'💾 Database path: {DB_PATH}')
 
 # ─── Khởi tạo SQLite ───────────────────────────────
 def init_db():
@@ -98,12 +104,21 @@ def get_snapshot_time():
 @app.route('/api/backup/sync', methods=['POST'])
 def receive_sync():
     try:
+        # Xử lý request không phải JSON
+        if not request.is_json:
+            print('⚠️ Non-JSON request received, ignoring...')
+            return jsonify({'status': 'error', 'message': 'JSON required'}), 400
+
         data = request.get_json()
         if not data:
             return jsonify({'status': 'error', 'message': 'No data'}), 400
 
         msg_type = data.get('type', '')
         token = data.get('token', '')
+        
+        if not token:
+            return jsonify({'status': 'error', 'message': 'No token'}), 400
+
         if token != BACKUP_TOKEN:
             return jsonify({'status': 'error', 'message': 'Invalid token'}), 401
 
@@ -138,7 +153,7 @@ def receive_sync():
             user_count = len(state.get('users', []))
             print(f'📥 Receiving snapshot ({user_count} users)...')
 
-            # 🔧 Lưu trong thread riêng, trả response ngay lập tức
+            # Lưu trong thread riêng, trả response ngay lập tức
             threading.Thread(target=save_snapshot, args=(state,), daemon=True).start()
 
             return jsonify({
