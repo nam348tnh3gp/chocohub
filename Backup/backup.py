@@ -1,4 +1,4 @@
-# backup.py – Backup Server nhận full snapshot + Diffie‑Hellman (nhóm chuẩn) + server authentication
+# backup.py – Backup Server nhận full snapshot từ ChocoHub (bất đồng bộ, chống timeout)
 import os
 import sys
 import json
@@ -10,74 +10,23 @@ from dotenv import dotenv_values
 from datetime import datetime
 import sqlite3
 
-from dh import DHExchange
-
-# ─── Đường dẫn thư mục hiện tại ────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(BASE_DIR, '.env')
 
 if not os.path.exists(ENV_PATH):
     print(f'❌ File .env không tồn tại tại: {ENV_PATH}')
-    print('   Hãy tạo file .env với nội dung:')
-    print('   BACKUP_PORT=3001')
-    print('   BACKUP_TOKEN=chocohub-default-token')
-    print('   MAIN_SERVER_URL=https://chocohub-r011.onrender.com')
-    print('   CHECK_INTERVAL=10')
-    print('   BACKUP_DB_PATH=backup.db')
     sys.exit(1)
 
 config = dotenv_values(ENV_PATH)
 
 app = Flask(__name__)
 
-# ─── Cấu hình từ .env ─────────────────────────────
 BACKUP_PORT     = int(config.get('BACKUP_PORT', 3001))
 BACKUP_TOKEN    = config.get('BACKUP_TOKEN', 'chocohub-default-token')
 MAIN_SERVER_URL = config.get('MAIN_SERVER_URL', 'https://chocohub-r011.onrender.com')
 CHECK_INTERVAL  = int(config.get('CHECK_INTERVAL', 10))
 DB_PATH         = os.path.join(BASE_DIR, config.get('BACKUP_DB_PATH', 'backup.db'))
 
-print(f'📁 Working directory: {BASE_DIR}')
-print(f'📄 .env loaded: {ENV_PATH}')
-print(f'💾 Database path: {DB_PATH}')
-print(f'🔑 BACKUP_PORT: {BACKUP_PORT}')
-
-# ─── Tạo / nạp RSA key pair cho server authentication ──
-RSA_PRIVATE_PATH = os.path.join(BASE_DIR, 'backup_private.pem')
-RSA_PUBLIC_PATH  = os.path.join(BASE_DIR, 'backup_public.pem')
-
-if os.path.exists(RSA_PRIVATE_PATH) and os.path.exists(RSA_PUBLIC_PATH):
-    with open(RSA_PRIVATE_PATH, 'r') as f:
-        server_private_key_pem = f.read()
-    with open(RSA_PUBLIC_PATH, 'r') as f:
-        server_public_key_pem = f.read()
-    print('🔑 Loaded existing RSA long‑term keys.')
-else:
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.hazmat.primitives import serialization
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
-    private_pem = private_key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption()
-    ).decode()
-    public_pem = private_key.public_key().public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    ).decode()
-    with open(RSA_PRIVATE_PATH, 'w') as f:
-        f.write(private_pem)
-    with open(RSA_PUBLIC_PATH, 'w') as f:
-        f.write(public_pem)
-    server_private_key_pem = private_pem
-    server_public_key_pem = public_pem
-    print('🔧 Generated new RSA long‑term keys.')
-
-# ─── DH keys của backup server (dùng nhóm chuẩn modp2048) ──
-server_dh_keys = DHExchange.generate_standard_keypair()
-dh_sessions = {}   # client_id → { 'session_key': ..., 'created_at': ... }
-
-# ─── Khởi tạo SQLite ───────────────────────────────
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -129,161 +78,68 @@ def get_snapshot_time():
     conn.close()
     return row[0] if row else 'unknown'
 
-# ═══════════════════════════════════════════════════
-# MIDDLEWARE KIỂM TRA CHỮ KÝ DH (cho các route backup)
-# ═══════════════════════════════════════════════════
-@app.before_request
-def verify_dh_signature():
-    if not request.path.startswith('/api/backup'):
-        return
-
-    client_id = request.headers.get('X-Client-Id') or request.args.get('clientId')
-    signature = request.headers.get('X-Signature')
-
-    if not client_id or not signature:
-        return
-
-    session = dh_sessions.get(client_id)
-    if not session:
-        return
-
-    timestamp = request.headers.get('X-Timestamp', '')
-    body_str = request.get_data(as_text=True) if request.method == 'POST' else ''
-    message = f"{request.method}{request.path}{timestamp}{body_str}"
-
-    if not DHExchange.verify(message, signature, session['session_key']):
-        return jsonify({'status': 'error', 'message': 'Invalid HMAC signature'}), 401
-
-# ═══════════════════════════════════════════════════
-# ROUTE: Lấy public key dài hạn của backup server
-# ═══════════════════════════════════════════════════
-@app.route('/api/server/public-key', methods=['GET'])
-def server_public_key():
-    return jsonify({
-        'status': 'success',
-        'publicKey': server_public_key_pem,
-        'algorithm': 'RSA-4096',
-        'purpose': 'DH server authentication'
-    })
-
-# ═══════════════════════════════════════════════════
-# ROUTE: DH KEY EXCHANGE (có chữ ký server)
-# ═══════════════════════════════════════════════════
-@app.route('/api/dh/exchange', methods=['POST'])
-def dh_exchange():
-    data = request.get_json()
-    if not data:
-        return jsonify({'status': 'error', 'message': 'No data'}), 400
-
-    client_id = data.get('clientId')
-    client_public_key = data.get('clientPublicKey')
-    token = data.get('token', '')
-
-    if not client_id or not client_public_key or not token:
-        return jsonify({'status': 'error', 'message': 'Missing fields'}), 400
-
-    if token != BACKUP_TOKEN:
-        return jsonify({'status': 'error', 'message': 'Invalid token'}), 401
-
-    try:
-        shared_secret = DHExchange.compute_shared_secret(
-            server_dh_keys['private_key'],
-            client_public_key,
-            server_dh_keys['prime'],
-            server_dh_keys['generator']
-        )
-        session_key = DHExchange.derive_session_key(shared_secret)
-
-        dh_sessions[client_id] = {
-            'session_key': session_key,
-            'created_at': datetime.now().isoformat()
-        }
-
-        # Chuẩn bị dữ liệu cần ký
-        server_pub_data = json.dumps({
-            'publicKey': server_dh_keys['public_key'],
-            'prime': server_dh_keys['prime'],
-            'generator': server_dh_keys['generator'],
-            'group': server_dh_keys['group']
-        })
-        # Ký bằng RSA private key của backup server
-        server_signature = DHExchange.sign_with_private_key(server_pub_data, server_private_key_pem)
-
-        print(f'🔐 DH session established with {client_id} (server signed)')
-        return jsonify({
-            'status': 'success',
-            'serverPublicKey': server_dh_keys['public_key'],
-            'prime': server_dh_keys['prime'],
-            'generator': server_dh_keys['generator'],
-            'group': server_dh_keys['group'],
-            'serverSignature': server_signature,
-            'message': 'Session key established'
-        })
-    except Exception as e:
-        print(f'❌ DH exchange error: {e}')
-        return jsonify({'status': 'error', 'message': 'Key exchange failed'}), 500
-
-# ═══════════════════════════════════════════════════
-# BACKUP SYNC ROUTE (chấp nhận token hoặc session)
-# ═══════════════════════════════════════════════════
 @app.route('/api/backup/sync', methods=['POST'])
 def receive_sync():
-    if not request.is_json:
-        print('⚠️ Non-JSON request received, ignoring...')
-        return jsonify({'status': 'error', 'message': 'JSON required'}), 400
+    try:
+        if not request.is_json:
+            return jsonify({'status': 'error', 'message': 'JSON required'}), 400
 
-    data = request.get_json()
-    if not data:
-        return jsonify({'status': 'error', 'message': 'No data'}), 400
+        data = request.get_json()
+        if not data:
+            return jsonify({'status': 'error', 'message': 'No data'}), 400
 
-    msg_type = data.get('type', '')
-    token = data.get('token', '')
-    client_id = request.headers.get('X-Client-Id')
+        msg_type = data.get('type', '')
+        token = data.get('token', '')
+        
+        if not token:
+            return jsonify({'status': 'error', 'message': 'No token'}), 400
 
-    # Xác thực: ưu tiên session, nếu không có mới dùng token
-    session = dh_sessions.get(client_id) if client_id else None
-    if not session:
-        if not token or token != BACKUP_TOKEN:
-            return jsonify({'status': 'error', 'message': 'Invalid token or no session'}), 401
+        if token != BACKUP_TOKEN:
+            return jsonify({'status': 'error', 'message': 'Invalid token'}), 401
 
-    if msg_type == 'READY':
-        empty = data.get('empty', False)
-        if empty:
-            snap = get_snapshot()
-            if snap and snap.get('users') is not None:
-                print(f'📤 Sending full snapshot ({len(snap.get("users", []))} users)')
-                return jsonify({
-                    'type': 'FULL_SNAPSHOT',
-                    'token': BACKUP_TOKEN,
-                    'state': snap
-                })
+        if msg_type == 'READY':
+            empty = data.get('empty', False)
+            if empty:
+                snap = get_snapshot()
+                if snap and snap.get('users') is not None:
+                    print(f'📤 Main server is empty, sending full snapshot ({len(snap.get("users", []))} users)')
+                    return jsonify({
+                        'type': 'FULL_SNAPSHOT',
+                        'token': BACKUP_TOKEN,
+                        'state': snap
+                    })
+                else:
+                    print('ℹ️ Backup server also empty – nothing to send')
+                    return jsonify({'type': 'READY_ACK', 'status': 'success', 'message': 'ready but empty'})
             else:
-                return jsonify({'type': 'READY_ACK', 'status': 'success', 'message': 'ready but empty'})
+                return jsonify({'type': 'READY_ACK', 'status': 'success', 'message': 'ack'})
+
+        elif msg_type == 'PING':
+            return jsonify({'type': 'PONG', 'timestamp': datetime.now().isoformat()})
+
+        elif msg_type == 'FULL_SNAPSHOT':
+            if 'state' not in data:
+                return jsonify({'status': 'error', 'message': 'Missing state'}), 400
+
+            state = data['state']
+            user_count = len(state.get('users', []))
+            print(f'📥 Receiving snapshot ({user_count} users)...')
+
+            threading.Thread(target=save_snapshot, args=(state,), daemon=True).start()
+
+            return jsonify({
+                'type': 'SNAPSHOT_ACK',
+                'status': 'success',
+                'message': f'OK ({user_count} users)'
+            })
+
         else:
-            return jsonify({'type': 'READY_ACK', 'status': 'success', 'message': 'ack'})
+            return jsonify({'status': 'error', 'message': f'Unknown type: {msg_type}'}), 400
 
-    elif msg_type == 'PING':
-        return jsonify({'type': 'PONG', 'timestamp': datetime.now().isoformat()})
+    except Exception as e:
+        print(f'❌ Error: {e}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
-    elif msg_type == 'FULL_SNAPSHOT':
-        if 'state' not in data:
-            return jsonify({'status': 'error', 'message': 'Missing state'}), 400
-
-        state = data['state']
-        user_count = len(state.get('users', []))
-        print(f'📥 Receiving snapshot ({user_count} users)...')
-        threading.Thread(target=save_snapshot, args=(state,), daemon=True).start()
-        return jsonify({
-            'type': 'SNAPSHOT_ACK',
-            'status': 'success',
-            'message': f'OK ({user_count} users)'
-        })
-
-    else:
-        print(f'⚠️ Unknown message type: {msg_type}')
-        return jsonify({'status': 'error', 'message': f'Unknown type: {msg_type}'}), 400
-
-# ─── Các route trạng thái ──────────────────────────
 @app.route('/api/backup/status', methods=['GET'])
 def backup_status():
     snap = get_snapshot()
@@ -303,122 +159,22 @@ def health_check():
         'snapshot_time': get_snapshot_time()
     })
 
-# ═══════════════════════════════════════════════════
-# GỬI SNAPSHOT LÊN MAIN SERVER (có xác thực server)
-# ═══════════════════════════════════════════════════
-
-# Lưu public key của main server sau khi fetch
-main_server_public_key = None
-
-def fetch_main_server_public_key():
-    global main_server_public_key
-    try:
-        resp = requests.get(f'{MAIN_SERVER_URL}/api/server/public-key', timeout=5, verify=True)
-        if resp.status_code == 200:
-            data = resp.json()
-            main_server_public_key = data.get('publicKey')
-            print(f'🔑 Fetched main server public key')
-            return True
-    except Exception as e:
-        print(f'❌ Could not fetch main server public key: {e}')
-    return False
-
-def get_or_create_session_with_main_server():
-    """Lấy session DH với main server, có xác minh chữ ký server."""
-    global main_server_public_key
-    client_id = f"backup-{os.uname().nodename}"
-
-    session = dh_sessions.get(client_id)
-    if session:
-        return client_id, session['session_key']
-
-    # Nếu chưa có public key của main server, thử fetch
-    if not main_server_public_key:
-        if not fetch_main_server_public_key():
-            print('⚠️ Cannot authenticate main server – skipping DH session')
-            return None, None
-
-    try:
-        client_dh_keys = DHExchange.generate_standard_keypair()
-        resp = requests.post(
-            f'{MAIN_SERVER_URL}/api/dh/exchange',
-            json={
-                'clientId': client_id,
-                'clientPublicKey': client_dh_keys['public_key'],
-                'token': BACKUP_TOKEN
-            },
-            timeout=10,
-            verify=True
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            if 'serverPublicKey' not in data or 'serverSignature' not in data:
-                return None, None
-
-            # Xác minh chữ ký server
-            server_pub_data = json.dumps({
-                'publicKey': data['serverPublicKey'],
-                'prime': data['prime'],
-                'generator': data['generator'],
-                'group': data.get('group', 'modp2048')
-            })
-            if not DHExchange.verify_with_public_key(server_pub_data, data['serverSignature'], main_server_public_key):
-                print('❌ Main server signature verification failed!')
-                return None, None
-
-            shared = DHExchange.compute_shared_secret(
-                client_dh_keys['private_key'],
-                data['serverPublicKey'],
-                data['prime'],
-                data['generator']
-            )
-            session_key = DHExchange.derive_session_key(shared)
-            dh_sessions[client_id] = {
-                'session_key': session_key,
-                'created_at': datetime.now().isoformat()
-            }
-            print(f'🔐 Authenticated DH session established with main server')
-            return client_id, session_key
-    except Exception as e:
-        print(f'❌ DH exchange with main server failed: {e}')
-
-    return None, None
-
 def send_snapshot_to_server():
     snap = get_snapshot()
     if not snap or not snap.get('users'):
         print('⚠️ No snapshot data to send')
         return
-
-    client_id, session_key = get_or_create_session_with_main_server()
-    headers = {
-        'Content-Type': 'application/json',
-        'User-Agent': 'ChocoHub-BackupServer/1.0'
-    }
-
-    payload = {
-        'type': 'FULL_SNAPSHOT',
-        'token': BACKUP_TOKEN,
-        'state': snap
-    }
-
-    if client_id and session_key:
-        timestamp = str(int(time.time()))
-        body_json = json.dumps(payload)
-        message = f"POST/api/backup/sync{timestamp}{body_json}"
-        signature = DHExchange.sign(message, session_key)
-        headers['X-Client-Id'] = client_id
-        headers['X-Timestamp'] = timestamp
-        headers['X-Signature'] = signature
-
     print(f'📤 Sending snapshot to {MAIN_SERVER_URL}...')
     try:
         response = requests.post(
             f'{MAIN_SERVER_URL}/api/backup/sync',
-            json=payload,
-            headers=headers,
-            timeout=30,
-            verify=True
+            json={
+                'type': 'FULL_SNAPSHOT',
+                'token': BACKUP_TOKEN,
+                'state': snap
+            },
+            headers={'Content-Type': 'application/json', 'User-Agent': 'ChocoHub-BackupServer/1.0'},
+            timeout=30
         )
         if response.status_code == 200:
             print('✅ Snapshot sent successfully')
@@ -427,17 +183,13 @@ def send_snapshot_to_server():
     except Exception as e:
         print(f'❌ Error sending snapshot: {e}')
 
-# ═══════════════════════════════════════════════════
-# MONITORING THREAD
-# ═══════════════════════════════════════════════════
 def check_main_server():
     try:
-        r = requests.get(f'{MAIN_SERVER_URL}/health', timeout=5,
-                         headers={'User-Agent': 'ChocoHub-BackupServer/1.0'}, verify=True)
+        r = requests.get(f'{MAIN_SERVER_URL}/health', timeout=5, headers={'User-Agent': 'ChocoHub-BackupServer/1.0'})
         return r.status_code == 200
     except:
         try:
-            r = requests.get(f'{MAIN_SERVER_URL}/api/test', timeout=5, verify=True)
+            r = requests.get(f'{MAIN_SERVER_URL}/api/test', timeout=5)
             return r.status_code == 200
         except:
             return False
@@ -456,23 +208,11 @@ def monitor_main_server():
             print(f'🟢 Main server BACK ONLINE at {now.strftime("%H:%M:%S")}')
             send_snapshot_to_server()
             was_down = False
-        elif online and now.minute % 5 == 0 and now.second < CHECK_INTERVAL:
-            print(f'💚 Monitor active – {now.strftime("%H:%M:%S")}')
 
-# ═══════════════════════════════════════════════════
-# MAIN
-# ═══════════════════════════════════════════════════
 if __name__ == '__main__':
     print('')
     print('╔══════════════════════════════════════╗')
-    print('║   CHOCO HUB - BACKUP SERVER + DH    ║')
-    print('╠══════════════════════════════════════╣')
-    print(f'║  Port: {BACKUP_PORT}                         ║')
-    print(f'║  Main Server: {MAIN_SERVER_URL[:35].ljust(35)} ║')
-    print(f'║  Check Interval: {CHECK_INTERVAL}s                    ║')
-    print(f'║  DB: {DB_PATH}                          ║')
-    print('║  DH Exchange: /api/dh/exchange       ║')
-    print('║  Server PubKey: /api/server/public-key║')
+    print('║   CHOCO HUB - BACKUP SERVER         ║')
     print('╚══════════════════════════════════════╝')
     print('')
     init_db()
