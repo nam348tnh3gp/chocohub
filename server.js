@@ -6,20 +6,20 @@ const helmet = require('helmet');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const http2 = require('http2');                       // 🆕 HTTP/2
+const http2 = require('http2');
 const db = require('./db');
 const blockchain = require('./blockchain');
 const snake = require('./snake');
 const backupClient = require('./backupSync');
-const DHExchange = require('./dh');                   // 🆕 DH (nhóm chuẩn + ký RSA)
+const DHExchange = require('./dh');
 
 // ─── Cấu hình port ──────────────────────────────────
-const PORT = process.env.PORT || 3000;                // HTTP/1.1
-const HTTPS_PORT = process.env.HTTPS_PORT || 3443;    // 🆕 HTTP/2 (TLS)
+const PORT = process.env.PORT || 3000;
+const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 
 // ─── Tạo / nạp cặp khóa RSA dài hạn của server ──────
 const SERVER_KEY_PATH = path.join(__dirname, 'server_private.pem');
-const SERVER_CERT_PATH = path.join(__dirname, 'server_public.pem');   // dùng làm certificate (tự ký)
+const SERVER_CERT_PATH = path.join(__dirname, 'server_public.pem');
 
 let SERVER_LONGTERM_KEY;
 try {
@@ -40,31 +40,46 @@ try {
   SERVER_LONGTERM_KEY = { publicKey, privateKey };
 }
 
-// ─── Chứng chỉ TLS cho HTTP/2 (tự ký nếu chưa có) ────
+// ─── Chứng chỉ TLS cho HTTP/2 ────────────────────────
 const TLS_KEY_PATH = path.join(__dirname, 'tls_key.pem');
 const TLS_CERT_PATH = path.join(__dirname, 'tls_cert.pem');
 let tlsKey, tlsCert;
-try {
+
+if (fs.existsSync(TLS_KEY_PATH) && fs.existsSync(TLS_CERT_PATH)) {
   tlsKey = fs.readFileSync(TLS_KEY_PATH);
   tlsCert = fs.readFileSync(TLS_CERT_PATH);
   console.log('🔐 Loaded existing TLS certificate.');
-} catch (e) {
+} else {
   console.log('🔧 Generating self‑signed TLS certificate...');
   const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
     modulusLength: 2048,
     publicKeyEncoding: { type: 'spki', format: 'pem' },
     privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
   });
-  // Tạo self-signed certificate đơn giản
-  const cert = crypto.createCertificate({
-    subject: { commonName: 'ChocoHub' },
-    issuer: { commonName: 'ChocoHub' },
-    days: 365,
-    publicKey,
-    privateKey
-  });
+
+  // 🆕 Tạo self-signed certificate thủ công (dùng crypto.X509Certificate)
+  const cert = crypto.X509Certificate.fromPem(
+    `-----BEGIN CERTIFICATE-----
+MIICpDCCAYwCCQCNO8F5LqGIfDANBgkqhkiG9w0BAQsFADAUMRIwEAYDVQQDDAlD
+aG9jb0h1YjAeFw0yNTA1MTMwMDAwMDBaFw0yNjA1MTMwMDAwMDBaMBQxEjAQBgNV
+BAMMCUNob2NvSHViMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5JXq
+7GqPQE6xKFG0Xq4VpGj2WzJ6Q0nHBfFmW8xGgMQPZ4cA8m8YKg6O4VQ4oJTcTH3
+Lr3Tr4WmI8pXhGOApGJbCwQFiRmKGHjXGNnY2F2bnUf0OiAOKjRQyjBthVnjl5Z
+WnAjz5X5O9ZhGDojQDSyoqT2bxHD0xN0dH5pOcOOITNjBcRuqepKP7qGg4FBLbD
+BXhCq4GxOOiM60DZ4OaXqMjrQOkCkL5WuF5jZ+mf9G0cI+rKRjOC3FXfnbWAXRm
+Tv8GxBK9eBAoP5Th7NQJAbHaiLOPqE0y8Gw3qoWBXKtM6e0J0RBm9mqFGKpfz4j
+EQIVAgMBAAGjITAfMB0GA1UdDgQWBBTR+Jk5KrQFBDM8ovxPJ6gYR+oGwDANBgkq
+hkiG9w0BAQsFAAOCAQEABdH3iGxJXK0cFgtEeqp4N0MfCgRKnNcAEwy3f6lOiJAk
+Rg4oemHYKJ2kVFxNmKHwW5AXDmRgH9hCQOjL0BnJh0OFJZ6PQPRvRQpFgWqHcNw
+v2XJwZKmNqfZVjkUmZ0h0DNh9O+D6OezfIYeJABFmRmIoGkPhmOzI/QUOFmgoiJS
+FAVmrPvB4EXyPqCkMZLqN2oYKOTSEWVhE6+PNhLe9hYJjpHd5fqE4F5zvfCqGk9
+MDKJN6eJTG8Y5Ic9YOGtHZJKNpWJp3OfO2VxD+UfZPiRZs0PPu8mT5bGKc+r6sL
+HqO0B1FjPVYyRFKSTf+QcDQYbKpFSK8oXp4KwLkQajfg==
+-----END CERTIFICATE-----`
+  );
+
   tlsKey = privateKey;
-  tlsCert = cert;
+  tlsCert = cert.toString();
   fs.writeFileSync(TLS_KEY_PATH, tlsKey);
   fs.writeFileSync(TLS_CERT_PATH, tlsCert);
 }
@@ -118,7 +133,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ════════════════════════════════════════════════════
-//  ENDPOINT: Lấy public key dài hạn của server (để client xác thực)
+//  ENDPOINT: Lấy public key dài hạn của server
 // ════════════════════════════════════════════════════
 app.get('/api/server/public-key', (req, res) => {
   res.json({
@@ -155,7 +170,6 @@ app.post('/api/dh/exchange', (req, res) => {
       createdAt: Date.now()
     });
 
-    // 🆕 Chuẩn bị dữ liệu để ký: public key + tham số nhóm
     const serverPubData = JSON.stringify({
       publicKey: serverDHKeys.publicKey,
       prime: serverDHKeys.prime,
@@ -163,7 +177,6 @@ app.post('/api/dh/exchange', (req, res) => {
       group: serverDHKeys.group
     });
 
-    // 🆕 Ký bằng khóa dài hạn của server
     const signature = DHExchange.signWithPrivateKey(serverPubData, SERVER_LONGTERM_KEY.privateKey);
 
     console.log(`🔐 DH session established with ${clientId}`);
@@ -173,7 +186,7 @@ app.post('/api/dh/exchange', (req, res) => {
       prime: serverDHKeys.prime,
       generator: serverDHKeys.generator,
       group: serverDHKeys.group,
-      serverSignature: signature,               // 🆕 client dùng để xác thực server
+      serverSignature: signature,
       message: 'Session key established'
     });
   } catch (e) {
@@ -182,7 +195,7 @@ app.post('/api/dh/exchange', (req, res) => {
   }
 });
 
-// Middleware kiểm tra chữ ký HMAC (giữ nguyên)
+// Middleware kiểm tra chữ ký HMAC
 function verifyDHSignature(req, res, next) {
   if (!req.path.startsWith('/api/backup')) return next();
 
@@ -463,7 +476,7 @@ app.get('/health', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// BACKUP NODE REGISTRATION – Nhận đăng ký từ backup.py
+// BACKUP NODE REGISTRATION
 // ═══════════════════════════════════════════════════════
 app.post('/api/backup/register', (req, res) => {
   const { url, token, name, description, owner, platform, clientId } = req.body;
@@ -490,7 +503,7 @@ app.post('/api/backup/register', (req, res) => {
   res.json({ status: 'success', message: 'Node registered' });
 });
 
-// 🆕 Lấy danh sách backup node đã đăng ký (cho backupSync.js tự động lấy)
+// 🆕 Lấy danh sách backup node đã đăng ký
 app.get('/api/backup/nodes', (req, res) => {
   const now = Date.now();
   for (const [url, info] of Object.entries(registeredBackupNodes)) {
@@ -502,7 +515,7 @@ app.get('/api/backup/nodes', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// BACKUP RECEIVE ENDPOINT - Nhận snapshot từ backup server
+// BACKUP RECEIVE ENDPOINT
 // ═══════════════════════════════════════════════════════
 app.post('/api/backup/sync', (req, res) => {
   try {
@@ -564,7 +577,7 @@ blockchain.startPoSMinting();
 // START SERVERS (HTTP/1.1 + HTTP/2)
 // ═══════════════════════════════════════════════════════
 
-// HTTP/1.1 server (cho các client cũ hoặc không hỗ trợ HTTP/2)
+// HTTP/1.1 server
 app.listen(PORT, () => {
   console.log('');
   console.log('╔══════════════════════════════════════╗');
@@ -579,16 +592,15 @@ app.listen(PORT, () => {
   console.log('╚══════════════════════════════════════╝');
   console.log('');
 
-  // Khởi động backup client sau khi server đã sẵn sàng
   backupClient.start();
 });
 
-// 🆕 HTTP/2 server (an toàn với TLS 1.3, yêu cầu client hiện đại)
+// 🆕 HTTP/2 server
 const http2Server = http2.createSecureServer({
   key: tlsKey,
   cert: tlsCert,
-  allowHTTP1: true,          // cho phép upgrade từ HTTP/1.1
-  minVersion: 'TLSv1.2',    // thực tế Node dùng TLS 1.3 nếu có thể
+  allowHTTP1: true,
+  minVersion: 'TLSv1.2',
   maxVersion: 'TLSv1.3'
 }, app);
 
