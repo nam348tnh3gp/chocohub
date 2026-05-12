@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const http2 = require('http2');
+const { execSync } = require('child_process');
 const db = require('./db');
 const blockchain = require('./blockchain');
 const snake = require('./snake');
@@ -46,46 +47,34 @@ const TLS_CERT_PATH = path.join(__dirname, 'tls_cert.pem');
 let tlsKey, tlsCert;
 
 function generateSelfSignedCert() {
-  const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
+  // Tạo private key
+  const { privateKey } = crypto.generateKeyPairSync('rsa', {
     modulusLength: 2048,
     publicKeyEncoding: { type: 'spki', format: 'pem' },
     privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
   });
 
-  // Tạo certificate bằng thuật toán thủ công
-  const cert = `-----BEGIN CERTIFICATE-----
-MIIFazCCA1OgAwIBAgIUNqfjOoNOuOnpqxVOhj3PoyTAQX4wDQYJKoZIhvcNAQEL
-BQAwRTELMAkGA1UEBhMCQVUxEzARBgNVBAgMClNvbWUtU3RhdGUxITAfBgNVBAoM
-GEludGVybmV0IFdpZGdpdHMgUHR5IEx0ZDAeFw0yNTA1MTMwMDAwMDBaFw0yNjA1
-MTMwMDAwMDBaMEUxCzAJBgNVBAYTAkFVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEw
-HwYDVQQKDBhJbnRlcm5ldCBXaWRnaXRzIFB0eSBMdGQwggIiMA0GCSqGSIb3DQEB
-AQUAA4ICDwAwggIKAoICAQC7gVrVwqE1CIs+lS4KKr+H4bxLqNTORWqNrq+58YBH
-4QPlKZXMBKThXmoaSRRQ7xANjHIbPBjzOCr3NceGvLAySW7HHmXV+rX3EKX8SV0E
-lqUnkqPVPxMCdMUU0FNkcJmnTw0oKPIGqxR4qEnJZCmFdqOcJsUNqPXFdCVkQLoh
-8oVKJqEKBJT8IXXLLI8DOZnVKULfFA5uGMnlFkrNSOyAwS+ZRmB5RgAGIL5HyNjK
-sCCs9P6gLQZDqJfFfRAhqhGqmF7OBzGjHJqhPX0FjtJM2aG7DDiI0jIM0BWI4R2S
-YKZqmVqNBSJXNGvyDqA4tLZLUI1vjRvh1NjELKQeF0RQ2Lf0NQ6pqvfXW3QVTVlD
-b6i4YcNkVABTN6CgP3FGKCgP3buj4tXVQE2I6jGwnXGXP2CN0qFGOF7GByhJzUEp
-0Ctw5EnMQt7GNl5EFgPhLkVGrCdCLIdGSKwGQDHbLhHBSJi2OEBE7uI7HkpnM+T1
-VUZqybqGRN2BkNhTM3K0JCSKrHiYE8VqFnGyB+xHQJNm+DEW2gYdqHfoWqE1KMYr
-sIIfDS5xEpsGQWxNBIkR5j5OJ0AEJU0cXlhnFBBFaIxSOTN3yEZKCGOFhGNZAGcm
-0QCjMv9XOJqjRxkUmCKNbcHLSBDOjjShwjELOFo5XDEfIg8EVC+MyhwgUZ90QFq9
-s8wIDAQABo1MwUTAdBgNVHQ4EFgQUEWQVk+ibwSJ4rD6uNnR+GsWMFRUwHwYDVR0j
-BBgwFoAUEWQVk+ibwSJ4rD6uNnR+GsWMFRUwDwYDVR0TAQH/BAUwAwEB/zANBgkq
-hkiG9w0BAQsFAAOCAgEAGh0FxVCfHDDE5vlXh4kBKiJrFgRFWB0LGzNvYhFyi1rE
-zKQQzKmEHTMFwMRUMgZ0OmAqE4IoLkPNlAwSBrmMBOz0CvSGpSKcSkJJlFhRmlkM
-6XAmnFLmgP28mCoCU00SlMxrXHNiLD5CWBxFLhOGyGgJzZBzSKL8PqoXBLxoNvuF
-ZJP+QSFJxN0sGM4BqzPGLIKgZwLGyqkXGbiiJtOsYQKqR8ZfKgB1NGNjIEaaNhoM
-pWjOJQMTGGDuk3ZQFNzodXhk1BEMiAbRGnGhUJ7KF3FXxJYhGvLGJ6GBpJyFXHMo
-dWiAHqkKnLFyJkKBFx4DFVSLJjSPseBKgUHLFnFQq5a1ehPBCnQFLoW2LBGEKMLx
-3cRJxKlKbFMADhmnBG+IShXZGS6SRgBwNcYy1KUnyigrQOQy4OBkJe3sBj7NSMQG
-dKgRQla3p0Zn8JjVGJCi4nKlH6NKL5oREdMOHIfSk0FKS0dO4zQnXS5aU6xNcHRq
-CkFzO0pQl2E8Gv+xY3N5pHD7A5aONZWFzFqDkYmJWxgqUYUKRq+5l8lNkJjWvh5
-c8XG8SJGJJBiOU6aJqUZqRmKRcpPDYvOBqNPOgqNUBp5GkGqoXQBfJTJjMIViOaH
-WGnOMBNkLyCqYLTo0CApUBI5OUPB0VHQ7ODMIpO4JWMouCaAFOSJsRfVGL9GqMM=
------END CERTIFICATE-----`;
-
-  return { privateKey, cert };
+  // Tạo certificate bằng openssl (có sẵn trên Render)
+  const tmpKeyPath = path.join(__dirname, '.tmp_tls_key.pem');
+  const tmpCertPath = path.join(__dirname, '.tmp_tls_cert.pem');
+  
+  fs.writeFileSync(tmpKeyPath, privateKey);
+  
+  try {
+    execSync(
+      `openssl req -x509 -new -key "${tmpKeyPath}" -out "${tmpCertPath}" -days 365 -subj "/CN=ChocoHub" -nodes`,
+      { stdio: 'pipe', timeout: 10000 }
+    );
+    const cert = fs.readFileSync(tmpCertPath, 'utf8');
+    return { privateKey, cert };
+  } catch (e) {
+    console.error('❌ Failed to generate certificate with openssl:', e.message);
+    throw e;
+  } finally {
+    // Dọn dẹp file tạm
+    try { fs.unlinkSync(tmpKeyPath); } catch (e) {}
+    try { fs.unlinkSync(tmpCertPath); } catch (e) {}
+  }
 }
 
 if (fs.existsSync(TLS_KEY_PATH) && fs.existsSync(TLS_CERT_PATH)) {
