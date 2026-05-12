@@ -1,12 +1,13 @@
-// backupSync.js – Client đồng bộ full-snapshot + Diffie‑Hellman key exchange.
+// backupSync.js – Client đồng bộ full-snapshot + TLS 1.3 + DH chuẩn + xác thực server
 const net = require('net');
 const https = require('https');
 const http = require('http');
 const crypto = require('crypto');
 const os = require('os');
 const db = require('./db');
-const DHExchange = require('./dh'); // 🆕 Diffie‑Hellman
+const DHExchange = require('./dh');
 
+// ─── Cấu hình từ môi trường ────────────────────────────
 const BACKUP_SERVERS = (process.env.BACKUP_SERVERS || '').split(',').filter(Boolean);
 const BACKUP_TOKEN = process.env.BACKUP_TOKEN || 'chocohub';
 const RECONNECT_DELAY = 5000;
@@ -17,14 +18,12 @@ const RETRY_INTERVAL = 30000;            // 30s thử lại server lỗi
 const NODE_SYNC_INTERVAL = 300000;       // 5 phút đồng bộ danh sách node từ server.js
 const MAX_RETRIES = 5;                  // Số lần thử lại tối đa trước khi xóa node động
 
-// Creates a fresh TLS agent per request — keepAlive: false prevents
-// "bad record mac" errors caused by reusing TCP connections with stale TLS state
-function makeHttpsAgent(hostname) {
+// ─── TLS Agent an toàn (xác thực chứng chỉ) ─────────────
+function makeSecureHttpsAgent(hostname) {
   return new https.Agent({
-    rejectUnauthorized: false,
+    rejectUnauthorized: true,            // ✅ bắt buộc xác thực TLS
     minVersion: 'TLSv1.2',
     maxVersion: 'TLSv1.3',
-    checkServerIdentity: () => undefined,
     servername: hostname,
     keepAlive: false,
   });
@@ -61,9 +60,12 @@ class BackupClient {
     this.retryCount = {};
     this.failedNodes = new Set();
 
-    // 🆕 DH sessions: serverKey → { clientId, sessionKey, clientPrivateKey }
+    // 🆕 DH sessions: serverKey → { clientId, sessionKey }
     this.dhSessions = new Map();
     this.clientBaseId = `backup-${os.hostname()}-${process.pid}`;
+
+    // 🆕 Public key dài hạn của server (để xác thực chữ ký DH)
+    this.serverLongtermPublicKey = null;
   }
 
   start() {
@@ -214,20 +216,56 @@ class BackupClient {
     if (this.snapshotTimers[serverKey]) { clearInterval(this.snapshotTimers[serverKey]); delete this.snapshotTimers[serverKey]; }
   }
 
-  // ==================== HTTP/HTTPS + DH ====================
-  /**
-   * Thực hiện trao đổi khóa DH với server.
-   * @returns {object|null} session { clientId, sessionKey } hoặc null nếu thất bại
-   */
-  async performDHExchange(server, serverKey, agent) {
+  // ==================== Lấy public key dài hạn của server ====================
+  async fetchServerPublicKey(server, agent) {
     const httpModule = server.protocol === 'https' ? https : http;
-    const clientPrivateKeyObj = DHExchange.generateKeyPair(); // temporary key pair
-    const clientPublicKey = clientPrivateKeyObj.publicKey;
+    return new Promise((resolve) => {
+      const req = httpModule.get({
+        hostname: server.host,
+        port: server.port,
+        path: '/api/server/public-key',
+        agent,
+        rejectUnauthorized: true,
+        timeout: 5000
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(data);
+            if (json.publicKey) {
+              this.serverLongtermPublicKey = json.publicKey;
+              console.log(`🔑 Server public key obtained for ${server.host}`);
+              resolve(true);
+            } else {
+              resolve(false);
+            }
+          } catch { resolve(false); }
+        });
+      });
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => { req.destroy(); resolve(false); });
+    });
+  }
+
+  // ==================== DH Exchange an toàn (có xác thực server) ====================
+  async performSecureDHExchange(server, serverKey, agent) {
+    // Đảm bảo đã có public key dài hạn của server
+    if (!this.serverLongtermPublicKey) {
+      const fetched = await this.fetchServerPublicKey(server, agent);
+      if (!fetched) {
+        console.error(`❌ Cannot fetch server public key for ${serverKey}`);
+        return null;
+      }
+    }
+
+    const httpModule = server.protocol === 'https' ? https : http;
+    const clientDHKeys = DHExchange.generateStandardKeyPair('modp2048');
     const clientId = `${this.clientBaseId}-${serverKey}`;
 
     const payload = JSON.stringify({
       clientId,
-      clientPublicKey,
+      clientPublicKey: clientDHKeys.publicKey,
       token: server.token
     });
 
@@ -243,7 +281,7 @@ class BackupClient {
           'User-Agent': 'ChocoHub-BackupClient/1.0'
         },
         agent,
-        rejectUnauthorized: false,
+        rejectUnauthorized: true,
         timeout: 10000
       }, (res) => {
         let body = '';
@@ -255,23 +293,41 @@ class BackupClient {
           }
           try {
             const data = JSON.parse(body);
-            if (!data.serverPublicKey || !data.prime || !data.generator) {
+            if (!data.serverPublicKey || !data.prime || !data.generator || !data.serverSignature) {
               console.error(`⚠️ DH exchange incomplete for ${serverKey}`);
               return resolve(null);
             }
+
+            // Xác minh chữ ký server
+            const serverPubData = JSON.stringify({
+              publicKey: data.serverPublicKey,
+              prime: data.prime,
+              generator: data.generator,
+              group: data.group
+            });
+            const isValid = DHExchange.verifyWithPublicKey(
+              serverPubData,
+              data.serverSignature,
+              this.serverLongtermPublicKey
+            );
+            if (!isValid) {
+              console.error(`⚠️ Server signature verification FAILED for ${serverKey}`);
+              return resolve(null);
+            }
+
             // Tính shared secret và session key
             const sharedSecret = DHExchange.computeSharedSecret(
-              clientPrivateKeyObj.privateKey,
+              clientDHKeys.privateKey,
               data.serverPublicKey,
               data.prime,
               data.generator
             );
             const sessionKey = DHExchange.deriveSessionKey(sharedSecret);
 
-            console.log(`🔐 DH session established with ${serverKey}`);
+            console.log(`🔐 Secure DH session established with ${serverKey} (server authenticated)`);
             resolve({ clientId, sessionKey });
           } catch (e) {
-            console.error(`❌ DH parse error ${serverKey}:`, e.message);
+            console.error(`❌ DH parse/verify error ${serverKey}:`, e.message);
             resolve(null);
           }
         });
@@ -319,10 +375,10 @@ class BackupClient {
   connectHttp(server) {
     const serverKey = `${server.host}:${server.port}`;
     const httpModule = server.protocol === 'https' ? https : http;
-    const agent = server.protocol === 'https' ? makeHttpsAgent(server.host) : undefined;
+    const agent = server.protocol === 'https' ? makeSecureHttpsAgent(server.host) : undefined;
 
-    // Thực hiện DH exchange trước, rồi mới khởi động READY
-    this.performDHExchange(server, serverKey, agent).then(session => {
+    // Thực hiện DH exchange an toàn trước, rồi mới khởi động READY
+    this.performSecureDHExchange(server, serverKey, agent).then(session => {
       if (session) {
         this.dhSessions.set(serverKey, session);
       }
@@ -351,7 +407,7 @@ class BackupClient {
         method: 'POST',
         headers,
         agent,
-        rejectUnauthorized: false
+        rejectUnauthorized: true
       }, (res) => {
         let body = '';
         res.on('data', chunk => body += chunk);
@@ -473,7 +529,7 @@ class BackupClient {
         method: 'POST',
         headers,
         agent,
-        rejectUnauthorized: false
+        rejectUnauthorized: true
       }, (res) => {
         res.resume();
         if (res.statusCode === 200) {
@@ -519,7 +575,7 @@ class BackupClient {
         method: 'POST',
         headers,
         agent,
-        rejectUnauthorized: false
+        rejectUnauthorized: true
       };
 
       const req = httpModule.request(reqOpts, (res) => {
