@@ -1,4 +1,4 @@
-// server.js – Hybrid PoW + PoS (case-sensitive fix + all features + backup sync tự động)
+// server.js – Hybrid PoW + PoS + Diffie-Hellman secured backup channels
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -10,6 +10,13 @@ const db = require('./db');
 const blockchain = require('./blockchain');
 const snake = require('./snake');
 const backupClient = require('./backupSync');
+const DHExchange = require('./dh');                     // 🆕 Diffie-Hellman
+
+// ─── DH Session Store ─────────────────────────────────
+const dhSessions = new Map();                           // clientId → { sessionKey, createdAt }
+
+// Tạo cặp khóa DH cố định cho server (tạo lúc khởi động, publicKey được dùng để trao đổi)
+const serverDHKeys = DHExchange.generateKeyPair();
 
 function getDbHash() {
   try {
@@ -54,6 +61,82 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ════════════════════════════════════════════════════
+//  DH KEY EXCHANGE ENDPOINT (cho backup clients)
+// ════════════════════════════════════════════════════
+app.post('/api/dh/exchange', (req, res) => {
+  const { clientId, clientPublicKey, token } = req.body;
+  if (!clientId || !clientPublicKey || !token) {
+    return res.status(400).json({ status: 'error', message: 'Missing clientId, clientPublicKey or token' });
+  }
+  if (token !== (process.env.BACKUP_TOKEN || 'chocohub-default-token')) {
+    return res.status(401).json({ status: 'error', message: 'Invalid token' });
+  }
+
+  try {
+    // Tính shared secret + session key
+    const sharedSecret = DHExchange.computeSharedSecret(
+      serverDHKeys.privateKey,
+      clientPublicKey,
+      serverDHKeys.prime,
+      serverDHKeys.generator
+    );
+    const sessionKey = DHExchange.deriveSessionKey(sharedSecret);
+
+    // Lưu session cho clientId
+    dhSessions.set(clientId, {
+      sessionKey,
+      createdAt: Date.now()
+    });
+
+    console.log(`🔐 DH session established with ${clientId}`);
+    res.json({
+      status: 'success',
+      serverPublicKey: serverDHKeys.publicKey,
+      prime: serverDHKeys.prime,
+      generator: serverDHKeys.generator,
+      message: 'Session key established'
+    });
+  } catch (e) {
+    console.error('❌ DH exchange error:', e);
+    res.status(500).json({ status: 'error', message: 'Key exchange failed' });
+  }
+});
+
+// Middleware kiểm tra chữ ký HMAC cho các route backup
+function verifyDHSignature(req, res, next) {
+  // Chỉ áp dụng cho các route backup
+  if (!req.path.startsWith('/api/backup')) return next();
+
+  const clientId = req.headers['x-client-id'] || req.body.clientId || req.query.clientId;
+  const signature = req.headers['x-signature'];
+
+  // Nếu không có clientId hoặc signature, fallback về token (giữ nguyên logic cũ)
+  if (!clientId || !signature) {
+    return next();
+  }
+
+  const session = dhSessions.get(clientId);
+  if (!session) {
+    // Session không tồn tại, fallback về token (các route sẽ tự kiểm tra token)
+    return next();
+  }
+
+  // Tạo chuỗi cần ký: method + path + timestamp + body (nếu có)
+  const timestamp = req.headers['x-timestamp'] || '';
+  const bodyStr = req.method === 'POST' ? JSON.stringify(req.body) : '';
+  const signPayload = `${req.method}${req.path}${timestamp}${bodyStr}`;
+
+  if (!DHExchange.verify(signPayload, signature, session.sessionKey)) {
+    return res.status(401).json({ status: 'error', message: 'Invalid HMAC signature' });
+  }
+
+  // Nếu hợp lệ, tiếp tục
+  next();
+}
+
+app.use(verifyDHSignature);
 
 // ─── Auth ─────────────────────────────────────────────
 app.post('/auth', (req, res) => {
@@ -314,12 +397,18 @@ app.get('/health', (req, res) => {
 // BACKUP NODE REGISTRATION – Nhận đăng ký từ backup.py
 // ═══════════════════════════════════════════════════════
 app.post('/api/backup/register', (req, res) => {
-  const { url, token, name, description, owner, platform } = req.body;
+  const { url, token, name, description, owner, platform, clientId } = req.body;
   if (!url || !token) {
     return res.status(400).json({ status: 'error', message: 'Missing url or token' });
   }
-  if (token !== (process.env.BACKUP_TOKEN || 'chocohub-default-token')) {
-    return res.status(401).json({ status: 'error', message: 'Invalid token' });
+  // Kiểm tra token hoặc session key (qua middleware verifyDHSignature đã chạy)
+  // Nếu không có session, route sẽ fallback về token
+  const providedToken = req.body.token || '';
+  const isTokenValid = providedToken === (process.env.BACKUP_TOKEN || 'chocohub-default-token');
+  const session = clientId ? dhSessions.get(clientId) : null;
+  
+  if (!isTokenValid && !session) {
+    return res.status(401).json({ status: 'error', message: 'Invalid token or no valid session' });
   }
   
   registeredBackupNodes[url] = {
@@ -353,9 +442,14 @@ app.post('/api/backup/sync', (req, res) => {
   try {
     const data = req.body;
     const token = data.token || '';
+    const clientId = data.clientId || req.headers['x-client-id'] || '';
     
-    if (token !== (process.env.BACKUP_TOKEN || 'chocohub-default-token')) {
-      return res.status(401).json({ status: 'error', message: 'Invalid token' });
+    // Kiểm tra session key nếu có
+    const session = clientId ? dhSessions.get(clientId) : null;
+    const isTokenValid = token === (process.env.BACKUP_TOKEN || 'chocohub-default-token');
+    
+    if (!isTokenValid && !session) {
+      return res.status(401).json({ status: 'error', message: 'Invalid token or no valid session' });
     }
     
     console.log(`📥 Received from backup: type=${data.type}`);
@@ -418,6 +512,7 @@ app.listen(PORT, () => {
   console.log('║  Send CC: /send_cc                  ║');
   console.log('║  Transactions: /get_transactions    ║');
   console.log('║  Backup Nodes: /api/backup/nodes    ║');
+  console.log('║  DH Exchange: /api/dh/exchange      ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
 
