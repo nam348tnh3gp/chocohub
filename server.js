@@ -1,4 +1,4 @@
-// server.js – Hybrid PoW + PoS + Diffie-Hellman secured backup channels
+// server.js – Hybrid PoW + PoS + Diffie-Hellman + HTTP/2 + TLS 1.3 + Server Authentication
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -6,17 +6,74 @@ const helmet = require('helmet');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const http2 = require('http2');                       // 🆕 HTTP/2
 const db = require('./db');
 const blockchain = require('./blockchain');
 const snake = require('./snake');
 const backupClient = require('./backupSync');
-const DHExchange = require('./dh');                     // 🆕 Diffie-Hellman
+const DHExchange = require('./dh');                   // 🆕 DH (nhóm chuẩn + ký RSA)
+
+// ─── Cấu hình port ──────────────────────────────────
+const PORT = process.env.PORT || 3000;                // HTTP/1.1
+const HTTPS_PORT = process.env.HTTPS_PORT || 3443;    // 🆕 HTTP/2 (TLS)
+
+// ─── Tạo / nạp cặp khóa RSA dài hạn của server ──────
+const SERVER_KEY_PATH = path.join(__dirname, 'server_private.pem');
+const SERVER_CERT_PATH = path.join(__dirname, 'server_public.pem');   // dùng làm certificate (tự ký)
+
+let SERVER_LONGTERM_KEY;
+try {
+  SERVER_LONGTERM_KEY = {
+    privateKey: fs.readFileSync(SERVER_KEY_PATH, 'utf8'),
+    publicKey: fs.readFileSync(SERVER_CERT_PATH, 'utf8')
+  };
+  console.log('🔑 Loaded existing server long‑term keys.');
+} catch (e) {
+  console.log('🔧 Generating new server long‑term keys (RSA‑4096)...');
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
+    modulusLength: 4096,
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+  });
+  fs.writeFileSync(SERVER_KEY_PATH, privateKey);
+  fs.writeFileSync(SERVER_CERT_PATH, publicKey);
+  SERVER_LONGTERM_KEY = { publicKey, privateKey };
+}
+
+// ─── Chứng chỉ TLS cho HTTP/2 (tự ký nếu chưa có) ────
+const TLS_KEY_PATH = path.join(__dirname, 'tls_key.pem');
+const TLS_CERT_PATH = path.join(__dirname, 'tls_cert.pem');
+let tlsKey, tlsCert;
+try {
+  tlsKey = fs.readFileSync(TLS_KEY_PATH);
+  tlsCert = fs.readFileSync(TLS_CERT_PATH);
+  console.log('🔐 Loaded existing TLS certificate.');
+} catch (e) {
+  console.log('🔧 Generating self‑signed TLS certificate...');
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+  });
+  // Tạo self-signed certificate đơn giản
+  const cert = crypto.createCertificate({
+    subject: { commonName: 'ChocoHub' },
+    issuer: { commonName: 'ChocoHub' },
+    days: 365,
+    publicKey,
+    privateKey
+  });
+  tlsKey = privateKey;
+  tlsCert = cert;
+  fs.writeFileSync(TLS_KEY_PATH, tlsKey);
+  fs.writeFileSync(TLS_CERT_PATH, tlsCert);
+}
 
 // ─── DH Session Store ─────────────────────────────────
-const dhSessions = new Map();                           // clientId → { sessionKey, createdAt }
+const dhSessions = new Map();
 
-// Tạo cặp khóa DH cố định cho server (tạo lúc khởi động, publicKey được dùng để trao đổi)
-const serverDHKeys = DHExchange.generateKeyPair();
+// 🆕 Tạo cặp khóa DH của server (dùng nhóm chuẩn modp2048)
+const serverDHKeys = DHExchange.generateStandardKeyPair('modp2048');
 
 function getDbHash() {
   try {
@@ -50,11 +107,9 @@ async function sendMinerWebhook(worker, bountyId, device) {
   }
 }
 
-// 🆕 Lưu danh sách backup node đã đăng ký (từ backup.py)
 const registeredBackupNodes = {};
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(cors());
@@ -63,7 +118,19 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ════════════════════════════════════════════════════
-//  DH KEY EXCHANGE ENDPOINT (cho backup clients)
+//  ENDPOINT: Lấy public key dài hạn của server (để client xác thực)
+// ════════════════════════════════════════════════════
+app.get('/api/server/public-key', (req, res) => {
+  res.json({
+    status: 'success',
+    publicKey: SERVER_LONGTERM_KEY.publicKey,
+    algorithm: 'RSA-4096',
+    purpose: 'DH server authentication'
+  });
+});
+
+// ════════════════════════════════════════════════════
+//  DH KEY EXCHANGE ENDPOINT (có chữ ký server)
 // ════════════════════════════════════════════════════
 app.post('/api/dh/exchange', (req, res) => {
   const { clientId, clientPublicKey, token } = req.body;
@@ -75,7 +142,6 @@ app.post('/api/dh/exchange', (req, res) => {
   }
 
   try {
-    // Tính shared secret + session key
     const sharedSecret = DHExchange.computeSharedSecret(
       serverDHKeys.privateKey,
       clientPublicKey,
@@ -84,11 +150,21 @@ app.post('/api/dh/exchange', (req, res) => {
     );
     const sessionKey = DHExchange.deriveSessionKey(sharedSecret);
 
-    // Lưu session cho clientId
     dhSessions.set(clientId, {
       sessionKey,
       createdAt: Date.now()
     });
+
+    // 🆕 Chuẩn bị dữ liệu để ký: public key + tham số nhóm
+    const serverPubData = JSON.stringify({
+      publicKey: serverDHKeys.publicKey,
+      prime: serverDHKeys.prime,
+      generator: serverDHKeys.generator,
+      group: serverDHKeys.group
+    });
+
+    // 🆕 Ký bằng khóa dài hạn của server
+    const signature = DHExchange.signWithPrivateKey(serverPubData, SERVER_LONGTERM_KEY.privateKey);
 
     console.log(`🔐 DH session established with ${clientId}`);
     res.json({
@@ -96,6 +172,8 @@ app.post('/api/dh/exchange', (req, res) => {
       serverPublicKey: serverDHKeys.publicKey,
       prime: serverDHKeys.prime,
       generator: serverDHKeys.generator,
+      group: serverDHKeys.group,
+      serverSignature: signature,               // 🆕 client dùng để xác thực server
       message: 'Session key established'
     });
   } catch (e) {
@@ -104,26 +182,22 @@ app.post('/api/dh/exchange', (req, res) => {
   }
 });
 
-// Middleware kiểm tra chữ ký HMAC cho các route backup
+// Middleware kiểm tra chữ ký HMAC (giữ nguyên)
 function verifyDHSignature(req, res, next) {
-  // Chỉ áp dụng cho các route backup
   if (!req.path.startsWith('/api/backup')) return next();
 
   const clientId = req.headers['x-client-id'] || req.body.clientId || req.query.clientId;
   const signature = req.headers['x-signature'];
 
-  // Nếu không có clientId hoặc signature, fallback về token (giữ nguyên logic cũ)
   if (!clientId || !signature) {
     return next();
   }
 
   const session = dhSessions.get(clientId);
   if (!session) {
-    // Session không tồn tại, fallback về token (các route sẽ tự kiểm tra token)
     return next();
   }
 
-  // Tạo chuỗi cần ký: method + path + timestamp + body (nếu có)
   const timestamp = req.headers['x-timestamp'] || '';
   const bodyStr = req.method === 'POST' ? JSON.stringify(req.body) : '';
   const signPayload = `${req.method}${req.path}${timestamp}${bodyStr}`;
@@ -132,7 +206,6 @@ function verifyDHSignature(req, res, next) {
     return res.status(401).json({ status: 'error', message: 'Invalid HMAC signature' });
   }
 
-  // Nếu hợp lệ, tiếp tục
   next();
 }
 
@@ -181,7 +254,6 @@ app.post('/send_cc', (req, res) => {
     return res.status(400).json({ status: 'error', message: 'Missing fields' });
   }
   try {
-    // Xác thực người gửi
     db.authenticate(from_username, pin);
     const sendAmount = parseFloat(amount);
     if (isNaN(sendAmount) || sendAmount <= 0) {
@@ -197,11 +269,8 @@ app.post('/send_cc', (req, res) => {
     const receiver = db.getUser(to_username);
     if (!receiver) return res.status(404).json({ status: 'error', message: 'Receiver not found' });
 
-    // Thực hiện chuyển
     db.updateBalance(from_username, -sendAmount);
     db.updateBalance(to_username, sendAmount);
-
-    // 🆕 Lưu lịch sử giao dịch
     db.addTransaction(from_username, to_username, sendAmount);
 
     const newBalance = db.getUser(from_username).balance;
@@ -401,8 +470,6 @@ app.post('/api/backup/register', (req, res) => {
   if (!url || !token) {
     return res.status(400).json({ status: 'error', message: 'Missing url or token' });
   }
-  // Kiểm tra token hoặc session key (qua middleware verifyDHSignature đã chạy)
-  // Nếu không có session, route sẽ fallback về token
   const providedToken = req.body.token || '';
   const isTokenValid = providedToken === (process.env.BACKUP_TOKEN || 'chocohub-default-token');
   const session = clientId ? dhSessions.get(clientId) : null;
@@ -425,7 +492,6 @@ app.post('/api/backup/register', (req, res) => {
 
 // 🆕 Lấy danh sách backup node đã đăng ký (cho backupSync.js tự động lấy)
 app.get('/api/backup/nodes', (req, res) => {
-  // Dọn các node đã quá 10 phút không thấy
   const now = Date.now();
   for (const [url, info] of Object.entries(registeredBackupNodes)) {
     if (now - new Date(info.last_seen).getTime() > 600000) {
@@ -444,7 +510,6 @@ app.post('/api/backup/sync', (req, res) => {
     const token = data.token || '';
     const clientId = data.clientId || req.headers['x-client-id'] || '';
     
-    // Kiểm tra session key nếu có
     const session = clientId ? dhSessions.get(clientId) : null;
     const isTokenValid = token === (process.env.BACKUP_TOKEN || 'chocohub-default-token');
     
@@ -496,25 +561,37 @@ blockchain.startAutoBounty();
 blockchain.startPoSMinting();
 
 // ═══════════════════════════════════════════════════════
-// START SERVER
+// START SERVERS (HTTP/1.1 + HTTP/2)
 // ═══════════════════════════════════════════════════════
+
+// HTTP/1.1 server (cho các client cũ hoặc không hỗ trợ HTTP/2)
 app.listen(PORT, () => {
   console.log('');
   console.log('╔══════════════════════════════════════╗');
   console.log('║     CHOCO HUB - PoW+PoS            ║');
   console.log('╠══════════════════════════════════════╣');
-  console.log('║  Dashboard: http://localhost:' + PORT + '    ║');
-  console.log('║  API Test:  /api/test               ║');
-  console.log('║  Leaderboard: /leaderboard          ║');
-  console.log('║  PoW Auto-Bounty: active            ║');
-  console.log('║  PoS Minting: active (30s blocks)   ║');
-  console.log('║  Backup Sync: active (full snapshot)║');
-  console.log('║  Send CC: /send_cc                  ║');
-  console.log('║  Transactions: /get_transactions    ║');
-  console.log('║  Backup Nodes: /api/backup/nodes    ║');
-  console.log('║  DH Exchange: /api/dh/exchange      ║');
+  console.log('║  HTTP/1.1  : http://localhost:' + PORT + '    ║');
+  console.log('║  HTTP/2 TLS: https://localhost:' + HTTPS_PORT + '  ║');
+  console.log('║  API Test  : /api/test               ║');
+  console.log('║  DH Exchange: /api/dh/exchange       ║');
+  console.log('║  Server PubKey: /api/server/public-key║');
+  console.log('║  Backup Nodes: /api/backup/nodes     ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
 
+  // Khởi động backup client sau khi server đã sẵn sàng
   backupClient.start();
+});
+
+// 🆕 HTTP/2 server (an toàn với TLS 1.3, yêu cầu client hiện đại)
+const http2Server = http2.createSecureServer({
+  key: tlsKey,
+  cert: tlsCert,
+  allowHTTP1: true,          // cho phép upgrade từ HTTP/1.1
+  minVersion: 'TLSv1.2',    // thực tế Node dùng TLS 1.3 nếu có thể
+  maxVersion: 'TLSv1.3'
+}, app);
+
+http2Server.listen(HTTPS_PORT, () => {
+  console.log(`🔐 HTTP/2 server listening on port ${HTTPS_PORT}`);
 });
