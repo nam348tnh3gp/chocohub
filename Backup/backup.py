@@ -1,5 +1,5 @@
 # backup.py – Backup Server nhận full snapshot từ ChocoHub (bất đồng bộ, chống timeout)
-# Hỗ trợ cả Windows & Linux. Nạp .env từ thư mục chứa file backup.py.
+# Hỗ trợ cả Windows & Linux. Dùng python-dotenv đọc .env từ thư mục chứa file backup.py.
 import os
 import sys
 import json
@@ -7,40 +7,42 @@ import time
 import threading
 import requests
 from flask import Flask, request, jsonify
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 from datetime import datetime
 import sqlite3
 
 # Lấy đường dẫn tuyệt đối thư mục chứa backup.py (hoạt động trên cả Windows & Linux)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Nạp file .env từ cùng thư mục với backup.py
-load_dotenv(os.path.join(BASE_DIR, '.env'))
+# Đường dẫn tới file .env
+ENV_PATH = os.path.join(BASE_DIR, '.env')
+
+# Đọc file .env trực tiếp bằng dotenv_values
+if not os.path.exists(ENV_PATH):
+    print(f'❌ File .env không tồn tại tại: {ENV_PATH}')
+    print('   Hãy tạo file .env với nội dung:')
+    print('   BACKUP_PORT=3001')
+    print('   BACKUP_TOKEN=chocohub-default-token')
+    print('   MAIN_SERVER_URL=https://chocohub-r011.onrender.com')
+    print('   CHECK_INTERVAL=10')
+    print('   BACKUP_DB_PATH=backup.db')
+    sys.exit(1)
+
+config = dotenv_values(ENV_PATH)
 
 app = Flask(__name__)
 
-# ─── Config từ .env (không có giá trị mặc định) ────────
-BACKUP_PORT     = int(os.getenv('BACKUP_PORT'))          # bắt buộc, VD: 5000
-BACKUP_TOKEN    = os.getenv('BACKUP_TOKEN')              # bắt buộc
-MAIN_SERVER_URL = os.getenv('MAIN_SERVER_URL')           # bắt buộc
-CHECK_INTERVAL  = int(os.getenv('CHECK_INTERVAL'))       # bắt buộc, VD: 10
-DB_PATH         = os.path.join(BASE_DIR, os.getenv('BACKUP_DB_PATH'))  # đảm bảo DB luôn nằm cùng thư mục
-
-# Kiểm tra nhanh các biến bắt buộc
-for var, val in [
-    ('BACKUP_PORT', BACKUP_PORT),
-    ('BACKUP_TOKEN', BACKUP_TOKEN),
-    ('MAIN_SERVER_URL', MAIN_SERVER_URL),
-    ('CHECK_INTERVAL', CHECK_INTERVAL),
-    ('BACKUP_DB_PATH', DB_PATH),
-]:
-    if val is None:
-        print(f'❌ Biến môi trường {var} chưa được đặt trong file .env')
-        sys.exit(1)
+# ─── Config từ .env ─────────────────────────────────
+BACKUP_PORT     = int(config.get('BACKUP_PORT', 3001))
+BACKUP_TOKEN    = config.get('BACKUP_TOKEN', 'chocohub-default-token')
+MAIN_SERVER_URL = config.get('MAIN_SERVER_URL', 'https://chocohub-r011.onrender.com')
+CHECK_INTERVAL  = int(config.get('CHECK_INTERVAL', 10))
+DB_PATH         = os.path.join(BASE_DIR, config.get('BACKUP_DB_PATH', 'backup.db'))
 
 print(f'📁 Working directory: {BASE_DIR}')
-print(f'📄 .env loaded: {os.path.join(BASE_DIR, ".env")}')
+print(f'📄 .env loaded: {ENV_PATH}')
 print(f'💾 Database path: {DB_PATH}')
+print(f'🔑 BACKUP_PORT: {BACKUP_PORT}')
 
 # ─── Khởi tạo SQLite ───────────────────────────────
 def init_db():
@@ -104,7 +106,6 @@ def get_snapshot_time():
 @app.route('/api/backup/sync', methods=['POST'])
 def receive_sync():
     try:
-        # Xử lý request không phải JSON
         if not request.is_json:
             print('⚠️ Non-JSON request received, ignoring...')
             return jsonify({'status': 'error', 'message': 'JSON required'}), 400
@@ -122,7 +123,7 @@ def receive_sync():
         if token != BACKUP_TOKEN:
             return jsonify({'status': 'error', 'message': 'Invalid token'}), 401
 
-        # ─── READY: main server yêu cầu khởi tạo kết nối ───
+        # ─── READY ────────────────────────────────
         if msg_type == 'READY':
             empty = data.get('empty', False)
             if empty:
@@ -140,11 +141,11 @@ def receive_sync():
             else:
                 return jsonify({'type': 'READY_ACK', 'status': 'success', 'message': 'ack'})
 
-        # ─── PING: heartbeat ────────────────────────────
+        # ─── PING ─────────────────────────────────
         elif msg_type == 'PING':
             return jsonify({'type': 'PONG', 'timestamp': datetime.now().isoformat()})
 
-        # ─── FULL_SNAPSHOT: nhận snapshot từ main server (bất đồng bộ) ──
+        # ─── FULL_SNAPSHOT (bất đồng bộ) ──────────
         elif msg_type == 'FULL_SNAPSHOT':
             if 'state' not in data:
                 return jsonify({'status': 'error', 'message': 'Missing state'}), 400
@@ -153,7 +154,6 @@ def receive_sync():
             user_count = len(state.get('users', []))
             print(f'📥 Receiving snapshot ({user_count} users)...')
 
-            # Lưu trong thread riêng, trả response ngay lập tức
             threading.Thread(target=save_snapshot, args=(state,), daemon=True).start()
 
             return jsonify({
@@ -190,7 +190,7 @@ def health_check():
     })
 
 # ═══════════════════════════════════════════════════════
-# GỬI SNAPSHOT LÊN MAIN SERVER (khi phát hiện online)
+# GỬI SNAPSHOT LÊN MAIN SERVER
 # ═══════════════════════════════════════════════════════
 
 def send_snapshot_to_server():
@@ -218,7 +218,7 @@ def send_snapshot_to_server():
         print(f'❌ Error sending snapshot: {e}')
 
 # ═══════════════════════════════════════════════════════
-# MONITORING THREAD – Theo dõi main server
+# MONITORING THREAD
 # ═══════════════════════════════════════════════════════
 
 def check_main_server():
