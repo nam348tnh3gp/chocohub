@@ -1,4 +1,4 @@
-// blockchain.js - PoW + PoS hybrid (cleaned + no expiry)
+// blockchain.js - PoW + PoS hybrid (cleaned + no expiry + auto cleanup)
 const crypto = require('crypto');
 const db = require('./db');
 
@@ -14,7 +14,8 @@ sqlite.pragma('journal_mode = WAL');
 const AUTO_BOUNTY_MIN = 0.0001;
 const AUTO_BOUNTY_MAX = 0.01;
 const MIN_ACTIVE_BOUNTIES = 30;
-const AUTO_BOUNTY_INTERVAL = 1000; // 1 giây
+const MAX_ACTIVE_BOUNTIES = 100;          // 🆕 Giới hạn tối đa
+const AUTO_BOUNTY_INTERVAL = 1000;        // 1 giây
 const AUTO_DIFFICULTIES = [8, 10, 12, 14, 16];
 
 function createAutoBounty() {
@@ -33,8 +34,33 @@ function createAutoBounty() {
   console.log(`🤖 Auto-bounty: #${bountyId.substring(0,12)} | ${difficulty}bits | ${reward} CC`);
 }
 
+// 🆕 Dọn dẹp bounty cũ nếu vượt quá MAX_ACTIVE_BOUNTIES
+function cleanupOldBounties() {
+  try {
+    const activeCount = sqlite.prepare(
+      'SELECT COUNT(*) as count FROM bounties WHERE status=?'
+    ).get('active').count;
+    
+    if (activeCount > MAX_ACTIVE_BOUNTIES) {
+      const toDelete = activeCount - MAX_ACTIVE_BOUNTIES;
+      sqlite.prepare(`
+        DELETE FROM bounties WHERE id IN (
+          SELECT id FROM bounties WHERE status = 'active'
+          ORDER BY created_at ASC LIMIT ?
+        )
+      `).run(toDelete);
+      console.log(`🧹 Cleaned up ${toDelete} old bounties (${activeCount} → ${MAX_ACTIVE_BOUNTIES})`);
+    }
+  } catch (e) {
+    console.error('Cleanup error:', e.message);
+  }
+}
+
 function checkAndRefillBounties() {
   try {
+    // 🆕 Dọn dẹp trước khi refill
+    cleanupOldBounties();
+    
     const activeCount = sqlite.prepare(
       'SELECT COUNT(*) as count FROM bounties WHERE status=?'
     ).get('active').count;
@@ -46,8 +72,6 @@ function checkAndRefillBounties() {
       }
       console.log(`📊 Bounties refilled: ${activeCount} → ${MIN_ACTIVE_BOUNTIES}`);
     }
-
-    // 🟢 KHÔNG xóa block cũ – không bao giờ hết hạn
     
   } catch (e) {
     console.error('Auto-bounty error:', e.message);
@@ -57,7 +81,7 @@ function checkAndRefillBounties() {
 function startAutoBounty() {
   checkAndRefillBounties();
   setInterval(checkAndRefillBounties, AUTO_BOUNTY_INTERVAL);
-  console.log(`🤖 Auto-bounty started (${AUTO_BOUNTY_MIN}-${AUTO_BOUNTY_MAX} CC, min ${MIN_ACTIVE_BOUNTIES} blocks, no expiry)`);
+  console.log(`🤖 Auto-bounty started (${AUTO_BOUNTY_MIN}-${AUTO_BOUNTY_MAX} CC, min ${MIN_ACTIVE_BOUNTIES} max ${MAX_ACTIVE_BOUNTIES} blocks, no expiry)`);
 }
 
 // ═══════════════════════════════════════════════════
@@ -65,22 +89,20 @@ function startAutoBounty() {
 // ═══════════════════════════════════════════════════
 const POS_BLOCK_INTERVAL = 30000; // 30 giây
 const MIN_STAKE = 10;
-const POS_BLOCK_REWARD = 0.1; // Thưởng cố định
+const POS_BLOCK_REWARD = 0.1;
 
-let currentValidator = null; // 🟢 Lưu validator vừa được chọn
+let currentValidator = null;
 
 function selectValidator() {
   const validators = db.getValidators(MIN_STAKE);
   if (validators.length === 0) return null;
   
-  // Chọn validator dựa trên tỷ lệ stake (xác suất tỷ lệ)
   const totalStake = validators.reduce((sum, v) => sum + v.amount, 0);
   let random = Math.random() * totalStake;
   for (const v of validators) {
     random -= v.amount;
     if (random <= 0) return v;
   }
-  // fallback
   return validators[0];
 }
 
@@ -88,21 +110,18 @@ function mintPoSBlock() {
   const validator = selectValidator();
   if (!validator) {
     console.log('🔒 No validator available for PoS block');
-    currentValidator = null; // Không có ai
+    currentValidator = null;
     return;
   }
   
   const reward = POS_BLOCK_REWARD;
   
-  // Ghi nhận block (dùng chung bảng blocks_mined)
   const blockId = 'pos_' + crypto.randomBytes(6).toString('hex');
   sqlite.prepare('INSERT INTO blocks_mined (username, bounty_id, reward) VALUES (?, ?, ?)')
     .run(validator.username, blockId, reward);
   
-  // Cộng pending reward vào stake
   db.addStakeReward(validator.username, reward);
   
-  // 🟢 Cập nhật validator hiện tại
   currentValidator = validator.username;
   
   console.log(`🏦 PoS Block forged by ${validator.username} | +${reward} CC | Stake: ${validator.amount} CC`);
@@ -113,18 +132,18 @@ function getCurrentValidator() {
 }
 
 function startPoSMinting() {
-  mintPoSBlock(); // chạy ngay lần đầu
+  mintPoSBlock();
   setInterval(mintPoSBlock, POS_BLOCK_INTERVAL);
   console.log(`🏦 PoS minting started (block every ${POS_BLOCK_INTERVAL/1000}s, reward ${POS_BLOCK_REWARD} CC)`);
 }
 
 // ═══════════════════════════════════════════════════
-// BOUNTY MANAGEMENT (PoW) – đã xóa createBounty
+// BOUNTY MANAGEMENT (PoW)
 // ═══════════════════════════════════════════════════
 
 function getActiveBounties() {
   const rows = sqlite.prepare(
-    'SELECT id, creator_username, target_device, difficulty, reward, binary_target, last_hash FROM bounties WHERE status=? ORDER BY created_at DESC'
+    'SELECT id, creator_username, target_device, difficulty, reward, binary_target, last_hash FROM bounties WHERE status=? ORDER BY created_at DESC LIMIT 50'
   ).all('active');
 
   const result = {};
@@ -164,7 +183,6 @@ function submitSolution(bountyId, nonce, workerName, deviceType) {
 
   if (!bounty) throw new Error('Bounty not found or already solved');
 
-  // Verify hash
   const input = bounty.last_hash + nonce + workerName;
   const hash = crypto.createHash('sha256').update(input).digest('hex');
   const binary = hexToBinary(hash);
@@ -176,17 +194,17 @@ function submitSolution(bountyId, nonce, workerName, deviceType) {
     };
   }
 
-  // Đánh dấu đã giải
   sqlite.prepare('UPDATE bounties SET status=?, nonce=?, solver_username=? WHERE id=?')
     .run('solved', String(nonce), workerName, bountyId);
 
-  // Thưởng miner theo reward của bounty
   const reward = bounty.reward || 1.0;
   db.updateBalance(workerName, reward);
 
-  // Log block đã đào
   sqlite.prepare('INSERT INTO blocks_mined (username, bounty_id, reward) VALUES (?, ?, ?)')
     .run(workerName, bountyId, reward);
+
+  // 🆕 Dọn dẹp sau mỗi block được giải
+  cleanupOldBounties();
 
   return { 
     status: 'success', 
@@ -205,6 +223,7 @@ module.exports = {
   submitSolution,
   startAutoBounty,
   checkAndRefillBounties,
+  cleanupOldBounties,     // 🆕 Export để dùng ngoài
   // PoS exports
   startPoSMinting,
   mintPoSBlock,
