@@ -4,7 +4,7 @@ import base64
 import hashlib
 import hmac
 from cryptography.hazmat.primitives.asymmetric import dh, rsa, padding
-from cryptography.hazmat.primitives.asymmetric.dh import DHPublicKey
+from cryptography.hazmat.primitives.asymmetric.dh import DHPublicNumbers
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.serialization import (
     Encoding, PublicFormat, PrivateFormat, NoEncryption,
@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.serialization import (
 )
 
 # ─── Nhóm DH chuẩn (prime, generator) ──────────────────
+#      modp2048 (RFC 3526) – tương thích với Node.js crypto.createDiffieHellmanGroup('modp2048')
 _MODP2048_PRIME = int(
     "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1"
     "29024E088A67CC74020BBEA63B139B22514A08798E3404DD"
@@ -60,6 +61,7 @@ class DHExchange:
 
     @staticmethod
     def generate_keypair():
+        """Giữ lại method cũ (dùng nhóm chuẩn modp2048)."""
         return DHExchange.generate_standard_keypair()
 
     @staticmethod
@@ -78,32 +80,38 @@ class DHExchange:
         param_numbers = dh.DHParameterNumbers(prime_int, generator_int)
         parameters = param_numbers.parameters()
 
-        # Tạo public key từ raw bytes
+        # Tạo public key từ raw bytes (tương thích mọi phiên bản cryptography)
         their_public_bytes = base64.b64decode(their_public_key_b64)
-        their_public_key = DHPublicKey.from_public_bytes(their_public_bytes, parameters)
+        their_y = int.from_bytes(their_public_bytes, 'big')
+        their_public_numbers = DHPublicNumbers(their_y, param_numbers)
+        their_public_key = their_public_numbers.public_key()
 
         shared = private_key.exchange(their_public_key)
         return base64.b64encode(shared).decode()
 
     @staticmethod
     def derive_session_key(shared_secret_b64):
+        """Dẫn xuất session key từ shared secret (SHA-256)."""
         return base64.b64encode(
             hashlib.sha256(base64.b64decode(shared_secret_b64)).digest()
         ).decode()
 
     @staticmethod
     def sign(message, session_key_b64):
+        """Tạo chữ ký HMAC-SHA256 cho thông điệp."""
         key = base64.b64decode(session_key_b64)
         return hmac.new(key, message.encode(), hashlib.sha256).hexdigest()
 
     @staticmethod
     def verify(message, signature, session_key_b64):
+        """Xác minh chữ ký HMAC (so sánh an toàn)."""
         expected = DHExchange.sign(message, session_key_b64)
         return hmac.compare_digest(expected, signature)
 
-    # ───────────── RSA signing ───────────────────────────
+    # ───────────── RSA signing (server authentication) ────
     @staticmethod
     def sign_with_private_key(data, private_key_pem):
+        """Ký dữ liệu bằng RSA private key (PEM)."""
         key = load_pem_private_key(private_key_pem.encode(), password=None)
         signature = key.sign(
             data.encode(),
@@ -114,6 +122,7 @@ class DHExchange:
 
     @staticmethod
     def verify_with_public_key(data, signature_b64, public_key_pem):
+        """Xác minh chữ ký bằng RSA public key (PEM)."""
         try:
             key = load_pem_public_key(public_key_pem.encode())
             key.verify(
