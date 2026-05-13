@@ -1,5 +1,5 @@
 // backupSync.js – Client đồng bộ full-snapshot + TLS 1.3 + DH (có fallback token)
-// 🆕 Fix: Fallback token khi DH không khả dụng
+// 🆕 Fix: Fallback token khi DH không khả dụng + đã sửa lỗi empty flag
 const net = require('net');
 const https = require('https');
 const http = require('http');
@@ -343,8 +343,12 @@ class BackupClient {
   }
 
   // 🆕 Hàm gửi request với token (fallback mode) - GIỐNG HỆT CODE CŨ
-  sendWithToken(method, path, bodyObj, server, agent) {
+  sendWithToken(method, path, bodyObj, server, agent, isEmpty) {
     bodyObj.token = server.token;
+    // ✅ Thêm empty flag nếu được truyền vào
+    if (isEmpty !== undefined) {
+      bodyObj.empty = isEmpty;
+    }
     const payload = JSON.stringify(bodyObj);
     const headers = {
       'Content-Type': 'application/json',
@@ -357,8 +361,12 @@ class BackupClient {
   }
 
   // Hàm gửi request với DH (nếu có session)
-  sendWithDH(method, path, bodyObj, session) {
+  sendWithDH(method, path, bodyObj, session, isEmpty) {
     bodyObj.token = BACKUP_TOKEN;
+    // ✅ Thêm empty flag nếu được truyền vào
+    if (isEmpty !== undefined) {
+      bodyObj.empty = isEmpty;
+    }
     const payload = JSON.stringify(bodyObj);
     const headers = {
       'Content-Type': 'application/json',
@@ -406,17 +414,18 @@ class BackupClient {
 
       const readyPayload = {
         type: 'READY',
-        token: server.token,
-        empty: db.getSeq() === 0
+        token: server.token
+        // empty sẽ được thêm vào bên trong sendWithToken/sendWithDH
       };
+      const isEmpty = db.getSeq() === 0;
 
       let payload, headers;
       if (useDH && session) {
-        const result = this.sendWithDH('POST', '/api/backup/sync', readyPayload, session);
+        const result = this.sendWithDH('POST', '/api/backup/sync', readyPayload, session, isEmpty);
         payload = result.payload;
         headers = result.headers;
       } else {
-        const result = this.sendWithToken('POST', '/api/backup/sync', readyPayload, server, agent);
+        const result = this.sendWithToken('POST', '/api/backup/sync', readyPayload, server, agent, isEmpty);
         payload = result.payload;
         headers = result.headers;
       }
@@ -428,7 +437,7 @@ class BackupClient {
         method: 'POST',
         headers,
         agent,
-        rejectUnauthorized: !useDH  // Nếu dùng token thì cho phép self-signed
+        rejectUnauthorized: useDH ? true : false  // DH: xác thực TLS, Token: không xác thực
       }, (res) => {
         let body = '';
         res.on('data', chunk => body += chunk);
