@@ -1,16 +1,5 @@
 // server.js – Hybrid PoW + PoS + Diffie-Hellman + HTTP/2 + TLS 1.3 + Server Authentication
 require('dotenv').config();
-// Thêm helper canonicalStringify
-function canonicalStringify(obj) {
-  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
-  if (Array.isArray(obj)) return '[' + obj.map(canonicalStringify).join(',') + ']';
-  const sortedKeys = Object.keys(obj).sort();
-  const pairs = sortedKeys.map(k => `"${k}":${canonicalStringify(obj[k])}`);
-  return '{' + pairs.join(',') + '}';
-}
-
-// Trong middleware verifyDHSignature, sửa phần tính bodyStr:
-const bodyStr = req.method === 'POST' ? canonicalStringify(req.body) : '';
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -24,6 +13,15 @@ const blockchain = require('./blockchain');
 const snake = require('./snake');
 const backupClient = require('./backupSync');
 const DHExchange = require('./dh');
+
+// ─── Helper: canonical JSON (sắp xếp key alphabet) ─────────────
+function canonicalStringify(obj) {
+  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+  if (Array.isArray(obj)) return '[' + obj.map(canonicalStringify).join(',') + ']';
+  const sortedKeys = Object.keys(obj).sort();
+  const pairs = sortedKeys.map(k => `"${k}":${canonicalStringify(obj[k])}`);
+  return '{' + pairs.join(',') + '}';
+}
 
 // ─── Cấu hình port ──────────────────────────────────
 const PORT = process.env.PORT || 3000;
@@ -58,19 +56,14 @@ const TLS_CERT_PATH = path.join(__dirname, 'tls_cert.pem');
 let tlsKey, tlsCert;
 
 function generateSelfSignedCert() {
-  // Tạo private key
   const { privateKey } = crypto.generateKeyPairSync('rsa', {
     modulusLength: 2048,
     publicKeyEncoding: { type: 'spki', format: 'pem' },
     privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
   });
-
-  // Tạo certificate bằng openssl (có sẵn trên Render)
   const tmpKeyPath = path.join(__dirname, '.tmp_tls_key.pem');
   const tmpCertPath = path.join(__dirname, '.tmp_tls_cert.pem');
-  
   fs.writeFileSync(tmpKeyPath, privateKey);
-  
   try {
     execSync(
       `openssl req -x509 -new -key "${tmpKeyPath}" -out "${tmpCertPath}" -days 365 -subj "/CN=ChocoHub" -nodes`,
@@ -82,7 +75,6 @@ function generateSelfSignedCert() {
     console.error('❌ Failed to generate certificate with openssl:', e.message);
     throw e;
   } finally {
-    // Dọn dẹp file tạm
     try { fs.unlinkSync(tmpKeyPath); } catch (e) {}
     try { fs.unlinkSync(tmpCertPath); } catch (e) {}
   }
@@ -104,8 +96,6 @@ if (fs.existsSync(TLS_KEY_PATH) && fs.existsSync(TLS_CERT_PATH)) {
 
 // ─── DH Session Store ─────────────────────────────────
 const dhSessions = new Map();
-
-// 🆕 Tạo cặp khóa DH của server (dùng nhóm chuẩn modp2048)
 const serverDHKeys = DHExchange.generateStandardKeyPair('modp2048');
 
 function getDbHash() {
@@ -143,7 +133,6 @@ async function sendMinerWebhook(worker, bountyId, device) {
 const registeredBackupNodes = {};
 
 const app = express();
-
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -182,19 +171,14 @@ app.post('/api/dh/exchange', (req, res) => {
       serverDHKeys.generator
     );
     const sessionKey = DHExchange.deriveSessionKey(sharedSecret);
+    dhSessions.set(clientId, { sessionKey, createdAt: Date.now() });
 
-    dhSessions.set(clientId, {
-      sessionKey,
-      createdAt: Date.now()
-    });
-
-    const serverPubData = JSON.stringify({
+    const serverPubData = canonicalStringify({
       publicKey: serverDHKeys.publicKey,
       prime: serverDHKeys.prime,
       generator: serverDHKeys.generator,
       group: serverDHKeys.group
     });
-
     const signature = DHExchange.signWithPrivateKey(serverPubData, SERVER_LONGTERM_KEY.privateKey);
 
     console.log(`🔐 DH session established with ${clientId}`);
@@ -213,36 +197,30 @@ app.post('/api/dh/exchange', (req, res) => {
   }
 });
 
-// Middleware kiểm tra chữ ký HMAC
+// Middleware kiểm tra chữ ký HMAC (dùng canonical JSON)
 function verifyDHSignature(req, res, next) {
   if (!req.path.startsWith('/api/backup')) return next();
 
   const clientId = req.headers['x-client-id'] || req.body.clientId || req.query.clientId;
   const signature = req.headers['x-signature'];
-
-  if (!clientId || !signature) {
-    return next();
-  }
+  if (!clientId || !signature) return next();
 
   const session = dhSessions.get(clientId);
-  if (!session) {
-    return next();
-  }
+  if (!session) return next();
 
   const timestamp = req.headers['x-timestamp'] || '';
-  const bodyStr = req.method === 'POST' ? JSON.stringify(req.body) : '';
+  const bodyStr = req.method === 'POST' ? canonicalStringify(req.body) : '';
   const signPayload = `${req.method}${req.path}${timestamp}${bodyStr}`;
 
   if (!DHExchange.verify(signPayload, signature, session.sessionKey)) {
     return res.status(401).json({ status: 'error', message: 'Invalid HMAC signature' });
   }
-
   next();
 }
 
 app.use(verifyDHSignature);
 
-// ─── Auth ─────────────────────────────────────────────
+// ─── Các route API (giữ nguyên) ─────────────────────────────────
 app.post('/auth', (req, res) => {
   const { username, pin } = req.body;
   if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing fields' });
@@ -254,7 +232,6 @@ app.post('/auth', (req, res) => {
   }
 });
 
-// ─── User info ─────────────────────────────────────────
 app.get('/get_user/:username', (req, res) => {
   try {
     const user = db.getUser(req.params.username);
@@ -265,7 +242,6 @@ app.get('/get_user/:username', (req, res) => {
   }
 });
 
-// ─── Get balance (query param) ─────────────────────────
 app.get('/get_balance', (req, res) => {
   const username = req.query.username;
   if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
@@ -278,7 +254,6 @@ app.get('/get_balance', (req, res) => {
   }
 });
 
-// ─── Send CC (Transfer) ──────────────────────────────
 app.post('/send_cc', (req, res) => {
   const { from_username, pin, to_username, amount } = req.body;
   if (!from_username || !pin || !to_username || !amount) {
@@ -290,32 +265,23 @@ app.post('/send_cc', (req, res) => {
     if (isNaN(sendAmount) || sendAmount <= 0) {
       return res.status(400).json({ status: 'error', message: 'Invalid amount' });
     }
-
     const sender = db.getUser(from_username);
     if (!sender) return res.status(404).json({ status: 'error', message: 'Sender not found' });
     if (sender.balance < sendAmount) {
       return res.status(400).json({ status: 'error', message: 'Insufficient balance' });
     }
-
     const receiver = db.getUser(to_username);
     if (!receiver) return res.status(404).json({ status: 'error', message: 'Receiver not found' });
-
     db.updateBalance(from_username, -sendAmount);
     db.updateBalance(to_username, sendAmount);
     db.addTransaction(from_username, to_username, sendAmount);
-
     const newBalance = db.getUser(from_username).balance;
-    res.json({
-      status: 'success',
-      message: `Sent ${sendAmount} CC to ${to_username}`,
-      new_balance: newBalance
-    });
+    res.json({ status: 'success', message: `Sent ${sendAmount} CC to ${to_username}`, new_balance: newBalance });
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
   }
 });
 
-// 🆕 Lấy lịch sử giao dịch của một user
 app.get('/get_transactions', (req, res) => {
   const username = req.query.username;
   if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
@@ -327,7 +293,6 @@ app.get('/get_transactions', (req, res) => {
   }
 });
 
-// ─── Network status ────────────────────────────────────
 app.get('/network_status', (req, res) => {
   try {
     const recent = db.getRecentBlocks(10);
@@ -338,7 +303,6 @@ app.get('/network_status', (req, res) => {
   }
 });
 
-// ─── Snake claim ──────────────────────────────────────
 app.post('/snake/claim', (req, res) => {
   const { username, pin, apples, mode } = req.body;
   if (!username || !pin || apples == null) return res.status(400).json({ status: 'error', message: 'Missing fields' });
@@ -350,7 +314,6 @@ app.post('/snake/claim', (req, res) => {
   }
 });
 
-// ─── Check cooldown ────────────────────────────────────
 app.get('/snake/cooldown', (req, res) => {
   const username = req.query.username;
   if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
@@ -362,7 +325,6 @@ app.get('/snake/cooldown', (req, res) => {
   }
 });
 
-// ─── Leaderboard ─────────────────────────────────────
 app.get('/leaderboard', (req, res) => {
   try {
     const normal = db.getLeaderboard('normal', 10);
@@ -373,7 +335,6 @@ app.get('/leaderboard', (req, res) => {
   }
 });
 
-// ─── PoS routes ──────────────────────────────────────
 app.get('/pos/info', (req, res) => {
   try {
     const username = (req.query.username || '').trim();
@@ -385,14 +346,7 @@ app.get('/pos/info', (req, res) => {
     const staked = Number(stake.amount) || 0;
     const pending = Number(stake.pending_reward) || 0;
     const currentVal = blockchain.getCurrentValidator();
-    res.json({
-      status: 'success',
-      balance,
-      staked,
-      is_validator: username === currentVal,
-      pending_reward: pending,
-      current_validator: currentVal || null
-    });
+    res.json({ status: 'success', balance, staked, is_validator: username === currentVal, pending_reward: pending, current_validator: currentVal || null });
   } catch (e) {
     console.error('/pos/info error:', e);
     res.status(500).json({ status: 'error', message: e.message });
@@ -427,7 +381,6 @@ app.post('/pos/unstake', (req, res) => {
   }
 });
 
-// ─── Bounty endpoints (PoW) ──────────────────────────
 app.get('/active_bounties_list', (req, res) => {
   try {
     const bounties = blockchain.getActiveBounties();
@@ -454,187 +407,107 @@ app.post('/submit_solution', (req, res) => {
     const worker_name = req.query.worker_name || req.body.worker_name;
     const device_type = req.query.device_type || req.body.device_type || 'web';
     if (!bounty_id || !nonce || !worker_name) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Missing required parameters: bounty_id, nonce, worker_name'
-      });
+      return res.status(400).json({ status: 'error', message: 'Missing required parameters: bounty_id, nonce, worker_name' });
     }
     const result = blockchain.submitSolution(bounty_id, nonce, worker_name, device_type);
-    if (result && result.status === 'success') {
-      sendMinerWebhook(worker_name, bounty_id, device_type);
-    }
+    if (result && result.status === 'success') sendMinerWebhook(worker_name, bounty_id, device_type);
     res.json(result);
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
   }
 });
 
-// ─── Miner heartbeat ──────────────────────────────────
 app.get('/miner_heartbeat', (req, res) => {
   res.json({ status: 'ok', time: Date.now() });
 });
 
-// ─── API test endpoint ─────────────────────────────────
 app.get('/api/test', (req, res) => {
-  res.json({
-    status: 'ok',
-    time: new Date().toISOString(),
-    message: 'ChocoHub API is running',
-    uptime: process.uptime()
-  });
+  res.json({ status: 'ok', time: new Date().toISOString(), message: 'ChocoHub API is running', uptime: process.uptime() });
 });
 
-// 🟢 Health endpoint cho Backup Server
 app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    dbHash: getDbHash()
-  });
+  res.json({ status: 'healthy', timestamp: new Date().toISOString(), dbHash: getDbHash() });
 });
 
-// ═══════════════════════════════════════════════════════
 // BACKUP NODE REGISTRATION
-// ═══════════════════════════════════════════════════════
 app.post('/api/backup/register', (req, res) => {
   const { url, token, name, description, owner, platform, clientId } = req.body;
-  if (!url || !token) {
-    return res.status(400).json({ status: 'error', message: 'Missing url or token' });
-  }
+  if (!url || !token) return res.status(400).json({ status: 'error', message: 'Missing url or token' });
   const providedToken = req.body.token || '';
   const isTokenValid = providedToken === (process.env.BACKUP_TOKEN || 'chocohub-default-token');
   const session = clientId ? dhSessions.get(clientId) : null;
-  
-  if (!isTokenValid && !session) {
-    return res.status(401).json({ status: 'error', message: 'Invalid token or no valid session' });
-  }
-  
-  registeredBackupNodes[url] = {
-    name: name || 'Unknown',
-    description: description || '',
-    owner: owner || '',
-    platform: platform || 'Unknown',
-    last_seen: new Date().toISOString()
-  };
-  
+  if (!isTokenValid && !session) return res.status(401).json({ status: 'error', message: 'Invalid token or no valid session' });
+  registeredBackupNodes[url] = { name: name || 'Unknown', description: description || '', owner: owner || '', platform: platform || 'Unknown', last_seen: new Date().toISOString() };
   console.log(`📡 Backup node registered: ${name || url} (${url})`);
   res.json({ status: 'success', message: 'Node registered' });
 });
 
-// 🆕 Lấy danh sách backup node đã đăng ký
 app.get('/api/backup/nodes', (req, res) => {
   const now = Date.now();
   for (const [url, info] of Object.entries(registeredBackupNodes)) {
-    if (now - new Date(info.last_seen).getTime() > 600000) {
-      delete registeredBackupNodes[url];
-    }
+    if (now - new Date(info.last_seen).getTime() > 600000) delete registeredBackupNodes[url];
   }
   res.json({ status: 'success', nodes: registeredBackupNodes });
 });
 
-// ═══════════════════════════════════════════════════════
-// BACKUP RECEIVE ENDPOINT (ĐÃ SỬA - CÓ REQUEST_SNAPSHOT)
-// ═══════════════════════════════════════════════════════
+// BACKUP RECEIVE ENDPOINT (có xử lý REQUEST_SNAPSHOT)
 app.post('/api/backup/sync', (req, res) => {
   try {
     const data = req.body;
     const token = data.token || '';
     const clientId = data.clientId || req.headers['x-client-id'] || '';
-    
     const session = clientId ? dhSessions.get(clientId) : null;
     const isTokenValid = token === (process.env.BACKUP_TOKEN || 'chocohub-default-token');
-    
-    if (!isTokenValid && !session) {
-      return res.status(401).json({ status: 'error', message: 'Invalid token or no valid session' });
-    }
-    
+    if (!isTokenValid && !session) return res.status(401).json({ status: 'error', message: 'Invalid token or no valid session' });
     console.log(`📥 Received from backup: type=${data.type}, empty=${data.empty}`);
-    
-    // Xử lý FULL_SNAPSHOT từ client
     if (data.type === 'FULL_SNAPSHOT' && data.state) {
       console.log('📥 Receiving full DB snapshot from backup client...');
       db.importFullState(data.state);
       console.log('✅ Full database restored from backup client');
       return res.json({ type: 'SNAPSHOT_ACK', status: 'success' });
     }
-    
-    // Xử lý READY từ client
     if (data.type === 'READY') {
       const serverHasData = db.getSeq() > 0;
       const clientHasData = data.empty === false;
-      
       console.log(`📋 READY: serverHasData=${serverHasData}, clientHasData=${clientHasData}`);
-      
       if (data.empty === true) {
-        // Client rỗng → server gửi snapshot xuống
         console.log('📤 Client is empty, sending snapshot to client...');
-        return res.json({
-          type: 'FULL_SNAPSHOT',
-          state: db.exportFullState()
-        });
-      } 
-      else if (serverHasData === false && clientHasData === true) {
-        // Server rỗng, client có dữ liệu → yêu cầu client gửi snapshot lên
+        return res.json({ type: 'FULL_SNAPSHOT', state: db.exportFullState() });
+      } else if (serverHasData === false && clientHasData === true) {
         console.log('📤 Server is empty, requesting snapshot from client...');
-        return res.json({
-          type: 'REQUEST_SNAPSHOT',
-          message: 'Server is empty, please send your snapshot'
-        });
-      }
-      else {
-        // Cả 2 đều có dữ liệu hoặc cả 2 đều rỗng
+        return res.json({ type: 'REQUEST_SNAPSHOT', message: 'Server is empty, please send your snapshot' });
+      } else {
         console.log('✅ Both have data or both empty, sending READY_ACK');
-        return res.json({
-          type: 'READY_ACK',
-          status: 'ok'
-        });
+        return res.json({ type: 'READY_ACK', status: 'ok' });
       }
     }
-    
-    // PING giữ heartbeat
-    if (data.type === 'PING') {
-      return res.json({ type: 'PONG' });
-    }
-    
+    if (data.type === 'PING') return res.json({ type: 'PONG' });
     res.json({ type: 'ACK', status: 'received' });
-    
   } catch (e) {
     console.error('❌ Error receiving backup:', e.message);
     res.status(500).json({ status: 'error', message: e.message });
   }
 });
 
-// ─── SPA fallback ─────────────────────────────────────
+// SPA fallback
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, 'public', 'index.html');
   try {
-    if (fs.existsSync(indexPath)) {
-      res.sendFile(indexPath);
-    } else {
-      res.status(200).send('<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>ChocoHub</title><style>body{background:#0a0a12;color:#eee4d8;font-family:"Outfit",sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;text-align:center}h1{color:#f58a00;font-size:2.5rem}p{color:#8b8296;margin-top:10px}</style></head><body><div><h1>ChocoHub</h1><p>Server is running. Please upload frontend files to continue.</p><p style="font-size:0.8rem;margin-top:20px;">API: <code style="color:#f58a00;">/api/test</code></p></div></body></html>');
-    }
+    if (fs.existsSync(indexPath)) res.sendFile(indexPath);
+    else res.status(200).send('<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>ChocoHub</title><style>body{background:#0a0a12;color:#eee4d8;font-family:"Outfit",sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;text-align:center}h1{color:#f58a00;font-size:2.5rem}p{color:#8b8296;margin-top:10px}</style></head><body><div><h1>ChocoHub</h1><p>Server is running. Please upload frontend files to continue.</p><p style="font-size:0.8rem;margin-top:20px;">API: <code style="color:#f58a00;">/api/test</code></p></div></body></html>');
   } catch(e) {
     res.status(500).send('Server error');
   }
 });
 
-// ─── Error handler ─────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error('Server error:', err.message);
   res.status(500).json({ status: 'error', message: 'Internal server error' });
 });
 
-// ═══════════════════════════════════════════════════════
-// START AUTO-BOUNTY (PoW) + PoS MINTING
-// ═══════════════════════════════════════════════════════
 blockchain.startAutoBounty();
 blockchain.startPoSMinting();
 
-// ═══════════════════════════════════════════════════════
-// START SERVERS (HTTP/1.1 + HTTP/2)
-// ═══════════════════════════════════════════════════════
-
-// HTTP/1.1 server
 app.listen(PORT, () => {
   console.log('');
   console.log('╔══════════════════════════════════════╗');
@@ -648,19 +521,10 @@ app.listen(PORT, () => {
   console.log('║  Backup Nodes: /api/backup/nodes     ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
-
   backupClient.start();
 });
 
-// 🆕 HTTP/2 server
-const http2Server = http2.createSecureServer({
-  key: tlsKey,
-  cert: tlsCert,
-  allowHTTP1: true,
-  minVersion: 'TLSv1.2',
-  maxVersion: 'TLSv1.3'
-}, app);
-
+const http2Server = http2.createSecureServer({ key: tlsKey, cert: tlsCert, allowHTTP1: true, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.3' }, app);
 http2Server.listen(HTTPS_PORT, () => {
   console.log(`🔐 HTTP/2 server listening on port ${HTTPS_PORT}`);
 });
