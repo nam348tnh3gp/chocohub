@@ -31,6 +31,9 @@ config = dotenv_values(ENV_PATH)
 
 app = Flask(__name__)
 
+# 🆕 KHÔNG giới hạn kích thước request – hỗ trợ snapshot > 2GB
+app.config['MAX_CONTENT_LENGTH'] = None  # None = không giới hạn
+
 # ─── Cấu hình từ .env ─────────────────────────────
 BACKUP_PORT     = int(config.get('BACKUP_PORT', 3001))
 BACKUP_TOKEN    = config.get('BACKUP_TOKEN', 'chocohub-default-token')
