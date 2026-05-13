@@ -1,393 +1,391 @@
-// backup.js – Backup server for ChocoHub
-require('dotenv').config({ path: require('path').join(__dirname, '.env') });
-const net = require('net');
-const http = require('http');
-const Database = require('better-sqlite3');
+// backup.js – Backup Server (Node.js) thay thế backup.py
+// Chạy: node backup.js
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+const sqlite3 = require('better-sqlite3');
+const DHExchange = require('./dh');   // dùng chung dh.js với server chính
 
-// ---------- Configuration ----------
-const TCP_PORT = parseInt(process.env.TCP_PORT) || 3001;
-const HTTP_PORT = parseInt(process.env.HTTP_PORT) || 3001;
-const ALLOWED_TOKENS = (process.env.BACKUP_TOKENS || 'chocohub-default-token')
-  .split(',')
-  .map(t => t.trim())
-  .filter(Boolean);
-const DB_PATH = process.env.BACKUP_DB_PATH || path.join(__dirname, 'backup.db');
-const MAIN_SERVERS = (process.env.MAIN_SERVERS || '')
-  .split(',')
-  .filter(Boolean)
-  .map(url => url.trim());
+// ─── Cấu hình từ .env ─────────────────────────────
+const BACKUP_PORT = process.env.BACKUP_PORT || 3001;
+const BACKUP_TOKEN = process.env.BACKUP_TOKEN || 'chocohub-default-token';
+const MAIN_SERVER_URL = process.env.MAIN_SERVER_URL || 'https://chocohub-r011.onrender.com';
+const CHECK_INTERVAL = parseInt(process.env.CHECK_INTERVAL || '10', 10);
+const DB_PATH = path.join(__dirname, process.env.BACKUP_DB_PATH || 'backup_node.db');
+const SELF_URL = process.env.SELF_URL || '';   // URL của chính backup server này (nếu muốn auto-register)
 
-// ---------- Database ----------
-const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: '50mb' }));
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS backup_data (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TEXT DEFAULT (datetime('now'))
-  );
-  INSERT OR IGNORE INTO backup_data (key, value) VALUES ('seq', '0');
-  INSERT OR IGNORE INTO backup_data (key, value) VALUES ('ready_count', '0');
-  INSERT OR IGNORE INTO backup_data (key, value) VALUES ('last_backup', '');
-  INSERT OR IGNORE INTO backup_data (key, value) VALUES ('backup_status', 'idle');
-`);
-
-// ---------- Helpers ----------
-function getBackupValue(key) {
-  const row = db.prepare('SELECT value FROM backup_data WHERE key = ?').get(key);
-  return row ? row.value : '0';
+// ─── SQLite ────────────────────────────────────────
+let db;
+function initDB() {
+  db = sqlite3(DB_PATH);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS snapshot (
+      id INTEGER PRIMARY KEY CHECK(id = 1),
+      state TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(`INSERT OR IGNORE INTO snapshot (id, state) VALUES (1, '{}')`);
+  console.log('✅ Backup database ready (Node.js snapshot mode)');
 }
 
-function setBackupValue(key, value) {
-  db.prepare('INSERT OR REPLACE INTO backup_data (key, value) VALUES (?, ?)').run(key, String(value));
+function saveSnapshot(state) {
+  const json = JSON.stringify(state);
+  db.prepare(`INSERT OR REPLACE INTO snapshot (id, state, updated_at) VALUES (1, ?, datetime('now'))`).run(json);
+  console.log(`💾 Snapshot saved (${state.users ? state.users.length : 0} users)`);
 }
 
-function getReadyCount() {
-  return parseInt(getBackupValue('ready_count')) || 0;
-}
-
-function incrementReady() {
-  const count = getReadyCount() + 1;
-  setBackupValue('ready_count', count);
-  return count;
-}
-
-function resetReady() {
-  setBackupValue('ready_count', '0');
-}
-
-// ---------- Lấy dữ liệu từ main server (nếu có config) ----------
-let mainBackupData = null;
-
-function fetchFromMainServers() {
-  if (MAIN_SERVERS.length === 0) {
-    console.log('ℹ️  No MAIN_SERVERS configured. Waiting for data push...');
-    return;
+function getSnapshot() {
+  const row = db.prepare('SELECT state FROM snapshot WHERE id = 1').get();
+  if (row && row.state) {
+    try { return JSON.parse(row.state); } catch { return null; }
   }
+  return null;
+}
 
-  console.log(`🔄 Fetching data from ${MAIN_SERVERS.length} main server(s)...`);
-  
-  MAIN_SERVERS.forEach(mainUrl => {
-    try {
-      const url = new URL(mainUrl.startsWith('http') ? mainUrl : `http://${mainUrl}`);
-      const options = {
-        hostname: url.hostname,
-        port: url.port || 3000,
-        path: '/network_status',
-        method: 'GET',
-        headers: { 'Accept': 'application/json' }
-      };
-      const httpModule = url.protocol === 'https:' ? require('https') : http;
+function getSnapshotTime() {
+  const row = db.prepare('SELECT updated_at FROM snapshot WHERE id = 1').get();
+  return row ? row.updated_at : 'unknown';
+}
 
-      const req = httpModule.request(options, (res) => {
-        let body = '';
-        res.on('data', chunk => body += chunk);
-        res.on('end', () => {
-          try {
-            const data = JSON.parse(body);
-            mainBackupData = data;
-            setBackupValue('last_backup', JSON.stringify(data));
-            setBackupValue('seq', String(Date.now()));
-            setBackupValue('backup_status', 'synced');
-            const now = new Date().toISOString();
-            console.log(`✅ [${now}] Fetched data from ${url.hostname}:${url.port}`);
-          } catch (e) {
-            console.error(`❌ Parse error from ${mainUrl}:`, e.message);
-          }
-        });
-      });
+// ─── RSA long‑term keys (server authentication) ────
+const RSA_PRIVATE_PATH = path.join(__dirname, 'backup_private.pem');
+const RSA_PUBLIC_PATH = path.join(__dirname, 'backup_public.pem');
+let serverPrivateKeyPem, serverPublicKeyPem;
 
-      req.on('error', (err) => {
-        console.error(`❌ Fetch error from ${mainUrl}:`, err.message);
-      });
+function loadOrGenerateRSA() {
+  if (fs.existsSync(RSA_PRIVATE_PATH) && fs.existsSync(RSA_PUBLIC_PATH)) {
+    serverPrivateKeyPem = fs.readFileSync(RSA_PRIVATE_PATH, 'utf8');
+    serverPublicKeyPem = fs.readFileSync(RSA_PUBLIC_PATH, 'utf8');
+    console.log('🔑 Loaded existing RSA long‑term keys.');
+  } else {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
+      modulusLength: 4096,
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+    });
+    fs.writeFileSync(RSA_PRIVATE_PATH, privateKey);
+    fs.writeFileSync(RSA_PUBLIC_PATH, publicKey);
+    serverPrivateKeyPem = privateKey;
+    serverPublicKeyPem = publicKey;
+    console.log('🔧 Generated new RSA long‑term keys.');
+  }
+}
 
-      req.setTimeout(5000, () => {
-        req.destroy();
-        console.error(`⏰ Timeout fetching from ${mainUrl}`);
-      });
+// ─── DH keys của backup server ─────────────────────
+const serverDHKeys = DHExchange.generateStandardKeyPair('modp2048');
+const dhSessions = new Map();   // clientId -> { sessionKey, createdAt }
 
-      req.end();
-    } catch (e) {
-      console.error(`❌ URL parse error for ${mainUrl}:`, e.message);
-    }
+// ═══════════════════════════════════════════════════
+// MIDDLEWARE (kiểm tra HMAC cho route backup)
+// ═══════════════════════════════════════════════════
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/backup')) return next();
+
+  const clientId = req.headers['x-client-id'] || req.body.clientId || req.query.clientId;
+  const signature = req.headers['x-signature'];
+  if (!clientId || !signature) return next();   // fallback token
+
+  const session = dhSessions.get(clientId);
+  if (!session) return next();
+
+  const timestamp = req.headers['x-timestamp'] || '';
+  const bodyStr = req.method === 'POST' ? JSON.stringify(req.body) : '';
+  const message = `${req.method}${req.path}${timestamp}${bodyStr}`;
+
+  if (!DHExchange.verify(message, signature, session.sessionKey)) {
+    return res.status(401).json({ status: 'error', message: 'Invalid HMAC signature' });
+  }
+  next();
+});
+
+// ═══════════════════════════════════════════════════
+// ROUTES
+// ═══════════════════════════════════════════════════
+
+// Health check
+app.get('/api/backup/health', (req, res) => {
+  res.json({ status: 'healthy', timestamp: new Date().toISOString(), snapshot_time: getSnapshotTime() });
+});
+
+// Trạng thái
+app.get('/api/backup/status', (req, res) => {
+  const snap = getSnapshot();
+  const users = snap ? (snap.users ? snap.users.length : 0) : 0;
+  res.json({ status: 'ok', total_users: users, snapshot_time: getSnapshotTime(), main_server: MAIN_SERVER_URL });
+});
+
+// Lấy public key dài hạn của backup server
+app.get('/api/server/public-key', (req, res) => {
+  res.json({
+    status: 'success',
+    publicKey: serverPublicKeyPem,
+    algorithm: 'RSA-4096',
+    purpose: 'DH server authentication'
   });
+});
+
+// DH key exchange (sẽ hoạt động hoàn hảo với Node.js client)
+app.post('/api/dh/exchange', (req, res) => {
+  const { clientId, clientPublicKey, token } = req.body;
+  if (!clientId || !clientPublicKey || !token) {
+    return res.status(400).json({ status: 'error', message: 'Missing fields' });
+  }
+  if (token !== BACKUP_TOKEN) {
+    return res.status(401).json({ status: 'error', message: 'Invalid token' });
+  }
+
+  try {
+    const sharedSecret = DHExchange.computeSharedSecret(
+      serverDHKeys.privateKey,
+      clientPublicKey,
+      serverDHKeys.prime,
+      serverDHKeys.generator
+    );
+    const sessionKey = DHExchange.deriveSessionKey(sharedSecret);
+
+    dhSessions.set(clientId, { sessionKey, createdAt: Date.now() });
+
+    const serverPubData = JSON.stringify({
+      publicKey: serverDHKeys.publicKey,
+      prime: serverDHKeys.prime,
+      generator: serverDHKeys.generator,
+      group: serverDHKeys.group
+    });
+    const signature = DHExchange.signWithPrivateKey(serverPubData, serverPrivateKeyPem);
+
+    console.log(`🔐 DH session established with ${clientId}`);
+    res.json({
+      status: 'success',
+      serverPublicKey: serverDHKeys.publicKey,
+      prime: serverDHKeys.prime,
+      generator: serverDHKeys.generator,
+      group: serverDHKeys.group,
+      serverSignature: signature,
+      message: 'Session key established'
+    });
+  } catch (e) {
+    console.error('❌ DH exchange error:', e);
+    res.status(500).json({ status: 'error', message: 'Key exchange failed' });
+  }
+});
+
+// Backup sync endpoint (READY, PING, FULL_SNAPSHOT)
+app.post('/api/backup/sync', (req, res) => {
+  const data = req.body;
+  if (!data || !data.type) return res.status(400).json({ status: 'error', message: 'Invalid request' });
+
+  const msgType = data.type;
+  const token = data.token || '';
+  const clientId = req.headers['x-client-id'] || '';
+
+  // Xác thực: ưu tiên session, fallback token
+  const session = clientId ? dhSessions.get(clientId) : null;
+  if (!session && token !== BACKUP_TOKEN) {
+    return res.status(401).json({ status: 'error', message: 'Invalid token or no session' });
+  }
+
+  if (msgType === 'READY') {
+    const empty = data.empty || false;
+    if (empty) {
+      const snap = getSnapshot();
+      if (snap && snap.users && snap.users.length > 0) {
+        console.log(`📤 Sending full snapshot (${snap.users.length} users) to requesting server`);
+        return res.json({ type: 'FULL_SNAPSHOT', token: BACKUP_TOKEN, state: snap });
+      } else {
+        return res.json({ type: 'READY_ACK', status: 'success', message: 'ready but empty' });
+      }
+    } else {
+      return res.json({ type: 'READY_ACK', status: 'success', message: 'ack' });
+    }
+  }
+  else if (msgType === 'PING') {
+    return res.json({ type: 'PONG', timestamp: new Date().toISOString() });
+  }
+  else if (msgType === 'FULL_SNAPSHOT') {
+    if (!data.state) return res.status(400).json({ status: 'error', message: 'Missing state' });
+    const state = data.state;
+    console.log(`📥 Receiving snapshot (${state.users ? state.users.length : 0} users)...`);
+    saveSnapshot(state);
+    return res.json({ type: 'SNAPSHOT_ACK', status: 'success' });
+  }
+  else {
+    return res.status(400).json({ status: 'error', message: `Unknown type: ${msgType}` });
+  }
+});
+
+// ─── Gửi snapshot đến main server (có DH nếu cần) ──
+let mainServerPublicKey = null;
+
+async function fetchMainServerPublicKey() {
+  try {
+    const resp = await fetch(`${MAIN_SERVER_URL}/api/server/public-key`);
+    if (resp.ok) {
+      const data = await resp.json();
+      mainServerPublicKey = data.publicKey;
+      console.log('🔑 Fetched main server public key');
+    }
+  } catch (e) {
+    console.error('❌ Could not fetch main server public key:', e.message);
+  }
 }
 
-// ---------- Gửi backup về main server ----------
-function pushBackupToMain() {
-  if (MAIN_SERVERS.length === 0) {
-    console.log('ℹ️  No MAIN_SERVERS to push backup to.');
+async function sendSnapshotToMainServer() {
+  const snap = getSnapshot();
+  if (!snap || !snap.users || snap.users.length === 0) {
+    console.log('⚠️ No snapshot data to send');
     return;
   }
 
-  const backupPayload = {
-    type: 'FULL_BACKUP',
-    rows: mainBackupData || JSON.parse(getBackupValue('last_backup') || '{}'),
-    seq: getBackupValue('seq'),
-    timestamp: new Date().toISOString(),
-    server: 'backup'
+  const clientId = `backup-${require('os').hostname()}-${process.pid}`;
+  let sessionKey = null;
+  let session = dhSessions.get(clientId);
+  if (session) {
+    sessionKey = session.sessionKey;
+  } else {
+    // Tạo DH exchange với main server
+    if (!mainServerPublicKey) await fetchMainServerPublicKey();
+    if (mainServerPublicKey) {
+      try {
+        const clientDH = DHExchange.generateStandardKeyPair('modp2048');
+        const resp = await fetch(`${MAIN_SERVER_URL}/api/dh/exchange`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clientId,
+            clientPublicKey: clientDH.publicKey,
+            token: BACKUP_TOKEN
+          })
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.serverPublicKey && data.serverSignature) {
+            // Xác minh chữ ký
+            const pubDataStr = JSON.stringify({
+              publicKey: data.serverPublicKey,
+              prime: data.prime,
+              generator: data.generator,
+              group: data.group
+            });
+            const valid = DHExchange.verifyWithPublicKey(pubDataStr, data.serverSignature, mainServerPublicKey);
+            if (valid) {
+              const shared = DHExchange.computeSharedSecret(
+                clientDH.privateKey,
+                data.serverPublicKey,
+                data.prime,
+                data.generator
+              );
+              sessionKey = DHExchange.deriveSessionKey(shared);
+              dhSessions.set(clientId, { sessionKey, createdAt: Date.now() });
+              console.log('🔐 Authenticated DH session with main server');
+            }
+          }
+        }
+      } catch (e) {
+        console.error('❌ DH exchange with main server failed:', e.message);
+      }
+    }
+  }
+
+  const payload = {
+    type: 'FULL_SNAPSHOT',
+    token: BACKUP_TOKEN,
+    state: snap
+  };
+  const headers = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'ChocoHub-BackupNode/1.0'
   };
 
-  console.log(`📤 Pushing FULL_BACKUP to ${MAIN_SERVERS.length} main server(s)...`);
-
-  MAIN_SERVERS.forEach(mainUrl => {
-    try {
-      const url = new URL(mainUrl.startsWith('http') ? mainUrl : `http://${mainUrl}`);
-      const options = {
-        hostname: url.hostname,
-        port: url.port || 3000,
-        path: '/api/backup/receive',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Backup-Token': ALLOWED_TOKENS[0] || 'chocohub-default-token'
-        }
-      };
-      const httpModule = url.protocol === 'https:' ? require('https') : http;
-
-      const req = httpModule.request(options, (res) => {
-        let body = '';
-        res.on('data', chunk => body += chunk);
-        res.on('end', () => {
-          if (res.statusCode === 200) {
-            console.log(`✅ Backup pushed to ${url.hostname}:${url.port}`);
-            setBackupValue('backup_status', 'pushed');
-          } else {
-            console.error(`❌ Push failed to ${url.hostname}:${url.port} (${res.statusCode}):`, body.substring(0, 100));
-          }
-        });
-      });
-
-      req.on('error', (err) => {
-        console.error(`❌ Push error to ${mainUrl}:`, err.message);
-      });
-
-      req.setTimeout(5000, () => {
-        req.destroy();
-        console.error(`⏰ Push timeout to ${mainUrl}`);
-      });
-
-      req.write(JSON.stringify(backupPayload));
-      req.end();
-    } catch (e) {
-      console.error(`❌ URL parse error for push ${mainUrl}:`, e.message);
-    }
-  });
-}
-
-// ==================== HTTP Server ====================
-const httpServer = http.createServer((req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, ngrok-skip-browser-warning, X-Backup-Token');
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(200);
-    res.end();
-    return;
+  if (sessionKey) {
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const bodyStr = JSON.stringify(payload);
+    const message = `POST/api/backup/sync${timestamp}${bodyStr}`;
+    const signature = DHExchange.sign(message, sessionKey);
+    headers['X-Client-Id'] = clientId;
+    headers['X-Timestamp'] = timestamp;
+    headers['X-Signature'] = signature;
   }
 
-  // Health check
-  if (req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      status: 'ok',
-      seq: getBackupValue('seq'),
-      ready_count: getReadyCount(),
-      backup_status: getBackupValue('backup_status'),
-      main_servers: MAIN_SERVERS.length,
-      time: new Date().toISOString()
-    }));
-    return;
-  }
-
-  // Nhận backup từ main server
-  if ((req.method === 'POST') && (req.url === '/api/backup/sync' || req.url === '/api/backup/receive')) {
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', () => {
-      try {
-        const msg = JSON.parse(body);
-        console.log(`📥 [HTTP] Received: ${msg.type}`);
-
-        // Xác thực token
-        const token = msg.token || req.headers['x-backup-token'];
-        if (token && !ALLOWED_TOKENS.includes(token)) {
-          res.writeHead(403, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ type: 'ERROR', message: 'Invalid token' }));
-          return;
-        }
-
-        let response;
-
-        switch (msg.type) {
-          case 'READY':
-            const count = incrementReady();
-            console.log(`📥 READY received (count: ${count}/2)`);
-            response = { type: 'READY_ACK', seq: getBackupValue('seq'), ready_count: count };
-
-            // Nếu nhận READY 2 lần → push backup về main
-            if (count >= 2) {
-              console.log('🎯 READY received 2 times! Triggering backup push...');
-              resetReady();
-              // Đẩy backup sau 1 giây để đảm bảo response READY_ACK đã gửi
-              setTimeout(() => pushBackupToMain(), 1000);
-              response.message = 'Backup will be pushed to main servers';
-            }
-            break;
-
-          case 'FULL_BACKUP':
-            // Nhận backup từ main server → lưu lại
-            console.log('📥 Receiving FULL_BACKUP from main server...');
-            if (msg.rows) {
-              mainBackupData = msg.rows;
-              setBackupValue('last_backup', JSON.stringify(msg.rows));
-              setBackupValue('seq', String(msg.seq || Date.now()));
-              setBackupValue('backup_status', 'received');
-            }
-            response = { type: 'BACKUP_ACK', status: 'saved', seq: getBackupValue('seq') };
-            break;
-
-          case 'DELTA':
-            console.log('📥 Receiving DELTA...');
-            response = { type: 'DELTA_ACK', seq: getBackupValue('seq') };
-            break;
-
-          default:
-            response = { type: 'UNKNOWN', message: `Unknown type: ${msg.type}` };
-        }
-
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(response));
-      } catch (e) {
-        console.error('❌ Invalid JSON:', body.substring(0, 100));
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ type: 'ERROR', message: 'Invalid JSON' }));
-      }
+  try {
+    const resp = await fetch(`${MAIN_SERVER_URL}/api/backup/sync`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload)
     });
-    return;
+    if (resp.ok) console.log('✅ Snapshot sent to main server');
+    else console.error(`❌ Send snapshot failed: ${resp.status}`);
+  } catch (e) {
+    console.error('❌ Error sending snapshot:', e.message);
   }
-
-  // Trạng thái backup
-  if (req.url === '/backup/status') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      status: getBackupValue('backup_status'),
-      seq: getBackupValue('seq'),
-      ready_count: getReadyCount(),
-      has_data: !!mainBackupData,
-      main_servers: MAIN_SERVERS
-    }));
-    return;
-  }
-
-  // Force push backup
-  if (req.url === '/backup/push' && req.method === 'POST') {
-    pushBackupToMain();
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'pushing', message: 'Backup push initiated' }));
-    return;
-  }
-
-  res.writeHead(404, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ type: 'ERROR', message: 'Not found' }));
-});
-
-httpServer.listen(HTTP_PORT, () => {
-  console.log(`🌐 HTTP Backup server on port ${HTTP_PORT}`);
-  console.log(`   Health: http://localhost:${HTTP_PORT}/health`);
-});
-
-// ==================== TCP Server ====================
-const tcpServer = net.createServer((socket) => {
-  let authenticated = false;
-  let clientInfo = `${socket.remoteAddress}:${socket.remotePort}`;
-
-  console.log(`🔌 [TCP] New connection: ${clientInfo}`);
-
-  let buffer = '';
-  socket.on('data', (data) => {
-    buffer += data.toString();
-    const lines = buffer.split('\n');
-    buffer = lines.pop();
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const msg = JSON.parse(line);
-        
-        if (!authenticated) {
-          if (msg.type === 'READY' && msg.token && ALLOWED_TOKENS.includes(msg.token)) {
-            authenticated = true;
-            const count = incrementReady();
-            console.log(`✅ [TCP] ${clientInfo} authenticated (READY count: ${count}/2)`);
-            
-            socket.write(JSON.stringify({ 
-              type: 'READY_ACK', 
-              seq: getBackupValue('seq'), 
-              ready_count: count 
-            }) + '\n');
-
-            // READY 2 lần → push backup
-            if (count >= 2) {
-              console.log('🎯 [TCP] READY 2 times! Pushing backup...');
-              resetReady();
-              setTimeout(() => pushBackupToMain(), 1000);
-            }
-          } else {
-            socket.write(JSON.stringify({ type: 'ERROR', message: 'Invalid token' }) + '\n');
-            socket.end();
-          }
-        } else {
-          // Đã authenticate → xử lý message
-          switch (msg.type) {
-            case 'DELTA':
-              socket.write(JSON.stringify({ type: 'DELTA_ACK', seq: getBackupValue('seq') }) + '\n');
-              break;
-            default:
-              socket.write(JSON.stringify({ type: 'UNKNOWN', message: `Unknown: ${msg.type}` }) + '\n');
-          }
-        }
-      } catch (e) {
-        console.error(`❌ Parse error: ${line.substring(0, 100)}`);
-      }
-    }
-  });
-
-  socket.on('close', () => {
-    console.log(`🔌 [TCP] Disconnected: ${clientInfo}`);
-  });
-  socket.on('error', (err) => {
-    console.error(`❌ [TCP] Socket error: ${err.message}`);
-  });
-});
-
-tcpServer.listen(TCP_PORT, () => {
-  console.log(`🔌 TCP Backup server on port ${TCP_PORT}`);
-  console.log(`🔐 Tokens: ${ALLOWED_TOKENS.join(', ') || '(none)'}`);
-  console.log(`💾 DB: ${DB_PATH}`);
-  console.log(`📡 Main servers: ${MAIN_SERVERS.length > 0 ? MAIN_SERVERS.join(', ') : '(none - will only receive, not push)'}`);
-  console.log('');
-});
-
-// ==================== Auto-fetch từ main server ====================
-if (MAIN_SERVERS.length > 0) {
-  // Fetch ngay khi start
-  setTimeout(fetchFromMainServers, 2000);
-  // Fetch định kỳ mỗi 60 giây
-  setInterval(fetchFromMainServers, 60000);
 }
 
-// ==================== Graceful Shutdown ====================
-process.on('SIGINT', () => {
-  console.log('\n🛑 Shutting down...');
-  db.close();
-  tcpServer.close();
-  httpServer.close();
-  process.exit(0);
-});
+// ─── Auto‑register với main server ────────────────
+async function registerWithMainServer() {
+  if (!SELF_URL) return;
+  try {
+    await fetch(`${MAIN_SERVER_URL}/api/backup/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: SELF_URL,
+        token: BACKUP_TOKEN,
+        name: 'ChocoHub Backup Node',
+        platform: 'Node.js'
+      })
+    });
+    console.log(`📡 Registered with main server as ${SELF_URL}`);
+  } catch (e) {
+    console.error('❌ Could not register with main server:', e.message);
+  }
+}
 
-console.log('╔══════════════════════════════════════╗');
-console.log('║   CHOCO HUB - BACKUP SERVER         ║');
-console.log('╚══════════════════════════════════════╝');
+// ─── Monitor main server ──────────────────────────
+let wasDown = false;
+setInterval(async () => {
+  try {
+    const resp = await fetch(`${MAIN_SERVER_URL}/health`);
+    const online = resp.ok;
+    if (!online && !wasDown) {
+      console.log('🔴 Main server DOWN');
+      wasDown = true;
+    } else if (online && wasDown) {
+      console.log('🟢 Main server BACK ONLINE');
+      await sendSnapshotToMainServer();
+      wasDown = false;
+    }
+  } catch (e) {
+    if (!wasDown) {
+      console.log('🔴 Main server DOWN');
+      wasDown = true;
+    }
+  }
+}, CHECK_INTERVAL * 1000);
+
+// ═══════════════════════════════════════════════════
+// START
+// ═══════════════════════════════════════════════════
+initDB();
+loadOrGenerateRSA();
+
+app.listen(BACKUP_PORT, () => {
+  console.log('');
+  console.log('╔══════════════════════════════════════╗');
+  console.log('║   CHOCO HUB - BACKUP SERVER (Node)  ║');
+  console.log('╠══════════════════════════════════════╣');
+  console.log(`║  Port: ${BACKUP_PORT}                          ║`);
+  console.log(`║  Main: ${MAIN_SERVER_URL.slice(0, 35).padEnd(35)}║`);
+  console.log('║  DH Exchange: /api/dh/exchange       ║');
+  console.log('╚══════════════════════════════════════╝');
+  console.log('');
+
+  // Tự động đăng ký nếu có SELF_URL
+  registerWithMainServer();
+});
