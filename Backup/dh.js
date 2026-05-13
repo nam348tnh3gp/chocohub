@@ -20,15 +20,15 @@ const MODP2048_GENERATOR = Buffer.from([2]);
 
 const MODP2048_PRIME_B64 = MODP2048_PRIME.toString('base64');
 const MODP2048_GENERATOR_B64 = MODP2048_GENERATOR.toString('base64');
+const MODP2048_PRIME_LEN = MODP2048_PRIME.length;   // 256 bytes
 
 class DHExchange {
   /**
-   * Tạo cặp khóa DH từ nhóm chuẩn (khuyến nghị: 'modp2048', 'modp3072', 'modp4096').
-   * @param {string} groupName – 'modp2048' | 'modp3072' | 'modp4096'
+   * Tạo cặp khóa DH từ nhóm chuẩn (khuyến nghị: 'modp2048').
+   * @param {string} groupName – 'modp2048'
    * @returns {{ privateKey: string, publicKey: string, prime: string, generator: string, group: string }}
    */
   static generateStandardKeyPair(groupName = 'modp2048') {
-    // Dùng prime/generator cứng thay vì crypto.createDiffieHellmanGroup
     const dh = crypto.createDiffieHellman(MODP2048_PRIME, MODP2048_GENERATOR);
     dh.generateKeys();
     return {
@@ -41,7 +41,7 @@ class DHExchange {
   }
 
   /**
-   * Sinh cặp khóa DH (2048‑bit) – giữ lại để tương thích, nhưng gọi hàm chuẩn.
+   * Sinh cặp khóa DH (2048‑bit) – giữ lại để tương thích, gọi hàm chuẩn.
    */
   static generateKeyPair() {
     return DHExchange.generateStandardKeyPair('modp2048');
@@ -49,14 +49,25 @@ class DHExchange {
 
   /**
    * Tính shared secret từ private key của mình và public key của đối tác.
+   * Tự động đệm public key nếu cần thiết.
    */
   static computeSharedSecret(ourPrivateKey, theirPublicKey, prime, generator) {
-    const dh = crypto.createDiffieHellman(
-      Buffer.from(prime, 'base64'),
-      Buffer.from(generator, 'base64')
-    );
+    const primeBuf = Buffer.from(prime, 'base64');
+    const generatorBuf = Buffer.from(generator, 'base64');
+    const primeLen = primeBuf.length;   // 256 bytes cho modp2048
+
+    const dh = crypto.createDiffieHellman(primeBuf, generatorBuf);
     dh.setPrivateKey(Buffer.from(ourPrivateKey, 'base64'));
-    const secret = dh.computeSecret(Buffer.from(theirPublicKey, 'base64'));
+
+    // Xử lý public key của đối tác: đệm cho đủ primeLen nếu bị thiếu
+    let theirPub = Buffer.from(theirPublicKey, 'base64');
+    if (theirPub.length < primeLen) {
+      const padded = Buffer.alloc(primeLen, 0);
+      theirPub.copy(padded, primeLen - theirPub.length);
+      theirPub = padded;
+    }
+
+    const secret = dh.computeSecret(theirPub);
     return secret.toString('base64');
   }
 
@@ -94,9 +105,9 @@ class DHExchange {
   }
 
   /**
-   * 🆕 Ký dữ liệu bằng RSA/ECDSA private key (PEM).
-   * @param {string} data – dữ liệu cần ký (thường là JSON string)
-   * @param {string} privateKeyPem – private key ở định dạng PEM
+   * Ký dữ liệu bằng RSA private key (PEM).
+   * @param {string} data – dữ liệu cần ký (JSON string)
+   * @param {string} privateKeyPem – private key PEM
    * @returns {string} chữ ký base64
    */
   static signWithPrivateKey(data, privateKeyPem) {
@@ -107,10 +118,10 @@ class DHExchange {
   }
 
   /**
-   * 🆕 Xác minh chữ ký bằng public key (PEM).
+   * Xác minh chữ ký bằng RSA public key (PEM).
    * @param {string} data – dữ liệu đã ký
    * @param {string} signature – chữ ký base64
-   * @param {string} publicKeyPem – public key ở định dạng PEM
+   * @param {string} publicKeyPem – public key PEM
    * @returns {boolean}
    */
   static verifyWithPublicKey(data, signature, publicKeyPem) {
