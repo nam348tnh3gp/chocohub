@@ -1,4 +1,5 @@
 // backupSync.js – Client đồng bộ full-snapshot + TLS 1.3 + DH chuẩn + xác thực server
+// 🆕 Fix: Luôn gửi token trong body
 const net = require('net');
 const https = require('https');
 const http = require('http');
@@ -21,7 +22,7 @@ const MAX_RETRIES = 5;                  // Số lần thử lại tối đa trư
 // ─── TLS Agent an toàn (xác thực chứng chỉ) ─────────────
 function makeSecureHttpsAgent(hostname) {
   return new https.Agent({
-    rejectUnauthorized: true,            // ✅ bắt buộc xác thực TLS
+    rejectUnauthorized: true,
     minVersion: 'TLSv1.2',
     maxVersion: 'TLSv1.3',
     servername: hostname,
@@ -31,7 +32,6 @@ function makeSecureHttpsAgent(hostname) {
 
 class BackupClient {
   constructor() {
-    // Phân biệt server tĩnh (.env) và server động (từ backup.py)
     this.staticServers = BACKUP_SERVERS.map(cfg => {
       const [token, hostPort] = cfg.includes('@') ? cfg.split('@') : [BACKUP_TOKEN, cfg];
       if (hostPort.startsWith('https://') || hostPort.startsWith('http://')) {
@@ -60,11 +60,8 @@ class BackupClient {
     this.retryCount = {};
     this.failedNodes = new Set();
 
-    // 🆕 DH sessions: serverKey → { clientId, sessionKey }
     this.dhSessions = new Map();
     this.clientBaseId = `backup-${os.hostname()}-${process.pid}`;
-
-    // 🆕 Public key dài hạn của server (để xác thực chữ ký DH)
     this.serverLongtermPublicKey = null;
   }
 
@@ -248,9 +245,8 @@ class BackupClient {
     });
   }
 
-  // ==================== DH Exchange an toàn (có xác thực server) ====================
+  // ==================== DH Exchange ====================
   async performSecureDHExchange(server, serverKey, agent) {
-    // Đảm bảo đã có public key dài hạn của server
     if (!this.serverLongtermPublicKey) {
       const fetched = await this.fetchServerPublicKey(server, agent);
       if (!fetched) {
@@ -298,7 +294,6 @@ class BackupClient {
               return resolve(null);
             }
 
-            // Xác minh chữ ký server
             const serverPubData = JSON.stringify({
               publicKey: data.serverPublicKey,
               prime: data.prime,
@@ -315,7 +310,6 @@ class BackupClient {
               return resolve(null);
             }
 
-            // Tính shared secret và session key
             const sharedSecret = DHExchange.computeSharedSecret(
               clientDHKeys.privateKey,
               data.serverPublicKey,
@@ -346,10 +340,11 @@ class BackupClient {
     });
   }
 
-  /**
-   * Tạo headers và body có chữ ký (nếu có session), nếu không trả về body gốc + headers cơ bản.
-   */
+  // 🆕 Fix: Luôn thêm token vào body
   signRequest(method, path, bodyObj, session) {
+    // Luôn gửi token
+    bodyObj.token = BACKUP_TOKEN;
+    
     const payload = JSON.stringify(bodyObj);
     const headers = {
       'Content-Type': 'application/json',
@@ -364,8 +359,6 @@ class BackupClient {
       headers['x-client-id'] = session.clientId;
       headers['x-timestamp'] = timestamp;
       headers['x-signature'] = signature;
-      // Vẫn gửi token để fallback khi server không có session
-      bodyObj.token = BACKUP_TOKEN;
     } else {
       headers['Content-Length'] = Buffer.byteLength(payload);
     }
@@ -377,7 +370,6 @@ class BackupClient {
     const httpModule = server.protocol === 'https' ? https : http;
     const agent = server.protocol === 'https' ? makeSecureHttpsAgent(server.host) : undefined;
 
-    // Thực hiện DH exchange an toàn trước, rồi mới khởi động READY
     this.performSecureDHExchange(server, serverKey, agent).then(session => {
       if (session) {
         this.dhSessions.set(serverKey, session);
