@@ -1,5 +1,5 @@
 // backupSync.js – Client đồng bộ full-snapshot + TLS 1.3 + DH (có fallback token)
-// 🆕 Fix: Fallback token khi DH không khả dụng + đã sửa lỗi empty flag
+// 🆕 Fix: Fallback token khi DH không khả dụng + đã sửa lỗi empty flag + XỬ LÝ REQUEST_SNAPSHOT
 const net = require('net');
 const https = require('https');
 const http = require('http');
@@ -405,6 +405,41 @@ class BackupClient {
     });
   }
 
+  // 🆕 Hàm gửi snapshot ngay lập tức (được gọi từ REQUEST_SNAPSHOT)
+  sendSnapshotNow(server, serverKey, httpModule, agent, session, useDH) {
+    const state = db.exportFullState();
+    const snapshotPayload = { type: 'FULL_SNAPSHOT', token: server.token, state };
+    
+    let payload, headers;
+    if (useDH && session) {
+      const result = this.sendWithDH('POST', '/api/backup/sync', snapshotPayload, session);
+      payload = result.payload;
+      headers = result.headers;
+    } else {
+      const result = this.sendWithToken('POST', '/api/backup/sync', snapshotPayload, server, agent);
+      payload = result.payload;
+      headers = result.headers;
+    }
+    
+    const req = httpModule.request({
+      hostname: server.host,
+      port: server.port,
+      path: '/api/backup/sync',
+      method: 'POST',
+      headers,
+      agent,
+      rejectUnauthorized: useDH ? true : false
+    }, (res) => {
+      res.resume(); // Đọc response để giải phóng bộ nhớ
+      console.log(`✅ Snapshot sent to ${serverKey} as requested.`);
+    });
+    
+    req.on('error', (err) => console.error(`❌ Error sending requested snapshot to ${serverKey}: ${err.message}`));
+    req.setTimeout(20000, () => req.destroy());
+    req.write(payload);
+    req.end();
+  }
+
   launchReadyProtocol(server, serverKey, httpModule, agent, session, useDH) {
     const tryReady = () => {
       if (this.restored) {
@@ -465,6 +500,16 @@ class BackupClient {
 
               if (msg.type === 'READY_ACK') {
                 console.log(`🔗 [${useDH ? 'DH' : 'TOKEN'}] Connected to ${serverKey} (main already has data)`);
+                this.restored = true;
+                this.ensureHeartbeatAndSnapshot(server, serverKey, agent, session, useDH);
+                if (server.isDynamic) this.retryCount[serverKey] = 0;
+                return;
+              }
+
+              // 🆕 XỬ LÝ REQUEST_SNAPSHOT: Server yêu cầu client gửi dữ liệu lên
+              if (msg.type === 'REQUEST_SNAPSHOT') {
+                console.log(`📤 Server ${serverKey} is empty. Sending our snapshot...`);
+                this.sendSnapshotNow(server, serverKey, httpModule, agent, session, useDH);
                 this.restored = true;
                 this.ensureHeartbeatAndSnapshot(server, serverKey, agent, session, useDH);
                 if (server.isDynamic) this.retryCount[serverKey] = 0;
