@@ -1,5 +1,4 @@
-// backup.js – Backup Server (Node.js) thay thế backup.py
-// 🆕 Thread-safe, backup history, transaction, anti-overwrite, UNLIMITED snapshot
+// backup.js – Backup Server (Node.js) với DH + canonical JSON + REQUEST_SNAPSHOT
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -8,6 +7,15 @@ const fs = require('fs');
 const crypto = require('crypto');
 const sqlite3 = require('better-sqlite3');
 const DHExchange = require('./dh');
+
+// ─── Helper: canonical JSON (sắp xếp key alphabet) ─────────────
+function canonicalStringify(obj) {
+  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+  if (Array.isArray(obj)) return '[' + obj.map(canonicalStringify).join(',') + ']';
+  const sortedKeys = Object.keys(obj).sort();
+  const pairs = sortedKeys.map(k => `"${k}":${canonicalStringify(obj[k])}`);
+  return '{' + pairs.join(',') + '}';
+}
 
 // ─── Cấu hình từ .env ─────────────────────────────
 const BACKUP_PORT = process.env.BACKUP_PORT || 3001;
@@ -18,7 +26,6 @@ const DB_PATH = path.join(__dirname, process.env.BACKUP_DB_PATH || 'backup_node.
 const SELF_URL = process.env.SELF_URL || '';
 const MAX_BACKUPS = parseInt(process.env.MAX_BACKUPS || '3', 10);
 
-// 🆕 KHÔNG giới hạn kích thước request – hỗ trợ snapshot > 2GB
 const NO_LIMIT = '5000mb';
 
 const app = express();
@@ -30,8 +37,6 @@ app.use(express.urlencoded({ extended: true, limit: NO_LIMIT }));
 let db;
 function initDB() {
   db = sqlite3(DB_PATH);
-  
-  // Bảng snapshot chính
   db.exec(`
     CREATE TABLE IF NOT EXISTS snapshot (
       id INTEGER PRIMARY KEY CHECK(id = 1),
@@ -40,8 +45,6 @@ function initDB() {
     )
   `);
   db.exec(`INSERT OR IGNORE INTO snapshot (id, state) VALUES (1, '{}')`);
-  
-  // Bảng backup history
   db.exec(`
     CREATE TABLE IF NOT EXISTS snapshot_backups (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,11 +54,9 @@ function initDB() {
       created_at TEXT DEFAULT (datetime('now'))
     )
   `);
-  
   console.log('✅ Backup database ready (Node.js snapshot mode + history)');
 }
 
-// 🆕 Đếm tổng items trong snapshot
 function countSnapshotSize(state) {
   const users = state.users ? state.users.length : 0;
   const stakes = state.stakes ? state.stakes.length : 0;
@@ -64,43 +65,32 @@ function countSnapshotSize(state) {
   return { total: users + stakes + blocks + transactions, users };
 }
 
-// 🆕 Lưu snapshot với transaction và backup history
 function saveSnapshot(state) {
-  const json = JSON.stringify(state);
+  const json = canonicalStringify(state);
   const { total, users } = countSnapshotSize(state);
-  
   const transaction = db.transaction(() => {
-    // 1. Backup bản cũ trước khi ghi đè
     const oldRow = db.prepare('SELECT state FROM snapshot WHERE id = 1').get();
     if (oldRow && oldRow.state && oldRow.state !== '{}') {
       try {
         const oldState = JSON.parse(oldRow.state);
         const oldSize = countSnapshotSize(oldState);
-        
         if (oldRow.state !== json) {
           db.prepare(
             'INSERT INTO snapshot_backups (state, users_count, total_items) VALUES (?, ?, ?)'
           ).run(oldRow.state, oldSize.users, oldSize.total);
           console.log(`📦 Backup bản cũ (${oldSize.users} users) vào history`);
         }
-      } catch (e) {
-        // Bỏ qua nếu bản cũ lỗi
-      }
+      } catch (e) {}
     }
-    
-    // 2. Ghi đè snapshot mới
     db.prepare(
       `INSERT OR REPLACE INTO snapshot (id, state, updated_at) VALUES (1, ?, datetime('now'))`
     ).run(json);
-    
-    // 3. Xóa backup cũ (chỉ giữ MAX_BACKUPS bản)
     db.prepare(
       `DELETE FROM snapshot_backups WHERE id NOT IN (
         SELECT id FROM snapshot_backups ORDER BY created_at DESC LIMIT ?
       )`
     ).run(MAX_BACKUPS);
   });
-  
   try {
     transaction();
     console.log(`💾 Snapshot saved (${users} users, ${total} items, ${(json.length / 1024).toFixed(1)} KB)`);
@@ -151,7 +141,7 @@ const serverDHKeys = DHExchange.generateStandardKeyPair('modp2048');
 const dhSessions = new Map();
 
 // ═══════════════════════════════════════════════════
-// MIDDLEWARE (kiểm tra HMAC)
+// MIDDLEWARE (kiểm tra HMAC với canonical JSON)
 // ═══════════════════════════════════════════════════
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api/backup')) return next();
@@ -164,7 +154,8 @@ app.use((req, res, next) => {
   if (!session) return next();
 
   const timestamp = req.headers['x-timestamp'] || '';
-  const bodyStr = req.method === 'POST' ? JSON.stringify(req.body) : '';
+  // 🆕 Dùng canonicalStringify thay vì JSON.stringify
+  const bodyStr = req.method === 'POST' ? canonicalStringify(req.body) : '';
   const message = `${req.method}${req.path}${timestamp}${bodyStr}`;
 
   if (!DHExchange.verify(message, signature, session.sessionKey)) {
@@ -193,58 +184,36 @@ app.get('/api/backup/status', (req, res) => {
   });
 });
 
-// 🆕 Backup history
 app.get('/api/backup/history', (req, res) => {
   const rows = db.prepare(
     'SELECT id, users_count, total_items, created_at FROM snapshot_backups ORDER BY created_at DESC LIMIT 10'
   ).all();
-  
-  res.json({
-    status: 'success',
-    history: rows,
-    max_backups: MAX_BACKUPS
-  });
+  res.json({ status: 'success', history: rows, max_backups: MAX_BACKUPS });
 });
 
-// 🆕 Restore từ backup cũ
 app.post('/api/backup/restore/:backupId', (req, res) => {
   const token = req.headers['x-backup-token'] || (req.body ? req.body.token : '');
   if (token !== BACKUP_TOKEN) {
     return res.status(401).json({ status: 'error', message: 'Invalid token' });
   }
-  
   const backupId = parseInt(req.params.backupId, 10);
   const row = db.prepare('SELECT state FROM snapshot_backups WHERE id = ?').get(backupId);
-  
-  if (!row) {
-    return res.status(404).json({ status: 'error', message: 'Backup not found' });
-  }
-  
+  if (!row) return res.status(404).json({ status: 'error', message: 'Backup not found' });
   try {
     const state = JSON.parse(row.state);
-    
-    // Lưu bản hiện tại vào history trước khi restore
     const current = getSnapshot();
     if (current && current.users && current.users.length > 0) {
       const currentSize = countSnapshotSize(current);
       db.prepare(
         'INSERT INTO snapshot_backups (state, users_count, total_items) VALUES (?, ?, ?)'
-      ).run(JSON.stringify(current), currentSize.users, currentSize.total);
+      ).run(canonicalStringify(current), currentSize.users, currentSize.total);
     }
-    
-    // Restore
     db.prepare(
       `INSERT OR REPLACE INTO snapshot (id, state, updated_at) VALUES (1, ?, datetime('now'))`
-    ).run(JSON.stringify(state));
-    
+    ).run(canonicalStringify(state));
     const size = countSnapshotSize(state);
     console.log(`🔄 Restored backup #${backupId} (${size.users} users)`);
-    
-    res.json({
-      status: 'success',
-      message: `Restored backup #${backupId}`,
-      users: size.users
-    });
+    res.json({ status: 'success', message: `Restored backup #${backupId}`, users: size.users });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
   }
@@ -267,7 +236,6 @@ app.post('/api/dh/exchange', (req, res) => {
   if (token !== BACKUP_TOKEN) {
     return res.status(401).json({ status: 'error', message: 'Invalid token' });
   }
-
   try {
     const sharedSecret = DHExchange.computeSharedSecret(
       serverDHKeys.privateKey,
@@ -276,10 +244,9 @@ app.post('/api/dh/exchange', (req, res) => {
       serverDHKeys.generator
     );
     const sessionKey = DHExchange.deriveSessionKey(sharedSecret);
-
     dhSessions.set(clientId, { sessionKey, createdAt: Date.now() });
 
-    const serverPubData = JSON.stringify({
+    const serverPubData = canonicalStringify({
       publicKey: serverDHKeys.publicKey,
       prime: serverDHKeys.prime,
       generator: serverDHKeys.generator,
@@ -302,6 +269,9 @@ app.post('/api/dh/exchange', (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════
+// BACKUP SYNC – SỬA LOGIC REQUEST_SNAPSHOT
+// ═══════════════════════════════════════════════════
 app.post('/api/backup/sync', (req, res) => {
   const data = req.body;
   if (!data || !data.type) return res.status(400).json({ status: 'error', message: 'Invalid request' });
@@ -316,45 +286,55 @@ app.post('/api/backup/sync', (req, res) => {
   }
 
   if (msgType === 'READY') {
-    const empty = data.empty || false;
-    if (empty) {
+    const clientEmpty = data.empty === true;
+    const serverHasData = getSnapshot() && getSnapshot().users && getSnapshot().users.length > 0;
+
+    console.log(`📋 READY: clientEmpty=${clientEmpty}, serverHasData=${serverHasData}`);
+
+    // Trường hợp 1: client rỗng → server gửi snapshot xuống
+    if (clientEmpty) {
       const snap = getSnapshot();
       if (snap && snap.users && snap.users.length > 0) {
-        const snapSize = JSON.stringify(snap).length;
-        console.log(`📤 Sending full snapshot (${snap.users.length} users, ${(snapSize / 1024).toFixed(1)} KB)`);
+        console.log(`📤 Sending full snapshot (${snap.users.length} users)`);
         return res.json({ type: 'FULL_SNAPSHOT', token: BACKUP_TOKEN, state: snap });
       } else {
+        console.log('ℹ️ Both empty, sending READY_ACK');
         return res.json({ type: 'READY_ACK', status: 'success', message: 'ready but empty' });
       }
-    } else {
-      return res.json({ type: 'READY_ACK', status: 'success', message: 'ack' });
     }
+
+    // Trường hợp 2: client có dữ liệu, server rỗng → yêu cầu client gửi snapshot lên
+    if (!clientEmpty && !serverHasData) {
+      console.log('📤 Server empty, requesting snapshot from client');
+      return res.json({ type: 'REQUEST_SNAPSHOT', message: 'Server is empty, please send your snapshot' });
+    }
+
+    // Trường hợp 3: cả hai đều có dữ liệu hoặc cả hai đều rỗng
+    console.log('✅ Both have data or both empty, sending READY_ACK');
+    return res.json({ type: 'READY_ACK', status: 'success', message: 'ack' });
   }
   else if (msgType === 'PING') {
     return res.json({ type: 'PONG', timestamp: new Date().toISOString() });
   }
   else if (msgType === 'FULL_SNAPSHOT') {
     if (!data.state) return res.status(400).json({ status: 'error', message: 'Missing state' });
-    
     const state = data.state;
     const newSize = countSnapshotSize(state);
     const current = getSnapshot();
-    
-    // 🆕 Chống ghi đè lùi
+
+    // Chống ghi đè lùi
     if (current && current.users && current.users.length > 0) {
       const currentSize = countSnapshotSize(current);
-      
       if (newSize.total < currentSize.total) {
         console.log(`⚠️ SKIP snapshot: ${newSize.total} items < current ${currentSize.total} items`);
         return res.json({ type: 'SNAPSHOT_ACK', status: 'skipped', message: 'Less data' });
       }
-      
       if (newSize.total === currentSize.total && newSize.users <= currentSize.users) {
         console.log(`⏭ Snapshot unchanged, skipping`);
         return res.json({ type: 'SNAPSHOT_ACK', status: 'skipped', message: 'Unchanged' });
       }
     }
-    
+
     console.log(`📥 Receiving snapshot (${newSize.users} users, ${newSize.total} items)...`);
     saveSnapshot(state);
     return res.json({ type: 'SNAPSHOT_ACK', status: 'success' });
@@ -364,7 +344,7 @@ app.post('/api/backup/sync', (req, res) => {
   }
 });
 
-// ─── Gửi snapshot đến main server ────────────────
+// ─── Gửi snapshot đến main server (có canonical) ────────────────
 let mainServerPublicKey = null;
 
 async function fetchMainServerPublicKey() {
@@ -390,16 +370,16 @@ async function sendSnapshotToMainServer() {
   const snapSize = JSON.stringify(snap).length;
   const clientId = `backup-${require('os').hostname()}-${process.pid}`;
   let sessionKey = null;
-  
+
   if (!mainServerPublicKey) await fetchMainServerPublicKey();
-  
+
   if (mainServerPublicKey) {
     try {
       const clientDH = DHExchange.generateStandardKeyPair('modp2048');
       const resp = await fetch(`${MAIN_SERVER_URL}/api/dh/exchange`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: canonicalStringify({
           clientId,
           clientPublicKey: clientDH.publicKey,
           token: BACKUP_TOKEN
@@ -408,7 +388,7 @@ async function sendSnapshotToMainServer() {
       if (resp.ok) {
         const data = await resp.json();
         if (data.serverPublicKey && data.serverSignature) {
-          const pubDataStr = JSON.stringify({
+          const pubDataStr = canonicalStringify({
             publicKey: data.serverPublicKey,
             prime: data.prime,
             generator: data.generator,
@@ -433,6 +413,7 @@ async function sendSnapshotToMainServer() {
   }
 
   const payload = { type: 'FULL_SNAPSHOT', token: BACKUP_TOKEN, state: snap };
+  const bodyString = canonicalStringify(payload);
   const headers = {
     'Content-Type': 'application/json',
     'User-Agent': 'ChocoHub-BackupNode/1.0'
@@ -440,8 +421,7 @@ async function sendSnapshotToMainServer() {
 
   if (sessionKey) {
     const timestamp = Math.floor(Date.now() / 1000).toString();
-    const bodyStr = JSON.stringify(payload);
-    const signature = DHExchange.sign(`POST/api/backup/sync${timestamp}${bodyStr}`, sessionKey);
+    const signature = DHExchange.sign(`POST/api/backup/sync${timestamp}${bodyString}`, sessionKey);
     headers['X-Client-Id'] = clientId;
     headers['X-Timestamp'] = timestamp;
     headers['X-Signature'] = signature;
@@ -452,7 +432,7 @@ async function sendSnapshotToMainServer() {
     const resp = await fetch(`${MAIN_SERVER_URL}/api/backup/sync`, {
       method: 'POST',
       headers,
-      body: JSON.stringify(payload)
+      body: bodyString
     });
     if (resp.ok) console.log('✅ Snapshot sent to main server');
     else console.error(`❌ Send snapshot failed: ${resp.status}`);
@@ -468,7 +448,7 @@ async function registerWithMainServer() {
     await fetch(`${MAIN_SERVER_URL}/api/backup/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      body: canonicalStringify({
         url: SELF_URL,
         token: BACKUP_TOKEN,
         name: 'ChocoHub Backup Node',
@@ -516,10 +496,9 @@ app.listen(BACKUP_PORT, () => {
   console.log('╠══════════════════════════════════════╣');
   console.log(`║  Port: ${BACKUP_PORT}                          ║`);
   console.log(`║  Main: ${MAIN_SERVER_URL.slice(0, 35).padEnd(35)}║`);
-  console.log('║  Max request size: 5000MB            ║');
-  console.log('║  DH Exchange: ON                     ║');
-  console.log('║  Anti-overwrite: ON                  ║');
-  console.log('║  Backup history: ON                  ║');
+  console.log('║  Canonical JSON: ON                 ║');
+  console.log('║  REQUEST_SNAPSHOT: ON               ║');
+  console.log('║  Anti-overwrite: ON                 ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
 
