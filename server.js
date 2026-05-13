@@ -522,7 +522,7 @@ app.get('/api/backup/nodes', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// BACKUP RECEIVE ENDPOINT
+// BACKUP RECEIVE ENDPOINT (ĐÃ SỬA - CÓ REQUEST_SNAPSHOT)
 // ═══════════════════════════════════════════════════════
 app.post('/api/backup/sync', (req, res) => {
   try {
@@ -537,13 +537,52 @@ app.post('/api/backup/sync', (req, res) => {
       return res.status(401).json({ status: 'error', message: 'Invalid token or no valid session' });
     }
     
-    console.log(`📥 Received from backup: type=${data.type}`);
+    console.log(`📥 Received from backup: type=${data.type}, empty=${data.empty}`);
     
+    // Xử lý FULL_SNAPSHOT từ client
     if (data.type === 'FULL_SNAPSHOT' && data.state) {
-      console.log('📥 Receiving full DB snapshot from backup server...');
+      console.log('📥 Receiving full DB snapshot from backup client...');
       db.importFullState(data.state);
-      console.log('✅ Full database restored from backup');
+      console.log('✅ Full database restored from backup client');
       return res.json({ type: 'SNAPSHOT_ACK', status: 'success' });
+    }
+    
+    // Xử lý READY từ client
+    if (data.type === 'READY') {
+      const serverHasData = db.getSeq() > 0;
+      const clientHasData = data.empty === false;
+      
+      console.log(`📋 READY: serverHasData=${serverHasData}, clientHasData=${clientHasData}`);
+      
+      if (data.empty === true) {
+        // Client rỗng → server gửi snapshot xuống
+        console.log('📤 Client is empty, sending snapshot to client...');
+        return res.json({
+          type: 'FULL_SNAPSHOT',
+          state: db.exportFullState()
+        });
+      } 
+      else if (serverHasData === false && clientHasData === true) {
+        // Server rỗng, client có dữ liệu → yêu cầu client gửi snapshot lên
+        console.log('📤 Server is empty, requesting snapshot from client...');
+        return res.json({
+          type: 'REQUEST_SNAPSHOT',
+          message: 'Server is empty, please send your snapshot'
+        });
+      }
+      else {
+        // Cả 2 đều có dữ liệu hoặc cả 2 đều rỗng
+        console.log('✅ Both have data or both empty, sending READY_ACK');
+        return res.json({
+          type: 'READY_ACK',
+          status: 'ok'
+        });
+      }
+    }
+    
+    // PING giữ heartbeat
+    if (data.type === 'PING') {
+      return res.json({ type: 'PONG' });
     }
     
     res.json({ type: 'ACK', status: 'received' });
