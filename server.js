@@ -1,5 +1,16 @@
 // server.js – Hybrid PoW + PoS + Diffie-Hellman + HTTP/2 + TLS 1.3 + Server Authentication
 require('dotenv').config();
+// Thêm helper canonicalStringify
+function canonicalStringify(obj) {
+  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+  if (Array.isArray(obj)) return '[' + obj.map(canonicalStringify).join(',') + ']';
+  const sortedKeys = Object.keys(obj).sort();
+  const pairs = sortedKeys.map(k => `"${k}":${canonicalStringify(obj[k])}`);
+  return '{' + pairs.join(',') + '}';
+}
+
+// Trong middleware verifyDHSignature, sửa phần tính bodyStr:
+const bodyStr = req.method === 'POST' ? canonicalStringify(req.body) : '';
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
