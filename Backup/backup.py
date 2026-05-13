@@ -4,6 +4,7 @@ import sys
 import json
 import time
 import threading
+import traceback                       # 🆕 để in stack trace chi tiết
 import requests
 from flask import Flask, request, jsonify
 from dotenv import dotenv_values
@@ -75,6 +76,7 @@ else:
 
 # ─── DH keys của backup server (dùng nhóm chuẩn modp2048) ──
 server_dh_keys = DHExchange.generate_standard_keypair()
+print(f'🔧 Server DH keys generated (group: {server_dh_keys["group"]})')
 dh_sessions = {}   # client_id → { 'session_key': ..., 'created_at': ... }
 
 # ─── Khởi tạo SQLite ───────────────────────────────
@@ -167,7 +169,7 @@ def server_public_key():
     })
 
 # ═══════════════════════════════════════════════════
-# ROUTE: DH KEY EXCHANGE (có chữ ký server)
+# ROUTE: DH KEY EXCHANGE (có chữ ký server) – ĐÃ THÊM LOG
 # ═══════════════════════════════════════════════════
 @app.route('/api/dh/exchange', methods=['POST'])
 def dh_exchange():
@@ -185,6 +187,12 @@ def dh_exchange():
     if token != BACKUP_TOKEN:
         return jsonify({'status': 'error', 'message': 'Invalid token'}), 401
 
+    # 🆕 Log đầu vào
+    print(f'🔍 DH exchange request from {client_id}')
+    print(f'   client public key (first 60 chars): {client_public_key[:60]}...')
+    print(f'   prime (first 60 chars): {server_dh_keys["prime"][:60]}...')
+    print(f'   generator: {server_dh_keys["generator"]}')
+
     try:
         shared_secret = DHExchange.compute_shared_secret(
             server_dh_keys['private_key'],
@@ -192,21 +200,21 @@ def dh_exchange():
             server_dh_keys['prime'],
             server_dh_keys['generator']
         )
+        print(f'   shared secret computed (first 40 chars): {shared_secret[:40]}...')
         session_key = DHExchange.derive_session_key(shared_secret)
+        print(f'   session key derived (first 40 chars): {session_key[:40]}...')
 
         dh_sessions[client_id] = {
             'session_key': session_key,
             'created_at': datetime.now().isoformat()
         }
 
-        # Chuẩn bị dữ liệu cần ký
         server_pub_data = json.dumps({
             'publicKey': server_dh_keys['public_key'],
             'prime': server_dh_keys['prime'],
             'generator': server_dh_keys['generator'],
             'group': server_dh_keys['group']
         })
-        # Ký bằng RSA private key của backup server
         server_signature = DHExchange.sign_with_private_key(server_pub_data, server_private_key_pem)
 
         print(f'🔐 DH session established with {client_id} (server signed)')
@@ -220,7 +228,8 @@ def dh_exchange():
             'message': 'Session key established'
         })
     except Exception as e:
-        print(f'❌ DH exchange error: {e}')
+        print(f'❌ DH exchange error for {client_id}: {e}')
+        traceback.print_exc()          # In toàn bộ stack trace
         return jsonify({'status': 'error', 'message': 'Key exchange failed'}), 500
 
 # ═══════════════════════════════════════════════════
