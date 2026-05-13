@@ -1,5 +1,5 @@
 // backupSync.js – Client đồng bộ full-snapshot + TLS 1.3 + DH (có fallback token)
-// 🆕 Fix: Fallback token khi DH không khả dụng + đã sửa lỗi empty flag + XỬ LÝ REQUEST_SNAPSHOT
+// 🆕 Fix: Xử lý REQUEST_SNAPSHOT + canonical JSON cho HMAC
 const net = require('net');
 const https = require('https');
 const http = require('http');
@@ -12,12 +12,21 @@ const DHExchange = require('./dh');
 const BACKUP_SERVERS = (process.env.BACKUP_SERVERS || '').split(',').filter(Boolean);
 const BACKUP_TOKEN = process.env.BACKUP_TOKEN || 'chocohub';
 const RECONNECT_DELAY = 5000;
-const HEARTBEAT_INTERVAL = 30000;        // 30 giây
-const SNAPSHOT_INTERVAL = 300000;        // 5 phút gửi snapshot
-const READY_TIMEOUT = 60000;             // 60s cho 1 request READY
-const RETRY_INTERVAL = 30000;            // 30s thử lại server lỗi
-const NODE_SYNC_INTERVAL = 300000;       // 5 phút đồng bộ danh sách node từ server.js
-const MAX_RETRIES = 5;                  // Số lần thử lại tối đa trước khi xóa node động
+const HEARTBEAT_INTERVAL = 30000;
+const SNAPSHOT_INTERVAL = 300000;
+const READY_TIMEOUT = 60000;
+const RETRY_INTERVAL = 30000;
+const NODE_SYNC_INTERVAL = 300000;
+const MAX_RETRIES = 5;
+
+// ─── Helper: canonical JSON (sắp xếp key alphabet) ─────
+function canonicalStringify(obj) {
+  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+  if (Array.isArray(obj)) return '[' + obj.map(canonicalStringify).join(',') + ']';
+  const sortedKeys = Object.keys(obj).sort();
+  const pairs = sortedKeys.map(k => `"${k}":${canonicalStringify(obj[k])}`);
+  return '{' + pairs.join(',') + '}';
+}
 
 // ─── TLS Agent (cho phép self-signed khi fallback) ─────────────
 function makeSecureHttpsAgent(hostname, allowUnauthorized = false) {
@@ -43,7 +52,7 @@ class BackupClient {
           port: url.port || (url.protocol === 'https:' ? 443 : 80),
           path: url.pathname || '/',
           isDynamic: false,
-          dhSupported: true  // Mặc định thử DH trước
+          dhSupported: true
         };
       }
       const [host, port] = hostPort.split(':');
@@ -104,7 +113,7 @@ class BackupClient {
                   port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
                   path: parsedUrl.pathname || '/',
                   isDynamic: true,
-                  dhSupported: true  // Mặc định thử DH
+                  dhSupported: true
                 };
                 console.log(`🆕 New backup node discovered: ${host} (from dynamic registration)`);
                 this.servers.push(newServer);
@@ -342,14 +351,13 @@ class BackupClient {
     });
   }
 
-  // 🆕 Hàm gửi request với token (fallback mode) - GIỐNG HỆT CODE CŨ
+  // 🆕 Hàm gửi request với token (fallback mode) - có canonical JSON
   sendWithToken(method, path, bodyObj, server, agent, isEmpty) {
     bodyObj.token = server.token;
-    // ✅ Thêm empty flag nếu được truyền vào
     if (isEmpty !== undefined) {
       bodyObj.empty = isEmpty;
     }
-    const payload = JSON.stringify(bodyObj);
+    const payload = canonicalStringify(bodyObj);
     const headers = {
       'Content-Type': 'application/json',
       'User-Agent': 'ChocoHub-BackupClient/1.0',
@@ -360,14 +368,13 @@ class BackupClient {
     return { payload, headers };
   }
 
-  // Hàm gửi request với DH (nếu có session)
+  // Hàm gửi request với DH (có canonical JSON cho HMAC)
   sendWithDH(method, path, bodyObj, session, isEmpty) {
     bodyObj.token = BACKUP_TOKEN;
-    // ✅ Thêm empty flag nếu được truyền vào
     if (isEmpty !== undefined) {
       bodyObj.empty = isEmpty;
     }
-    const payload = JSON.stringify(bodyObj);
+    const payload = canonicalStringify(bodyObj);
     const headers = {
       'Content-Type': 'application/json',
       'User-Agent': 'ChocoHub-BackupClient/1.0',
@@ -385,14 +392,63 @@ class BackupClient {
     return { payload, headers };
   }
 
+  // 🆕 Gửi snapshot ngay lập tức (dùng cho REQUEST_SNAPSHOT)
+  sendSnapshotNow(server, serverKey, agent, session, useDH) {
+    const httpModule = server.protocol === 'https' ? https : http;
+    const snapshotPayload = { type: 'FULL_SNAPSHOT', token: server.token, state: db.exportFullState() };
+    let payload, headers;
+    if (useDH && session) {
+      const result = this.sendWithDH('POST', '/api/backup/sync', snapshotPayload, session);
+      payload = result.payload;
+      headers = result.headers;
+    } else {
+      const result = this.sendWithToken('POST', '/api/backup/sync', snapshotPayload, server, agent);
+      payload = result.payload;
+      headers = result.headers;
+    }
+
+    const req = httpModule.request({
+      hostname: server.host,
+      port: server.port,
+      path: '/api/backup/sync',
+      method: 'POST',
+      headers,
+      agent,
+      rejectUnauthorized: useDH ? true : false
+    }, (res) => {
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          console.log(`📤 Snapshot sent to ${serverKey} (${useDH ? 'DH' : 'TOKEN'})`);
+          // Sau khi gửi snapshot thành công, coi như restored
+          if (!this.restored) {
+            this.restored = true;
+            console.log(`✅ Database sent to ${serverKey}`);
+          }
+          this.ensureHeartbeatAndSnapshot(server, serverKey, agent, session, useDH);
+        } else {
+          console.error(`❌ Failed to send snapshot to ${serverKey}: ${res.statusCode}`);
+          this.handleConnectionFailure(server, () => this.sendSnapshotNow(server, serverKey, agent, session, useDH));
+        }
+      });
+    });
+    req.on('error', (err) => {
+      console.error(`❌ Snapshot send error ${serverKey}: ${err.message}`);
+      this.handleConnectionFailure(server, () => this.sendSnapshotNow(server, serverKey, agent, session, useDH));
+    });
+    req.on('timeout', () => req.destroy(new Error('snapshot send timeout')));
+    req.setTimeout(30000);
+    req.write(payload);
+    req.end();
+  }
+
   connectHttp(server) {
     const serverKey = `${server.host}:${server.port}`;
     const httpModule = server.protocol === 'https' ? https : http;
-    // Thử DH trước, nếu fail thì dùng agent không xác thực
     const dhAgent = server.protocol === 'https' ? makeSecureHttpsAgent(server.host, false) : undefined;
     const fallbackAgent = server.protocol === 'https' ? makeSecureHttpsAgent(server.host, true) : undefined;
 
-    // Thử DH, nếu thành công thì dùng DH, không thì fallback token
     this.performSecureDHExchange(server, serverKey, dhAgent).then(session => {
       if (session) {
         this.dhSessions.set(serverKey, session);
@@ -405,41 +461,6 @@ class BackupClient {
     });
   }
 
-  // 🆕 Hàm gửi snapshot ngay lập tức (được gọi từ REQUEST_SNAPSHOT)
-  sendSnapshotNow(server, serverKey, httpModule, agent, session, useDH) {
-    const state = db.exportFullState();
-    const snapshotPayload = { type: 'FULL_SNAPSHOT', token: server.token, state };
-    
-    let payload, headers;
-    if (useDH && session) {
-      const result = this.sendWithDH('POST', '/api/backup/sync', snapshotPayload, session);
-      payload = result.payload;
-      headers = result.headers;
-    } else {
-      const result = this.sendWithToken('POST', '/api/backup/sync', snapshotPayload, server, agent);
-      payload = result.payload;
-      headers = result.headers;
-    }
-    
-    const req = httpModule.request({
-      hostname: server.host,
-      port: server.port,
-      path: '/api/backup/sync',
-      method: 'POST',
-      headers,
-      agent,
-      rejectUnauthorized: useDH ? true : false
-    }, (res) => {
-      res.resume(); // Đọc response để giải phóng bộ nhớ
-      console.log(`✅ Snapshot sent to ${serverKey} as requested.`);
-    });
-    
-    req.on('error', (err) => console.error(`❌ Error sending requested snapshot to ${serverKey}: ${err.message}`));
-    req.setTimeout(20000, () => req.destroy());
-    req.write(payload);
-    req.end();
-  }
-
   launchReadyProtocol(server, serverKey, httpModule, agent, session, useDH) {
     const tryReady = () => {
       if (this.restored) {
@@ -447,11 +468,7 @@ class BackupClient {
         return;
       }
 
-      const readyPayload = {
-        type: 'READY',
-        token: server.token
-        // empty sẽ được thêm vào bên trong sendWithToken/sendWithDH
-      };
+      const readyPayload = { type: 'READY', token: server.token };
       const isEmpty = db.getSeq() === 0;
 
       let payload, headers;
@@ -472,7 +489,7 @@ class BackupClient {
         method: 'POST',
         headers,
         agent,
-        rejectUnauthorized: useDH ? true : false  // DH: xác thực TLS, Token: không xác thực
+        rejectUnauthorized: useDH ? true : false
       }, (res) => {
         let body = '';
         res.on('data', chunk => body += chunk);
@@ -485,6 +502,14 @@ class BackupClient {
           if (res.statusCode === 200 && body.trim()) {
             try {
               const msg = JSON.parse(body);
+              
+              // 🆕 Xử lý REQUEST_SNAPSHOT (server rỗng, client có data)
+              if (msg.type === 'REQUEST_SNAPSHOT') {
+                console.log(`📤 Server ${serverKey} requested snapshot, sending...`);
+                this.sendSnapshotNow(server, serverKey, agent, session, useDH);
+                return;
+              }
+              
               if (msg.type === 'FULL_SNAPSHOT' && msg.state) {
                 const users = Array.isArray(msg.state.users) ? msg.state.users.length : 0;
                 if (users > 0) {
@@ -500,16 +525,6 @@ class BackupClient {
 
               if (msg.type === 'READY_ACK') {
                 console.log(`🔗 [${useDH ? 'DH' : 'TOKEN'}] Connected to ${serverKey} (main already has data)`);
-                this.restored = true;
-                this.ensureHeartbeatAndSnapshot(server, serverKey, agent, session, useDH);
-                if (server.isDynamic) this.retryCount[serverKey] = 0;
-                return;
-              }
-
-              // 🆕 XỬ LÝ REQUEST_SNAPSHOT: Server yêu cầu client gửi dữ liệu lên
-              if (msg.type === 'REQUEST_SNAPSHOT') {
-                console.log(`📤 Server ${serverKey} is empty. Sending our snapshot...`);
-                this.sendSnapshotNow(server, serverKey, httpModule, agent, session, useDH);
                 this.restored = true;
                 this.ensureHeartbeatAndSnapshot(server, serverKey, agent, session, useDH);
                 if (server.isDynamic) this.retryCount[serverKey] = 0;
@@ -597,13 +612,13 @@ class BackupClient {
     }
   }
 
-  // ==================== Heartbeat & Snapshot - TOKEN MODE (giống hệt code cũ) ====================
+  // ==================== Heartbeat & Snapshot - TOKEN MODE (dùng canonical) ====================
   startHttpHeartbeatToken(server, serverKey, agent) {
     const httpModule = server.protocol === 'https' ? https : http;
     if (!this.heartbeatLogCounter[serverKey]) this.heartbeatLogCounter[serverKey] = 0;
 
     const heartbeat = () => {
-      const payload = JSON.stringify({ type: 'PING', token: server.token });
+      const payload = canonicalStringify({ type: 'PING', token: server.token });
       const req = httpModule.request({
         hostname: server.host,
         port: server.port,
@@ -646,7 +661,7 @@ class BackupClient {
 
     const sendSnapshot = () => {
       const state = db.exportFullState();
-      const payload = JSON.stringify({ type: 'FULL_SNAPSHOT', token: server.token, state });
+      const payload = canonicalStringify({ type: 'FULL_SNAPSHOT', token: server.token, state });
       const hash = crypto.createHash('sha256').update(payload).digest('hex').substring(0, 16);
 
       if (hash === lastSnapshotHash) {
@@ -688,7 +703,7 @@ class BackupClient {
     sendSnapshot();
   }
 
-  // ==================== Heartbeat & Snapshot - DH MODE ====================
+  // ==================== Heartbeat & Snapshot - DH MODE (dùng canonical) ====================
   startHttpHeartbeatDH(server, serverKey, agent, session) {
     const httpModule = server.protocol === 'https' ? https : http;
     if (!this.heartbeatLogCounter[serverKey]) this.heartbeatLogCounter[serverKey] = 0;
@@ -773,6 +788,5 @@ class BackupClient {
   }
 }
 
-// Singleton
 const backupClient = new BackupClient();
 module.exports = backupClient;
