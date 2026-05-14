@@ -1,0 +1,99 @@
+# Tên của workflow, hiển thị trên tab Actions của GitHub
+name: Linux Desktop với XFCE và Cloudflare Tunnel
+
+# Sự kiện kích hoạt workflow. Ở đây cho phép chạy thủ công.
+on:
+  workflow_dispatch:
+
+jobs:
+  # Định nghĩa một job tên là "remote-desktop"
+  remote-desktop:
+    # Chạy trên máy ảo Ubuntu mới nhất của GitHub
+    runs-on: ubuntu-latest
+    # Đặt thời gian timeout để tránh lãng phí phút Actions (tối đa 6 giờ)
+    timeout-minutes: 360
+
+    steps:
+      # Bước 1: Kiểm tra (checkout) mã nguồn của repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Bước 2: Cài đặt môi trường desktop XFCE và máy chủ VNC
+      - name: Cài đặt XFCE4, VNC và các công cụ cần thiết
+        run: |
+          # Dừng script nếu có lỗi
+          set -e
+
+          # Cập nhật danh sách gói
+          sudo apt update
+
+          # Cài đặt XFCE4, trình quản lý hiển thị lightdm, và các tiện ích
+          sudo apt install -y xfce4 xfce4-goodies lightdm
+
+          # Cài đặt máy chủ VNC (TightVNC)
+          sudo apt install -y tightvncserver
+
+          # Cài đặt các công cụ hỗ trợ
+          sudo apt install -y wget curl unzip dbus-x11
+
+      # Bước 3: Cài đặt Firefox từ kho APT của Mozilla (KHÔNG DÙNG SNAP)
+      - name: Cài đặt Firefox không dùng Snap
+        run: |
+          set -e
+          # Thêm PPA chính thức của đội Mozilla
+          sudo add-apt-repository ppa:mozillateam/ppa -y
+          sudo apt update
+
+          # Cài đặt Firefox ESR hoặc phiên bản thường từ PPA
+          sudo apt install -y firefox-esr
+          # hoặc sudo apt install -y firefox nếu ông muốn bản mới nhất
+
+      # Bước 4: Cấu hình và khởi động máy chủ VNC
+      - name: Khởi động máy chủ VNC (Mật khẩu: 123456)
+        run: |
+          set -e
+          # Tạo thư mục cấu hình VNC nếu chưa có
+          mkdir -p ~/.vnc
+
+          # Đặt mật khẩu VNC (có thể thay đổi). Ở đây dùng '123456'
+          echo "123456" | vncpasswd -f > ~/.vnc/passwd
+          chmod 600 ~/.vnc/passwd
+
+          # Khởi động máy chủ VNC trên màn hình ảo :1 (cổng 5901)
+          # Sử dụng độ phân giải 1280x800 và độ sâu màu 24-bit
+          tightvncserver :1 -geometry 1280x800 -depth 24
+          echo "Máy chủ VNC đã được khởi động."
+
+          # Để phiên desktop tồn tại, ta tạo một vòng lặp vô hạn
+          # giữ cho tiến trình VNC không bị thoát.
+          while true; do sleep 60; done &
+
+      # Bước 5: Tải và chạy Cloudflare Tunnel (TryCloudflare)
+      - name: Tạo Cloudflare Tunnel công khai (không cần tài khoản)
+        run: |
+          set -e
+          # Tải xuống file nhị phân cloudflared cho Linux 64-bit
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared-linux-amd64
+
+          # Chạy cloudflared ở chế độ Quick Tunnel.
+          # Nó sẽ chuyển hướng lưu lượng từ một URL trycloudflare.com ngẫu nhiên
+          # đến cổng VNC cục bộ (5901).
+          # &> lệnh chuyển hướng cả stdout và stderr vào file cloudflare.log
+          ./cloudflared-linux-amd64 tunnel --url http://localhost:5901 &> cloudflare.log &
+
+          # Chờ một lát để tunnel được tạo và URL xuất hiện trong log
+          sleep 10
+
+          # Trích xuất URL từ file log và in ra màn hình
+          echo "--------------------------------------------------"
+          echo "URL Cloudflare Tunnel của bạn (dùng để kết nối VNC):"
+          grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflare.log || echo "Không tìm thấy URL. Kiểm tra file cloudflare.log."
+          echo "--------------------------------------------------"
+
+      # Bước 6: Giữ cho workflow chạy để duy trì kết nối
+      - name: Giữ phiên làm việc
+        run: |
+          echo "Desktop XFCE đã sẵn sàng. Workflow sẽ chạy trong tối đa 6 giờ."
+          # Vòng lặp vô hạn để giữ job không kết thúc
+          while true; do sleep 300; done
