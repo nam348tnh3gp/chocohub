@@ -72,7 +72,8 @@ class BackupClient {
 
     this.dhSessions = new Map();
     this.clientBaseId = `backup-${os.hostname()}-${process.pid}`;
-    this.serverLongtermPublicKey = null;
+    // 🆕 Map lưu public key riêng cho từng server (key: "host:port")
+    this.serverPublicKeys = new Map();
   }
 
   start() {
@@ -227,6 +228,7 @@ class BackupClient {
   // ==================== Lấy public key dài hạn của server ====================
   async fetchServerPublicKey(server, agent) {
     const httpModule = server.protocol === 'https' ? https : http;
+    const serverKey = `${server.host}:${server.port}`;
     return new Promise((resolve) => {
       const req = httpModule.get({
         hostname: server.host,
@@ -242,7 +244,8 @@ class BackupClient {
           try {
             const json = JSON.parse(data);
             if (json.publicKey) {
-              this.serverLongtermPublicKey = json.publicKey;
+              // 🆕 Lưu vào map riêng cho serverKey
+              this.serverPublicKeys.set(serverKey, json.publicKey);
               console.log(`🔑 Server public key obtained for ${server.host}`);
               resolve(true);
             } else {
@@ -258,19 +261,23 @@ class BackupClient {
 
   // ==================== DH Exchange (có fallback) ====================
   async performSecureDHExchange(server, serverKey, agent) {
-    if (!this.serverLongtermPublicKey) {
+    // 🆕 Lấy public key riêng cho server này, nếu chưa có thì fetch
+    let serverPubKey = this.serverPublicKeys.get(serverKey);
+    if (!serverPubKey) {
       const fetched = await this.fetchServerPublicKey(server, agent);
       if (!fetched) {
         console.log(`⚠️ Cannot fetch server public key for ${serverKey}, falling back to token mode`);
         return null;
       }
+      serverPubKey = this.serverPublicKeys.get(serverKey);
     }
 
     const httpModule = server.protocol === 'https' ? https : http;
     const clientDHKeys = DHExchange.generateStandardKeyPair('modp2048');
     const clientId = `${this.clientBaseId}-${serverKey}`;
 
-    const payload = JSON.stringify({
+    // 🆕 Dùng canonicalStringify để nhất quán
+    const payload = canonicalStringify({
       clientId,
       clientPublicKey: clientDHKeys.publicKey,
       token: server.token
@@ -305,7 +312,8 @@ class BackupClient {
               return resolve(null);
             }
 
-            const serverPubData = JSON.stringify({
+            // 🆕 Dùng canonicalStringify để tạo serverPubData giống như backup server đã ký
+            const serverPubData = canonicalStringify({
               publicKey: data.serverPublicKey,
               prime: data.prime,
               generator: data.generator,
@@ -314,7 +322,7 @@ class BackupClient {
             const isValid = DHExchange.verifyWithPublicKey(
               serverPubData,
               data.serverSignature,
-              this.serverLongtermPublicKey
+              serverPubKey  // Dùng đúng key của server này
             );
             if (!isValid) {
               console.log(`⚠️ Server signature verification FAILED for ${serverKey}, falling back to token mode`);
@@ -421,7 +429,6 @@ class BackupClient {
       res.on('end', () => {
         if (res.statusCode === 200) {
           console.log(`📤 Snapshot sent to ${serverKey} (${useDH ? 'DH' : 'TOKEN'})`);
-          // Sau khi gửi snapshot thành công, coi như restored
           if (!this.restored) {
             this.restored = true;
             console.log(`✅ Database sent to ${serverKey}`);
@@ -503,7 +510,6 @@ class BackupClient {
             try {
               const msg = JSON.parse(body);
               
-              // 🆕 Xử lý REQUEST_SNAPSHOT (server rỗng, client có data)
               if (msg.type === 'REQUEST_SNAPSHOT') {
                 console.log(`📤 Server ${serverKey} requested snapshot, sending...`);
                 this.sendSnapshotNow(server, serverKey, agent, session, useDH);
