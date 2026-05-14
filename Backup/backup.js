@@ -154,7 +154,6 @@ app.use((req, res, next) => {
   if (!session) return next();
 
   const timestamp = req.headers['x-timestamp'] || '';
-  // 🆕 Dùng canonicalStringify thay vì JSON.stringify
   const bodyStr = req.method === 'POST' ? canonicalStringify(req.body) : '';
   const message = `${req.method}${req.path}${timestamp}${bodyStr}`;
 
@@ -270,7 +269,7 @@ app.post('/api/dh/exchange', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════
-// BACKUP SYNC – SỬA LOGIC REQUEST_SNAPSHOT
+// BACKUP SYNC – ĐÃ SỬA CHỐNG GHI ĐÈ BẰNG HASH
 // ═══════════════════════════════════════════════════
 app.post('/api/backup/sync', (req, res) => {
   const data = req.body;
@@ -291,7 +290,6 @@ app.post('/api/backup/sync', (req, res) => {
 
     console.log(`📋 READY: clientEmpty=${clientEmpty}, serverHasData=${serverHasData}`);
 
-    // Trường hợp 1: client rỗng → server gửi snapshot xuống
     if (clientEmpty) {
       const snap = getSnapshot();
       if (snap && snap.users && snap.users.length > 0) {
@@ -303,13 +301,11 @@ app.post('/api/backup/sync', (req, res) => {
       }
     }
 
-    // Trường hợp 2: client có dữ liệu, server rỗng → yêu cầu client gửi snapshot lên
     if (!clientEmpty && !serverHasData) {
       console.log('📤 Server empty, requesting snapshot from client');
       return res.json({ type: 'REQUEST_SNAPSHOT', message: 'Server is empty, please send your snapshot' });
     }
 
-    // Trường hợp 3: cả hai đều có dữ liệu hoặc cả hai đều rỗng
     console.log('✅ Both have data or both empty, sending READY_ACK');
     return res.json({ type: 'READY_ACK', status: 'success', message: 'ack' });
   }
@@ -318,20 +314,28 @@ app.post('/api/backup/sync', (req, res) => {
   }
   else if (msgType === 'FULL_SNAPSHOT') {
     if (!data.state) return res.status(400).json({ status: 'error', message: 'Missing state' });
+
     const state = data.state;
     const newSize = countSnapshotSize(state);
     const current = getSnapshot();
 
-    // Chống ghi đè lùi
+    // Tính hash của snapshot mới
+    const newHash = crypto.createHash('sha256').update(canonicalStringify(state)).digest('hex');
+
     if (current && current.users && current.users.length > 0) {
-      const currentSize = countSnapshotSize(current);
-      if (newSize.total < currentSize.total) {
-        console.log(`⚠️ SKIP snapshot: ${newSize.total} items < current ${currentSize.total} items`);
-        return res.json({ type: 'SNAPSHOT_ACK', status: 'skipped', message: 'Less data' });
+      const currentHash = crypto.createHash('sha256').update(canonicalStringify(current)).digest('hex');
+
+      // Nếu hash giống hệt -> bỏ qua
+      if (newHash === currentHash) {
+        console.log('⏭ Snapshot identical (same hash), skipping');
+        return res.json({ type: 'SNAPSHOT_ACK', status: 'skipped', message: 'Identical' });
       }
-      if (newSize.total === currentSize.total && newSize.users <= currentSize.users) {
-        console.log(`⏭ Snapshot unchanged, skipping`);
-        return res.json({ type: 'SNAPSHOT_ACK', status: 'skipped', message: 'Unchanged' });
+
+      // Chống ghi đè lùi: nếu dữ liệu mới ít hơn 50% -> cảnh báo và bỏ qua (tuỳ chọn)
+      const currentSize = countSnapshotSize(current);
+      if (newSize.total < currentSize.total * 0.5) {
+        console.log(`⚠️ SKIP snapshot: ${newSize.total} items < 50% of current ${currentSize.total} items (possible regression)`);
+        return res.json({ type: 'SNAPSHOT_ACK', status: 'skipped', message: 'Less data' });
       }
     }
 
@@ -498,7 +502,7 @@ app.listen(BACKUP_PORT, () => {
   console.log(`║  Main: ${MAIN_SERVER_URL.slice(0, 35).padEnd(35)}║`);
   console.log('║  Canonical JSON: ON                 ║');
   console.log('║  REQUEST_SNAPSHOT: ON               ║');
-  console.log('║  Anti-overwrite: ON                 ║');
+  console.log('║  Anti-overwrite: HASH-BASED         ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
 
