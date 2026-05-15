@@ -16,8 +16,8 @@ jobs:
         run: |
           set -e
           sudo apt update
-          sudo apt install -y xfce4 xfce4-goodies tightvncserver
-          sudo apt install -y wget curl unzip dbus-x11 xvfb
+          sudo apt install -y xfce4 xfce4-goodies tightvncserver xfonts-base
+          sudo apt install -y wget curl unzip dbus-x11
 
       - name: Install Firefox without Snap
         run: |
@@ -35,6 +35,7 @@ jobs:
           
           # Kill VNC cũ nếu có
           tightvncserver -kill :1 2>/dev/null || true
+          rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
           
           # Tạo script khởi động XFCE cho VNC
           cat > ~/.vnc/xstartup << 'EOF'
@@ -44,21 +45,25 @@ jobs:
           EOF
           chmod +x ~/.vnc/xstartup
           
-          # Khởi động VNC với độ phân giải cụ thể
-          tightvncserver :1 -geometry 1280x800 -depth 24 -localhost no
+          # Khởi động VNC - bỏ -localhost no
+          tightvncserver :1 -geometry 1280x800 -depth 24
           
           # Đợi VNC thực sự lắng nghe
           echo "Waiting for VNC to be ready..."
-          for i in {1..30}; do
-            if netstat -tlnp 2>/dev/null | grep -q ":5901"; then
-              echo "VNC is now listening on port 5901"
-              break
-            fi
-            sleep 1
-          done
+          sleep 5
           
-          # Xác nhận lại
-          netstat -tlnp 2>/dev/null | grep 5901 || echo "Warning: Port 5901 not confirmed"
+          # Kiểm tra VNC đã chạy chưa
+          if pgrep -f "Xtightvnc :1" > /dev/null; then
+            echo "VNC process is running"
+          else
+            echo "Error: VNC process not found"
+            cat ~/.vnc/*.log 2>/dev/null || true
+            exit 1
+          fi
+          
+          # Kiểm tra port
+          ss -tlnp | grep 5901 || netstat -tlnp 2>/dev/null | grep 5901 || echo "Checking port with lsof..."
+          lsof -i :5901 2>/dev/null || echo "Port check done"
 
       - name: Create Cloudflare Tunnel
         run: |
@@ -66,21 +71,32 @@ jobs:
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
           chmod +x cloudflared-linux-amd64
           
-          # Chạy tunnel, chờ lấy URL
-          ./cloudflared-linux-amd64 tunnel --url http://localhost:5901 &> cloudflare.log &
+          # Chạy tunnel
+          ./cloudflared-linux-amd64 tunnel --url http://localhost:5901 > cloudflare.log 2>&1 &
+          TUNNEL_PID=$!
           
-          echo "Waiting for Cloudflare Tunnel..."
+          echo "Waiting for Cloudflare Tunnel (PID: $TUNNEL_PID)..."
           sleep 15
           
+          echo "=============================================="
           echo "Cloudflare Tunnel URL:"
           grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflare.log || (
-            echo "Trying again after 5s..."
-            sleep 5
-            grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflare.log || echo "URL not found. Full log:"
+            echo "First attempt failed. Full log:"
             cat cloudflare.log
+            echo "Retrying in 5 seconds..."
+            sleep 5
+            grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflare.log || echo "URL extraction failed"
           )
+          echo "=============================================="
+          
+          # Giữ tunnel PID để biết
+          echo $TUNNEL_PID > /tmp/tunnel.pid
 
       - name: Keep session alive
         run: |
-          echo "XFCE desktop is ready. Connecting via VNC..."
-          while true; do sleep 300; done
+          echo "=============================================="
+          echo "XFCE Desktop is running!"
+          echo "Use VNC viewer to connect with password: 123456"
+          echo "Session will last up to 6 hours"
+          echo "=============================================="
+          while true; do sleep 60; done
