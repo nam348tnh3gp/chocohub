@@ -17,7 +17,7 @@ jobs:
           set -e
           sudo apt update
           sudo apt install -y xfce4 xfce4-goodies tightvncserver xfonts-base
-          sudo apt install -y wget curl unzip dbus-x11
+          sudo apt install -y wget curl unzip dbus-x11 socat
           sudo add-apt-repository ppa:mozillateam/ppa -y
           sudo apt update
           sudo apt install -y firefox-esr
@@ -26,7 +26,11 @@ jobs:
         run: |
           set -e
           
-          # === Setup VNC ===
+          echo "=============================================="
+          echo "Step 1: Setting up VNC server..."
+          echo "=============================================="
+          
+          # Setup VNC
           mkdir -p ~/.vnc
           echo "123456" | vncpasswd -f > ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
@@ -41,56 +45,128 @@ jobs:
           XSTARTUP
           chmod +x ~/.vnc/xstartup
           
-          tightvncserver :1 -geometry 1280x800 -depth 24
-          echo "VNC started on port 5901"
+          tightvncserver :1 -geometry 1280x800 -depth 24 -localhost
+          echo "VNC started on port 5901 (localhost only)"
           
-          # === Download and start Cloudflare Tunnel ===
+          # Verify VNC is running
+          sleep 3
+          if pgrep -f "Xtightvnc :1" > /dev/null; then
+            echo "✓ VNC process confirmed running"
+          else
+            echo "✗ VNC failed to start. Log:"
+            cat ~/.vnc/*.log 2>/dev/null
+            exit 1
+          fi
+          
+          # Check what VNC is listening on
+          echo "VNC listening on:"
+          ss -tlnp | grep 5901 || netstat -tlnp 2>/dev/null | grep 5901
+          
+          echo ""
+          echo "=============================================="
+          echo "Step 2: Creating TCP forwarder (5901 -> 15901)"
+          echo "=============================================="
+          
+          # Use socat to forward from 0.0.0.0:15901 to localhost:5901
+          socat TCP-LISTEN:15901,bind=0.0.0.0,reuseaddr,fork TCP:localhost:5901 &
+          SOCAT_PID=$!
+          echo "socat forwarder started with PID: $SOCAT_PID"
+          sleep 2
+          
+          # Verify socat is listening on all interfaces
+          echo "socat listening on:"
+          ss -tlnp | grep 15901 || netstat -tlnp 2>/dev/null | grep 15901
+          
+          echo ""
+          echo "=============================================="
+          echo "Step 3: Testing local connection..."
+          echo "=============================================="
+          
+          # Test that port 15901 is reachable
+          timeout 3 bash -c 'echo > /dev/tcp/localhost/15901' 2>/dev/null && echo "✓ Port 15901 reachable" || echo "⚠ Port 15901 not reachable yet"
+          timeout 3 bash -c 'echo > /dev/tcp/0.0.0.0/15901' 2>/dev/null && echo "✓ Port 15901 reachable on 0.0.0.0" || echo "⚠ Port 15901 not reachable on 0.0.0.0"
+          
+          echo ""
+          echo "=============================================="
+          echo "Step 4: Starting Cloudflare Tunnel..."
+          echo "=============================================="
+          
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
           chmod +x cloudflared-linux-amd64
           
-          ./cloudflared-linux-amd64 tunnel --url http://localhost:5901 > cloudflare.log 2>&1 &
+          # Point tunnel to socat port (15901) instead of VNC directly
+          ./cloudflared-linux-amd64 tunnel --url http://localhost:15901 > cloudflare.log 2>&1 &
           TUNNEL_PID=$!
-          echo "Cloudflare Tunnel started with PID: $TUNNEL_PID"
+          echo "Tunnel PID: $TUNNEL_PID"
           
-          # === Wait for URL ===
-          echo "Waiting for tunnel URL..."
-          sleep 15
+          # Wait for tunnel to establish
+          echo "Waiting for Cloudflare Tunnel to establish..."
+          sleep 20
           
-          # === Show URL ===
+          echo ""
+          echo "=============================================="
+          echo "TUNNEL LOG:"
+          echo "=============================================="
+          cat cloudflare.log
+          echo ""
+          echo "=============================================="
+          
+          # Extract URL
+          TUNNEL_URL=$(grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflare.log | head -1)
+          
           echo ""
           echo "╔══════════════════════════════════════════════════════╗"
-          echo "║         CLOUDFLARE TUNNEL URL FOR VNC               ║"
+          echo "║         CLOUDFLARE TUNNEL READY                     ║"
           echo "╠══════════════════════════════════════════════════════╣"
-          TUNNEL_URL=$(grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflare.log | head -1)
           if [ -n "$TUNNEL_URL" ]; then
-            echo "║  $TUNNEL_URL"
+            echo "║  URL: $TUNNEL_URL"
             echo "╠══════════════════════════════════════════════════════╣"
-            echo "║  VNC Password: 123456                               ║"
-            echo "║  Connect with RealVNC or any VNC client              ║"
+            echo "║  PASSWORD: 123456                                   ║"
+            echo "║  Connect with any VNC client                        ║"
+            echo "║  Paste the URL above (without https://)             ║"
           else
-            echo "║  URL not found yet, checking log..."
-            cat cloudflare.log
-            TUNNEL_URL=$(grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflare.log | head -1)
-            if [ -n "$TUNNEL_URL" ]; then
-              echo "║  $TUNNEL_URL"
-            fi
+            echo "║  URL not extracted automatically                    ║"
+            echo "║  Check cloudflare.log above for trycloudflare URL   ║"
+            echo "║  Password: 123456                                   ║"
           fi
           echo "╚══════════════════════════════════════════════════════╝"
           echo ""
           
-          # === Keep everything alive for 6 hours ===
-          echo "Session will run for up to 6 hours. Press Ctrl+C in VNC to disconnect."
+          # Test direct connection
+          echo "Testing HTTP request to tunnel..."
+          curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" http://localhost:15901 2>/dev/null || echo "HTTP test failed (expected for VNC port)"
+          
+          echo ""
+          echo "=== Keep alive loop started ==="
+          echo "Session runs up to 6 hours"
+          echo ""
+          
+          # Keep alive with auto-restart
           while true; do
-            # Check VNC is still running
+            # Check socat
+            if ! kill -0 $SOCAT_PID 2>/dev/null; then
+              echo "[$(date)] socat died! Restarting..."
+              socat TCP-LISTEN:15901,bind=0.0.0.0,reuseaddr,fork TCP:localhost:5901 &
+              SOCAT_PID=$!
+            fi
+            
+            # Check VNC
             if ! pgrep -f "Xtightvnc :1" > /dev/null; then
-              echo "VNC died! Restarting..."
-              tightvncserver :1 -geometry 1280x800 -depth 24
+              echo "[$(date)] VNC died! Restarting..."
+              tightvncserver :1 -geometry 1280x800 -depth 24 -localhost
             fi
-            # Check tunnel is still running
+            
+            # Check tunnel
             if ! kill -0 $TUNNEL_PID 2>/dev/null; then
-              echo "Tunnel died! Restarting..."
-              ./cloudflared-linux-amd64 tunnel --url http://localhost:5901 > cloudflare.log 2>&1 &
+              echo "[$(date)] Tunnel died! Restarting..."
+              ./cloudflared-linux-amd64 tunnel --url http://localhost:15901 > cloudflare.log 2>&1 &
               TUNNEL_PID=$!
+              sleep 15
+              NEW_URL=$(grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflare.log | head -1)
+              if [ -n "$NEW_URL" ]; then
+                echo "[$(date)] New tunnel URL: $NEW_URL"
+              fi
             fi
+            
             sleep 30
           done
