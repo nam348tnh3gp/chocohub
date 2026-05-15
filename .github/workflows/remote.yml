@@ -12,91 +12,85 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install XFCE4, VNC, and prerequisites
+      - name: Install all packages
         run: |
           set -e
           sudo apt update
           sudo apt install -y xfce4 xfce4-goodies tightvncserver xfonts-base
           sudo apt install -y wget curl unzip dbus-x11
-
-      - name: Install Firefox without Snap
-        run: |
-          set -e
           sudo add-apt-repository ppa:mozillateam/ppa -y
           sudo apt update
           sudo apt install -y firefox-esr
 
-      - name: Setup and start VNC server properly
+      - name: Start everything and keep alive
         run: |
           set -e
+          
+          # === Setup VNC ===
           mkdir -p ~/.vnc
           echo "123456" | vncpasswd -f > ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
           
-          # Kill VNC cũ nếu có
           tightvncserver -kill :1 2>/dev/null || true
           rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
           
-          # Tạo script khởi động XFCE cho VNC
-          cat > ~/.vnc/xstartup << 'EOF'
+          cat > ~/.vnc/xstartup << 'XSTARTUP'
           #!/bin/bash
           xrdb $HOME/.Xresources
           startxfce4 &
-          EOF
+          XSTARTUP
           chmod +x ~/.vnc/xstartup
           
-          # Khởi động VNC - bỏ -localhost no
           tightvncserver :1 -geometry 1280x800 -depth 24
+          echo "VNC started on port 5901"
           
-          # Đợi VNC thực sự lắng nghe
-          echo "Waiting for VNC to be ready..."
-          sleep 5
-          
-          # Kiểm tra VNC đã chạy chưa
-          if pgrep -f "Xtightvnc :1" > /dev/null; then
-            echo "VNC process is running"
-          else
-            echo "Error: VNC process not found"
-            cat ~/.vnc/*.log 2>/dev/null || true
-            exit 1
-          fi
-          
-          # Kiểm tra port
-          ss -tlnp | grep 5901 || netstat -tlnp 2>/dev/null | grep 5901 || echo "Checking port with lsof..."
-          lsof -i :5901 2>/dev/null || echo "Port check done"
-
-      - name: Create Cloudflare Tunnel
-        run: |
-          set -e
+          # === Download and start Cloudflare Tunnel ===
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
           chmod +x cloudflared-linux-amd64
           
-          # Chạy tunnel
           ./cloudflared-linux-amd64 tunnel --url http://localhost:5901 > cloudflare.log 2>&1 &
           TUNNEL_PID=$!
+          echo "Cloudflare Tunnel started with PID: $TUNNEL_PID"
           
-          echo "Waiting for Cloudflare Tunnel (PID: $TUNNEL_PID)..."
+          # === Wait for URL ===
+          echo "Waiting for tunnel URL..."
           sleep 15
           
-          echo "=============================================="
-          echo "Cloudflare Tunnel URL:"
-          grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflare.log || (
-            echo "First attempt failed. Full log:"
+          # === Show URL ===
+          echo ""
+          echo "╔══════════════════════════════════════════════════════╗"
+          echo "║         CLOUDFLARE TUNNEL URL FOR VNC               ║"
+          echo "╠══════════════════════════════════════════════════════╣"
+          TUNNEL_URL=$(grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflare.log | head -1)
+          if [ -n "$TUNNEL_URL" ]; then
+            echo "║  $TUNNEL_URL"
+            echo "╠══════════════════════════════════════════════════════╣"
+            echo "║  VNC Password: 123456                               ║"
+            echo "║  Connect with RealVNC or any VNC client              ║"
+          else
+            echo "║  URL not found yet, checking log..."
             cat cloudflare.log
-            echo "Retrying in 5 seconds..."
-            sleep 5
-            grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflare.log || echo "URL extraction failed"
-          )
-          echo "=============================================="
+            TUNNEL_URL=$(grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflare.log | head -1)
+            if [ -n "$TUNNEL_URL" ]; then
+              echo "║  $TUNNEL_URL"
+            fi
+          fi
+          echo "╚══════════════════════════════════════════════════════╝"
+          echo ""
           
-          # Giữ tunnel PID để biết
-          echo $TUNNEL_PID > /tmp/tunnel.pid
-
-      - name: Keep session alive
-        run: |
-          echo "=============================================="
-          echo "XFCE Desktop is running!"
-          echo "Use VNC viewer to connect with password: 123456"
-          echo "Session will last up to 6 hours"
-          echo "=============================================="
-          while true; do sleep 60; done
+          # === Keep everything alive for 6 hours ===
+          echo "Session will run for up to 6 hours. Press Ctrl+C in VNC to disconnect."
+          while true; do
+            # Check VNC is still running
+            if ! pgrep -f "Xtightvnc :1" > /dev/null; then
+              echo "VNC died! Restarting..."
+              tightvncserver :1 -geometry 1280x800 -depth 24
+            fi
+            # Check tunnel is still running
+            if ! kill -0 $TUNNEL_PID 2>/dev/null; then
+              echo "Tunnel died! Restarting..."
+              ./cloudflared-linux-amd64 tunnel --url http://localhost:5901 > cloudflare.log 2>&1 &
+              TUNNEL_PID=$!
+            fi
+            sleep 30
+          done
