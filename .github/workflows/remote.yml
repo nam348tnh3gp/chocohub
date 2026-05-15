@@ -16,8 +16,8 @@ jobs:
         run: |
           set -e
           sudo apt update
-          sudo apt install -y xfce4 xfce4-goodies tightvncserver xfonts-base
-          sudo apt install -y wget curl unzip dbus-x11 socat
+          sudo apt install -y xfce4 xfce4-goodies x11vnc xvfb xfonts-base
+          sudo apt install -y wget curl unzip dbus-x11
           sudo add-apt-repository ppa:mozillateam/ppa -y
           sudo apt update
           sudo apt install -y firefox-esr
@@ -27,79 +27,91 @@ jobs:
           set -e
           
           echo "=============================================="
-          echo "Step 1: Setting up VNC server..."
+          echo "Step 1: Setting up virtual display with Xvfb"
           echo "=============================================="
           
-          # Setup VNC
-          mkdir -p ~/.vnc
-          echo "123456" | vncpasswd -f > ~/.vnc/passwd
-          chmod 600 ~/.vnc/passwd
-          
-          tightvncserver -kill :1 2>/dev/null || true
+          # Kill any existing X sessions
+          pkill Xvfb 2>/dev/null || true
           rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
           
-          cat > ~/.vnc/xstartup << 'XSTARTUP'
-          #!/bin/bash
-          xrdb $HOME/.Xresources
+          # Start virtual display
+          Xvfb :1 -screen 0 1280x800x24 &
+          XVFB_PID=$!
+          echo "Xvfb started with PID: $XVFB_PID"
+          sleep 2
+          
+          # Set DISPLAY
+          export DISPLAY=:1
+          echo "DISPLAY set to :1"
+          
+          echo ""
+          echo "=============================================="
+          echo "Step 2: Starting XFCE desktop"
+          echo "=============================================="
+          
+          # Start XFCE on the virtual display
           startxfce4 &
-          XSTARTUP
-          chmod +x ~/.vnc/xstartup
+          XFCE_PID=$!
+          echo "XFCE started with PID: $XFCE_PID"
+          sleep 5
           
-          tightvncserver :1 -geometry 1280x800 -depth 24 -localhost
-          echo "VNC started on port 5901 (localhost only)"
+          echo ""
+          echo "=============================================="
+          echo "Step 3: Starting x11vnc server"
+          echo "=============================================="
           
-          # Verify VNC is running
+          # Create password file
+          mkdir -p ~/.vnc
+          x11vnc -storepasswd 123456 ~/.vnc/passwd
+          
+          # Start x11vnc - listen on ALL interfaces (0.0.0.0)
+          x11vnc -display :1 \
+            -forever \
+            -shared \
+            -rfbport 5901 \
+            -rfbauth ~/.vnc/passwd \
+            -listen 0.0.0.0 \
+            -noxdamage \
+            -noxfixes \
+            -nopw \
+            -wait 50 \
+            -maxclients 10 \
+            > x11vnc.log 2>&1 &
+          VNC_PID=$!
+          echo "x11vnc started with PID: $VNC_PID"
           sleep 3
-          if pgrep -f "Xtightvnc :1" > /dev/null; then
-            echo "✓ VNC process confirmed running"
+          
+          # Verify x11vnc
+          if kill -0 $VNC_PID 2>/dev/null; then
+            echo "✓ x11vnc is running"
           else
-            echo "✗ VNC failed to start. Log:"
-            cat ~/.vnc/*.log 2>/dev/null
+            echo "✗ x11vnc failed. Log:"
+            cat x11vnc.log
             exit 1
           fi
           
-          # Check what VNC is listening on
+          # Check listening port
           echo "VNC listening on:"
-          ss -tlnp | grep 5901 || netstat -tlnp 2>/dev/null | grep 5901
+          ss -tlnp 2>/dev/null | grep 5901 || netstat -tlnp 2>/dev/null | grep 5901
+          
+          # Test VNC port directly
+          echo ""
+          echo "Testing VNC port 5901..."
+          timeout 3 bash -c 'echo > /dev/tcp/0.0.0.0/5901' 2>/dev/null && echo "✓ Port 5901 reachable" || echo "⚠ Port check done"
           
           echo ""
           echo "=============================================="
-          echo "Step 2: Creating TCP forwarder (5901 -> 15901)"
-          echo "=============================================="
-          
-          # Use socat to forward from 0.0.0.0:15901 to localhost:5901
-          socat TCP-LISTEN:15901,bind=0.0.0.0,reuseaddr,fork TCP:localhost:5901 &
-          SOCAT_PID=$!
-          echo "socat forwarder started with PID: $SOCAT_PID"
-          sleep 2
-          
-          # Verify socat is listening on all interfaces
-          echo "socat listening on:"
-          ss -tlnp | grep 15901 || netstat -tlnp 2>/dev/null | grep 15901
-          
-          echo ""
-          echo "=============================================="
-          echo "Step 3: Testing local connection..."
-          echo "=============================================="
-          
-          # Test that port 15901 is reachable
-          timeout 3 bash -c 'echo > /dev/tcp/localhost/15901' 2>/dev/null && echo "✓ Port 15901 reachable" || echo "⚠ Port 15901 not reachable yet"
-          timeout 3 bash -c 'echo > /dev/tcp/0.0.0.0/15901' 2>/dev/null && echo "✓ Port 15901 reachable on 0.0.0.0" || echo "⚠ Port 15901 not reachable on 0.0.0.0"
-          
-          echo ""
-          echo "=============================================="
-          echo "Step 4: Starting Cloudflare Tunnel..."
+          echo "Step 4: Starting Cloudflare Tunnel"
           echo "=============================================="
           
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
           chmod +x cloudflared-linux-amd64
           
-          # Point tunnel to socat port (15901) instead of VNC directly
-          ./cloudflared-linux-amd64 tunnel --url http://localhost:15901 > cloudflare.log 2>&1 &
+          # Point tunnel directly to VNC (no socat needed!)
+          ./cloudflared-linux-amd64 tunnel --url http://localhost:5901 > cloudflare.log 2>&1 &
           TUNNEL_PID=$!
           echo "Tunnel PID: $TUNNEL_PID"
           
-          # Wait for tunnel to establish
           echo "Waiting for Cloudflare Tunnel to establish..."
           sleep 20
           
@@ -109,62 +121,56 @@ jobs:
           echo "=============================================="
           cat cloudflare.log
           echo ""
-          echo "=============================================="
           
           # Extract URL
           TUNNEL_URL=$(grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflare.log | head -1)
           
           echo ""
           echo "╔══════════════════════════════════════════════════════╗"
-          echo "║         CLOUDFLARE TUNNEL READY                     ║"
+          echo "║          XFCE DESKTOP READY                         ║"
           echo "╠══════════════════════════════════════════════════════╣"
           if [ -n "$TUNNEL_URL" ]; then
             echo "║  URL: $TUNNEL_URL"
-            echo "╠══════════════════════════════════════════════════════╣"
-            echo "║  PASSWORD: 123456                                   ║"
-            echo "║  Connect with any VNC client                        ║"
-            echo "║  Paste the URL above (without https://)             ║"
           else
-            echo "║  URL not extracted automatically                    ║"
             echo "║  Check cloudflare.log above for trycloudflare URL   ║"
-            echo "║  Password: 123456                                   ║"
           fi
+          echo "╠══════════════════════════════════════════════════════╣"
+          echo "║  VNC Password: 123456                               ║"
+          echo "║  Use RealVNC/TigerVNC client to connect             ║"
+          echo "║  Paste URL (without https://) in VNC client         ║"
           echo "╚══════════════════════════════════════════════════════╝"
           echo ""
           
-          # Test direct connection
-          echo "Testing HTTP request to tunnel..."
-          curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" http://localhost:15901 2>/dev/null || echo "HTTP test failed (expected for VNC port)"
-          
-          echo ""
-          echo "=== Keep alive loop started ==="
-          echo "Session runs up to 6 hours"
-          echo ""
-          
-          # Keep alive with auto-restart
+          # Keep alive
+          echo "=== Session active (up to 6 hours) ==="
           while true; do
-            # Check socat
-            if ! kill -0 $SOCAT_PID 2>/dev/null; then
-              echo "[$(date)] socat died! Restarting..."
-              socat TCP-LISTEN:15901,bind=0.0.0.0,reuseaddr,fork TCP:localhost:5901 &
-              SOCAT_PID=$!
+            # Check and restart Xvfb
+            if ! kill -0 $XVFB_PID 2>/dev/null; then
+              echo "[$(date)] Xvfb died! Restarting..."
+              Xvfb :1 -screen 0 1280x800x24 &
+              XVFB_PID=$!
+              sleep 2
             fi
             
-            # Check VNC
-            if ! pgrep -f "Xtightvnc :1" > /dev/null; then
-              echo "[$(date)] VNC died! Restarting..."
-              tightvncserver :1 -geometry 1280x800 -depth 24 -localhost
+            # Check and restart x11vnc
+            if ! kill -0 $VNC_PID 2>/dev/null; then
+              echo "[$(date)] x11vnc died! Restarting..."
+              x11vnc -display :1 -forever -shared -rfbport 5901 \
+                -rfbauth ~/.vnc/passwd -listen 0.0.0.0 \
+                -noxdamage -noxfixes -wait 50 \
+                > x11vnc.log 2>&1 &
+              VNC_PID=$!
             fi
             
-            # Check tunnel
+            # Check and restart tunnel
             if ! kill -0 $TUNNEL_PID 2>/dev/null; then
               echo "[$(date)] Tunnel died! Restarting..."
-              ./cloudflared-linux-amd64 tunnel --url http://localhost:15901 > cloudflare.log 2>&1 &
+              ./cloudflared-linux-amd64 tunnel --url http://localhost:5901 > cloudflare.log 2>&1 &
               TUNNEL_PID=$!
               sleep 15
               NEW_URL=$(grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflare.log | head -1)
               if [ -n "$NEW_URL" ]; then
-                echo "[$(date)] New tunnel URL: $NEW_URL"
+                echo "[$(date)] New URL: $NEW_URL"
               fi
             fi
             
