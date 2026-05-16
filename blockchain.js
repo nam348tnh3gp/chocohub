@@ -17,7 +17,7 @@ try {
 // ═══════════════════════════════════════════════════
 // CẤU HÌNH ĐỘ KHÓ TỰ ĐỘNG (Dynamic Difficulty)
 // ═══════════════════════════════════════════════════
-const BLOCK_TIME_TARGET = 10;           // Thời gian mục tiêu giữa 2 block PoW (giây)
+const BLOCK_TIME_TARGET = 1;           // Thời gian mục tiêu giữa 2 block PoW (giây)
 const DIFFICULTY_ADJUST_INTERVAL = 5;   // Số block giải được trước khi điều chỉnh độ khó toàn mạng
 const MIN_DIFFICULTY = 4;              // Độ khó thấp nhất (bits)
 const MAX_DIFFICULTY = 30;             // Độ khó cao nhất (bits)
