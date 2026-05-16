@@ -390,6 +390,27 @@ app.get('/active_bounties_list', (req, res) => {
   }
 });
 
+// ─── 🆕 NEW: Per-worker job assignment ─────────────────
+app.post('/get_job', (req, res) => {
+  try {
+    const { worker_name } = req.body;
+    if (!worker_name) {
+      return res.status(400).json({ status: 'error', message: 'Missing worker_name' });
+    }
+
+    const job = blockchain.getJobForWorker(worker_name);
+    if (!job) {
+      return res.status(404).json({ status: 'error', message: 'No job available' });
+    }
+
+    res.json(job);
+  } catch (e) {
+    console.error('get_job error:', e);
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+// ─── Giữ nguyên endpoint cũ để tương thích ─────────────
 app.get('/get_job/:id', (req, res) => {
   try {
     const job = blockchain.getJob(req.params.id);
@@ -519,6 +540,7 @@ app.listen(PORT, () => {
   console.log('║  DH Exchange: /api/dh/exchange       ║');
   console.log('║  Server PubKey: /api/server/public-key║');
   console.log('║  Backup Nodes: /api/backup/nodes     ║');
+  console.log('║  NEW: POST /get_job (per-worker)    ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
   backupClient.start();
