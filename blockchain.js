@@ -1,18 +1,24 @@
-// blockchain.js - PoW + PoS hybrid (cleaned + no expiry + auto cleanup + dynamic difficulty)
+// blockchain.js - PoW + PoS hybrid + dynamic difficulty + per-worker job assignment
 const crypto = require('crypto');
 const db = require('./db');
 
-// Kết nối DB nội bộ
 const Database = require('better-sqlite3');
 const path = require('path');
 const sqlite = new Database(path.join(__dirname, 'chocohub.db'));
 sqlite.pragma('journal_mode = WAL');
 
+// Đảm bảo bảng bounties có cột worker_name (cho per-worker job)
+try {
+  sqlite.exec(`ALTER TABLE bounties ADD COLUMN worker_name TEXT DEFAULT NULL`);
+} catch (e) {
+  // Cột đã tồn tại hoặc lỗi khác, bỏ qua
+}
+
 // ═══════════════════════════════════════════════════
 // CẤU HÌNH ĐỘ KHÓ TỰ ĐỘNG (Dynamic Difficulty)
 // ═══════════════════════════════════════════════════
 const BLOCK_TIME_TARGET = 30;           // Thời gian mục tiêu giữa 2 block PoW (giây)
-const DIFFICULTY_ADJUST_INTERVAL = 5;   // Số block giải được trước khi điều chỉnh độ khó
+const DIFFICULTY_ADJUST_INTERVAL = 5;   // Số block giải được trước khi điều chỉnh độ khó toàn mạng
 const MIN_DIFFICULTY = 4;              // Độ khó thấp nhất (bits)
 const MAX_DIFFICULTY = 20;             // Độ khó cao nhất (bits)
 const MAX_DIFFICULTY_CHANGE = 0.5;     // Tối đa thay đổi 50% mỗi lần điều chỉnh
@@ -22,8 +28,11 @@ let blockSolveCount = 0;
 let recentBlockTimes = [];              // Lưu thời gian (giây) của các block gần đây
 let lastBlockTimestamp = Date.now();    // Thời điểm block cuối cùng được giải
 
+// Map lưu thời điểm giao job cho từng worker (để tính thời gian giải)
+const jobAssignTime = new Map(); // key: workerName, value: timestamp (ms)
+
 // ═══════════════════════════════════════════════════
-// AUTO-BOUNTY: Server tạo block miễn phí (PoW)
+// AUTO-BOUNTY: Server tạo block miễn phí (PoW) – bounty chung (worker_name = NULL)
 // ═══════════════════════════════════════════════════
 const AUTO_BOUNTY_MIN = 0.0001;
 const AUTO_BOUNTY_MAX = 0.01;
@@ -32,7 +41,6 @@ const MAX_ACTIVE_BOUNTIES = 100;
 const AUTO_BOUNTY_INTERVAL = 1000;        // 1 giây
 
 function createAutoBounty() {
-  // Sử dụng độ khó động với một chút ngẫu nhiên ±2 để đa dạng
   const variation = Math.floor(Math.random() * 5) - 2; // -2..+2
   let difficulty = currentDifficulty + variation;
   difficulty = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, difficulty));
@@ -44,14 +52,13 @@ function createAutoBounty() {
   const lastHash = crypto.randomBytes(32).toString('hex');
   
   sqlite.prepare(`
-    INSERT INTO bounties (id, creator_username, target_device, difficulty, reward, cost, binary_target, last_hash, status)
-    VALUES (?, ?, ?, ?, ?, 0, ?, ?, 'active')
+    INSERT INTO bounties (id, creator_username, target_device, difficulty, reward, cost, binary_target, last_hash, status, worker_name)
+    VALUES (?, ?, ?, ?, ?, 0, ?, ?, 'active', NULL)
   `).run(bountyId, 'server', 'all', difficulty, reward, binaryTarget, lastHash);
   
   // console.log(`🤖 Auto-bounty: #${bountyId.substring(0,12)} | ${difficulty}bits | ${reward} CC`);
 }
 
-// 🆕 Dọn dẹp bounty cũ nếu vượt quá MAX_ACTIVE_BOUNTIES
 function cleanupOldBounties() {
   try {
     const activeCount = sqlite.prepare(
@@ -154,16 +161,14 @@ function startPoSMinting() {
 }
 
 // ═══════════════════════════════════════════════════
-// CƠ CHẾ TỰ ĐỘNG ĐIỀU CHỈNH ĐỘ KHÓ (Dynamic Difficulty)
+// CƠ CHẾ TỰ ĐỘNG ĐIỀU CHỈNH ĐỘ KHÓ TOÀN MẠNG (Global)
 // ═══════════════════════════════════════════════════
 function adjustDifficulty() {
   const now = Date.now();
   const timeSinceLastBlock = (now - lastBlockTimestamp) / 1000; // giây
   lastBlockTimestamp = now;
 
-  // Bỏ qua nếu thời gian bất thường (có thể server vừa khởi động)
   if (timeSinceLastBlock > 3600) {
-    // Nếu hơn 1 giờ, coi như bắt đầu lại
     recentBlockTimes = [];
     blockSolveCount = 0;
     return;
@@ -172,21 +177,16 @@ function adjustDifficulty() {
   blockSolveCount++;
   recentBlockTimes.push(timeSinceLastBlock);
 
-  // Chỉ điều chỉnh sau khi đủ số block quy định
   if (blockSolveCount < DIFFICULTY_ADJUST_INTERVAL) return;
 
-  // Tính thời gian trung bình
   const avgTime = recentBlockTimes.reduce((a, b) => a + b, 0) / recentBlockTimes.length;
 
-  // Công thức điều chỉnh: Difficulty mới = Difficulty hiện tại * (Thời gian mục tiêu / Thời gian thực tế)
   let newDifficulty = currentDifficulty * (BLOCK_TIME_TARGET / avgTime);
 
-  // Giới hạn mức thay đổi không quá MAX_DIFFICULTY_CHANGE (50%)
   const minChange = currentDifficulty * (1 - MAX_DIFFICULTY_CHANGE);
   const maxChange = currentDifficulty * (1 + MAX_DIFFICULTY_CHANGE);
   newDifficulty = Math.max(minChange, Math.min(maxChange, newDifficulty));
 
-  // Làm tròn và giới hạn trong khoảng cho phép
   newDifficulty = Math.round(newDifficulty);
   newDifficulty = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, newDifficulty));
 
@@ -195,13 +195,28 @@ function adjustDifficulty() {
     currentDifficulty = newDifficulty;
   }
 
-  // Reset bộ đếm
   blockSolveCount = 0;
   recentBlockTimes = [];
 }
 
 // ═══════════════════════════════════════════════════
-// BOUNTY MANAGEMENT (PoW)
+// PER-WORKER DIFFICULTY ADJUSTMENT
+// ═══════════════════════════════════════════════════
+function adjustWorkerDifficulty(workerName, solveTime) {
+  const currentWorkerDiff = db.getWorkerDifficulty(workerName) || currentDifficulty;
+  const targetTime = BLOCK_TIME_TARGET; // 30 giây mục tiêu
+
+  let newDiff = currentWorkerDiff * (targetTime / solveTime);
+  // Giới hạn thay đổi 50%
+  newDiff = Math.max(currentWorkerDiff * 0.5, Math.min(currentWorkerDiff * 1.5, newDiff));
+  newDiff = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, Math.round(newDiff)));
+
+  db.setWorkerDifficulty(workerName, newDiff, Date.now());
+  console.log(`👷 Worker ${workerName}: difficulty ${currentWorkerDiff} → ${newDiff} (solve time ${solveTime.toFixed(1)}s)`);
+}
+
+// ═══════════════════════════════════════════════════
+// BOUNTY MANAGEMENT (PoW) + PER-WORKER JOB
 // ═══════════════════════════════════════════════════
 
 function getActiveBounties() {
@@ -239,12 +254,59 @@ function getJob(bountyId) {
   };
 }
 
+/**
+ * Lấy hoặc tạo job phù hợp cho một worker cụ thể.
+ * @param {string} workerName 
+ * @returns {object|null} job data
+ */
+function getJobForWorker(workerName) {
+  // 1. Tìm bounty riêng đang active của worker này
+  let bounty = sqlite.prepare(
+    "SELECT * FROM bounties WHERE worker_name = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1"
+  ).get(workerName);
+
+  if (!bounty) {
+    // 2. Nếu chưa có, tạo bounty mới với difficulty phù hợp
+    let difficulty = db.getWorkerDifficulty(workerName);
+    if (!difficulty) {
+      difficulty = currentDifficulty; // lần đầu dùng difficulty chung
+    }
+
+    const bountyId = 'wrk_' + crypto.randomBytes(6).toString('hex');
+    const binaryTarget = '0'.repeat(difficulty);
+    const lastHash = crypto.randomBytes(32).toString('hex');
+    const reward = parseFloat((AUTO_BOUNTY_MIN + Math.random() * (AUTO_BOUNTY_MAX - AUTO_BOUNTY_MIN)).toFixed(3));
+
+    sqlite.prepare(`
+      INSERT INTO bounties (id, creator_username, target_device, difficulty, reward, cost, binary_target, last_hash, status, worker_name)
+      VALUES (?, 'server', 'all', ?, ?, 0, ?, ?, 'active', ?)
+    `).run(bountyId, difficulty, reward, binaryTarget, lastHash, workerName);
+
+    bounty = sqlite.prepare('SELECT * FROM bounties WHERE id = ?').get(bountyId);
+  }
+
+  // Ghi nhận thời điểm giao job để sau này tính thời gian giải
+  jobAssignTime.set(workerName, Date.now());
+
+  return {
+    last_hash: bounty.last_hash,
+    target_bin: bounty.binary_target,
+    difficulty_bits: bounty.difficulty,
+    bounty_id: bounty.id
+  };
+}
+
 function submitSolution(bountyId, nonce, workerName, deviceType) {
   const bounty = sqlite.prepare(
     'SELECT * FROM bounties WHERE id=? AND status=?'
   ).get(bountyId, 'active');
 
   if (!bounty) throw new Error('Bounty not found or already solved');
+
+  // Kiểm tra quyền: nếu bounty có worker_name thì phải khớp với workerName
+  if (bounty.worker_name && bounty.worker_name !== workerName) {
+    throw new Error('This bounty is assigned to another worker');
+  }
 
   const input = bounty.last_hash + nonce + workerName;
   const hash = crypto.createHash('sha256').update(input).digest('hex');
@@ -266,10 +328,18 @@ function submitSolution(bountyId, nonce, workerName, deviceType) {
   sqlite.prepare('INSERT INTO blocks_mined (username, bounty_id, reward) VALUES (?, ?, ?)')
     .run(workerName, bountyId, reward);
 
-  // 🆕 Điều chỉnh độ khó sau mỗi block được giải
+  // Điều chỉnh difficulty toàn mạng
   adjustDifficulty();
 
-  // 🆕 Dọn dẹp sau mỗi block được giải
+  // Điều chỉnh difficulty riêng cho worker này
+  const assignTime = jobAssignTime.get(workerName);
+  if (assignTime) {
+    const solveTime = (Date.now() - assignTime) / 1000; // giây
+    adjustWorkerDifficulty(workerName, solveTime);
+    jobAssignTime.delete(workerName);
+  }
+
+  // Dọn dẹp bounty cũ
   cleanupOldBounties();
 
   return { 
@@ -283,10 +353,11 @@ function hexToBinary(hex) {
   return hex.split('').map(c => parseInt(c, 16).toString(2).padStart(4, '0')).join('');
 }
 
-// 🆕 Xuất thêm biến currentDifficulty để dashboard có thể hiển thị
+// ─── Exports ─────────────────────────────────────
 module.exports = { 
   getActiveBounties, 
-  getJob, 
+  getJob,
+  getJobForWorker,     // 🆕 Per-worker job
   submitSolution,
   startAutoBounty,
   checkAndRefillBounties,
