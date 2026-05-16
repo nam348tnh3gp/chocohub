@@ -17,10 +17,10 @@ try {
 // ═══════════════════════════════════════════════════
 // CẤU HÌNH ĐỘ KHÓ TỰ ĐỘNG (Dynamic Difficulty)
 // ═══════════════════════════════════════════════════
-const BLOCK_TIME_TARGET = 30;           // Thời gian mục tiêu giữa 2 block PoW (giây)
+const BLOCK_TIME_TARGET = 10;           // Thời gian mục tiêu giữa 2 block PoW (giây)
 const DIFFICULTY_ADJUST_INTERVAL = 5;   // Số block giải được trước khi điều chỉnh độ khó toàn mạng
 const MIN_DIFFICULTY = 4;              // Độ khó thấp nhất (bits)
-const MAX_DIFFICULTY = 20;             // Độ khó cao nhất (bits)
+const MAX_DIFFICULTY = 30;             // Độ khó cao nhất (bits)
 const MAX_DIFFICULTY_CHANGE = 0.5;     // Tối đa thay đổi 50% mỗi lần điều chỉnh
 
 let currentDifficulty = 10;             // Độ khó khởi điểm
@@ -38,7 +38,7 @@ const AUTO_BOUNTY_MIN = 0.0001;
 const AUTO_BOUNTY_MAX = 0.01;
 const MIN_ACTIVE_BOUNTIES = 30;
 const MAX_ACTIVE_BOUNTIES = 100;
-const AUTO_BOUNTY_INTERVAL = 1000;        // 1 giây
+const AUTO_BOUNTY_INTERVAL = 3000;        // 3 giây
 
 function createAutoBounty() {
   const variation = Math.floor(Math.random() * 5) - 2; // -2..+2
