@@ -1,5 +1,5 @@
 // db.js – Full fix + PoS Staking + Leaderboard + Backup full snapshot + Transactions
-// 🆕 Giới hạn 10 blocks gần nhất trong snapshot
+// 🆕 Thêm bảng worker_difficulty cho per-worker dynamic difficulty
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -65,6 +65,14 @@ db.exec(`
     amount REAL NOT NULL,
     created_at TEXT DEFAULT (datetime('now'))
   );
+
+  -- 🆕 Bảng lưu difficulty riêng cho từng worker
+  CREATE TABLE IF NOT EXISTS worker_difficulty (
+    worker_name TEXT PRIMARY KEY,
+    difficulty REAL NOT NULL DEFAULT 10,
+    last_solve_time INTEGER DEFAULT 0,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 console.log('✅ Database ready (better-sqlite3)');
@@ -110,7 +118,6 @@ function getTransactions(username, limit = 20) {
 }
 
 // ─── Blocks & Miners ─────────────────────────────
-// 🆕 Giới hạn 10 blocks gần nhất
 function getRecentBlocks(limit = 10) {
   return db.prepare('SELECT bounty_id as id, username, reward FROM blocks_mined ORDER BY mined_at DESC LIMIT ?').all(limit);
 }
@@ -221,7 +228,6 @@ function exportFullState() {
   const users = db.prepare('SELECT username, pin_hash, balance FROM users').all();
   const stakes = db.prepare('SELECT username, amount, pending_reward FROM stakes').all();
   
-  // 🆕 CHỈ 10 blocks gần nhất
   const blocks = db.prepare(
     'SELECT username, bounty_id, reward, mined_at FROM blocks_mined ORDER BY mined_at DESC LIMIT 10'
   ).all();
@@ -230,7 +236,6 @@ function exportFullState() {
     'SELECT username, apples, mode, reward, claimed_at FROM snake_claims ORDER BY claimed_at DESC LIMIT 20'
   ).all();
   
-  // 🆕 CHỈ 10 bounties active gần nhất
   const bounties = db.prepare(
     'SELECT id, creator_username, target_device, difficulty, reward, cost, binary_target, last_hash, nonce, solver_username, status, created_at FROM bounties WHERE status = ? ORDER BY created_at DESC LIMIT 10'
   ).all('active');
@@ -284,11 +289,25 @@ function importFullState(state) {
   });
 
   transaction();
-  
-  // 🆕 Dọn dẹp bounty cũ sau khi import
   cleanupOldBounties();
-  
   return true;
+}
+
+// 🆕 Quản lý difficulty riêng cho từng worker
+function getWorkerDifficulty(workerName) {
+  const row = db.prepare('SELECT difficulty FROM worker_difficulty WHERE worker_name = ?').get(workerName);
+  return row ? row.difficulty : null;
+}
+
+function setWorkerDifficulty(workerName, difficulty, lastSolveTime) {
+  db.prepare(`
+    INSERT INTO worker_difficulty (worker_name, difficulty, last_solve_time, updated_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT(worker_name) DO UPDATE SET
+      difficulty = excluded.difficulty,
+      last_solve_time = excluded.last_solve_time,
+      updated_at = datetime('now')
+  `).run(workerName, difficulty, lastSolveTime);
 }
 
 // ─── Exports ─────────────────────────────────────
@@ -314,5 +333,8 @@ module.exports = {
   importFullState,
   addTransaction,
   getTransactions,
-  cleanupOldBounties   // 🆕 Export để gọi định kỳ
+  cleanupOldBounties,
+  // 🆕 Per-worker difficulty
+  getWorkerDifficulty,
+  setWorkerDifficulty
 };
