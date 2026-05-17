@@ -1,9 +1,10 @@
-// cpu.js - TURBO SHA-256 MINER (Ultra Performance)
+// cpu.js - TURBO SHA-256 MINER (Ultra Performance) – hỗ trợ target_hex (difficulty float)
 (function() {
 'use strict';
 
 let running = false;
 let bountyId = '';
+let targetHex = ''; // thay thế targetBin
 
 // ==================== PRE-COMPUTED DATA ====================
 const K = new Uint32Array([
@@ -22,7 +23,7 @@ for (let i = 0; i < 256; i++) {
     HEX[i] = (i >> 4).toString(16) + (i & 15).toString(16);
 }
 
-// ==================== ULTRA-FAST SHA-256 ====================
+// ==================== FAST SHA-256 ====================
 function sha256(msg, msgLen) {
     const H = new Uint32Array(8);
     H[0] = 0x6a09e667; H[1] = 0xbb67ae85;
@@ -33,10 +34,8 @@ function sha256(msg, msgLen) {
     const W = new Uint32Array(64);
     const len = msgLen;
     
-    // Process full 64-byte blocks
     let off = 0;
     while (len - off >= 64) {
-        // Load 16 words from message (big-endian)
         for (let t = 0; t < 16; t++) {
             const idx = off + t * 4;
             W[t] = (msg[idx] << 24) | (msg[idx+1] << 16) | (msg[idx+2] << 8) | msg[idx+3];
@@ -51,7 +50,6 @@ function sha256(msg, msgLen) {
         let a = H[0], b = H[1], c = H[2], d = H[3],
             e = H[4], f = H[5], g = H[6], h = H[7];
 
-        // UNROLLED SHA-256 COMPRESSION (64 rounds inline)
         for (let t = 0; t < 64; t += 8) {
             // Round t
             let S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
@@ -141,7 +139,6 @@ function sha256(msg, msgLen) {
         off += 64;
     }
 
-    // Output
     const hash = new Uint8Array(32);
     for (let i = 0; i < 8; i++) {
         const s = H[i];
@@ -155,46 +152,40 @@ function sha256(msg, msgLen) {
 
 // ==================== MINING CORE ====================
 let inputBuffer;
-let lastHashStr, usernameStr, targetBin;
+let lastHashStr, usernameStr;
 let prefixBytes, suffixBytes;
 let bufferLen;
 
-function initJob(lastHash, username, targetBinStr, bid) {
+function initJob(lastHash, username, targetHexStr, bid) {
     lastHashStr = lastHash;
     usernameStr = username;
-    targetBin = targetBinStr;
+    targetHex = targetHexStr;   // Lưu target dạng hex
     bountyId = bid;
 
-    // Pre-compute static parts
     const enc = new TextEncoder();
     prefixBytes = enc.encode(lastHash);
     suffixBytes = enc.encode(username);
     
-    // Buffer = prefix + 20 nonce digits + suffix
     bufferLen = prefixBytes.length + 20 + suffixBytes.length;
     inputBuffer = new Uint8Array(bufferLen);
     inputBuffer.set(prefixBytes, 0);
     inputBuffer.set(suffixBytes, prefixBytes.length + 20);
     
-    // Init nonce area to '0'
     const nonceStart = prefixBytes.length;
     for (let i = 0; i < 20; i++) {
         inputBuffer[nonceStart + i] = 48; // '0'
     }
 }
 
-// Ultra-fast nonce writer (no loop unless necessary)
 function writeNonce(n) {
     const buf = inputBuffer;
     let pos = prefixBytes.length + 19;
     
-    // Fast path for small numbers
     if (n < 10) {
         buf[pos] = 48 + n;
-        return pos; // Start from last digit
+        return pos;
     }
     
-    // General case
     while (n > 0 && pos >= prefixBytes.length) {
         buf[pos--] = 48 + (n % 10);
         n = (n / 10) | 0;
@@ -202,23 +193,15 @@ function writeNonce(n) {
     return pos + 1;
 }
 
-// Optimized target verification
+// ==================== TARGET VERIFICATION (HEX COMPARISON) ====================
 function meetsTarget(hashBytes) {
-    const bits = targetBin.length;
-    const bytesNeeded = (bits + 7) >> 3;
-    
-    for (let i = 0; i < bytesNeeded; i++) {
-        const b = hashBytes[i];
-        let expected = 0;
-        for (let j = 0; j < 8; j++) {
-            const bitPos = i * 8 + j;
-            if (bitPos >= bits) break;
-            if (targetBin[bitPos] === '1') expected |= (1 << (7 - j));
-        }
-        if (b < expected) return true;
-        if (b > expected) return false;
+    // Chuyển hashBytes thành chuỗi hex 64 ký tự
+    let hex = '';
+    for (let i = 0; i < 32; i++) {
+        hex += HEX[hashBytes[i]];
     }
-    return true;
+    // So sánh trực tiếp chuỗi hex
+    return hex < targetHex;
 }
 
 function formatHash(bytes) {
@@ -232,23 +215,19 @@ function formatHash(bytes) {
 // ==================== MINING LOOP ====================
 function mine() {
     let nonce = 0;
-    let batchSize = 50000; // Increased initial batch
-    const TARGET_MS = 45; // Max 45ms per batch for UI responsiveness
+    let batchSize = 50000;
+    const TARGET_MS = 45;
     
     while (running) {
         const start = performance.now();
         let hashes = 0;
         
         for (let i = 0; i < batchSize && running; i++, hashes++) {
-            // Write nonce
             const startIdx = writeNonce(nonce);
-            // Hash from startIdx (skip leading zeros)
             const msgLen = bufferLen - (startIdx - prefixBytes.length);
             
-            // Compute hash
             const hashBytes = sha256(inputBuffer.subarray(0, bufferLen), msgLen);
             
-            // Check
             if (meetsTarget(hashBytes)) {
                 const hexHash = formatHash(hashBytes);
                 self.postMessage({
@@ -263,14 +242,12 @@ function mine() {
             nonce++;
         }
         
-        // Report progress
         self.postMessage({
             type: 'progress',
             nonce: nonce,
             hashes: hashes
         });
         
-        // Adaptive batch sizing
         const elapsed = performance.now() - start;
         if (elapsed > TARGET_MS && batchSize > 5000) {
             batchSize = Math.max(5000, Math.floor(batchSize * 0.75));
@@ -278,7 +255,6 @@ function mine() {
             batchSize = Math.min(500000, Math.floor(batchSize * 1.5));
         }
         
-        // Yield to browser
         if (running) {
             setTimeout(mine, 0);
             return;
@@ -291,7 +267,8 @@ self.onmessage = function(e) {
     switch(e.data.type) {
         case 'start':
             if (!running) {
-                initJob(e.data.last_hash, e.data.username, e.data.target_bin, e.data.bounty_id);
+                // Nhận target_hex thay vì target_bin
+                initJob(e.data.last_hash, e.data.username, e.data.target_hex, e.data.bounty_id);
                 running = true;
                 setTimeout(mine, 0);
             }
