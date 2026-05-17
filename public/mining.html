@@ -130,16 +130,20 @@
 <script>
 const API = window.location.origin;
 
-// Lấy worker name duy nhất từ localStorage, nếu chưa có thì tạo mới
+// Lấy username từ localStorage (đã lưu sau khi đăng nhập)
 function getWorkerName() {
-    let name = localStorage.getItem('choco_worker_name');
-    if (!name) {
-        name = 'web-' + Math.random().toString(36).substr(2, 9);
-        localStorage.setItem('choco_worker_name', name);
+    let username = localStorage.getItem('choco_username');
+    if (!username) {
+        alert('Vui lòng đăng nhập trước khi đào.');
+        window.location.href = '/';
+        return null;
     }
-    return name;
+    return username;
 }
 const workerName = getWorkerName();
+if (!workerName) {
+    throw new Error('Chưa đăng nhập');
+}
 
 // Web Worker cho cpu.js
 const worker = new Worker('/static/js/cpu.js');
@@ -231,7 +235,6 @@ async function startMiningWithJob(job) {
     // Hiển thị thông tin job (bao gồm reward từ server)
     document.getElementById('current-block-id').textContent = '#' + job.bounty_id.substring(0, 12) + '...';
     document.getElementById('current-block-diff').textContent = (job.difficulty || '?').toString();
-    // SỬA: hiển thị reward từ job thay vì "? CC"
     const rewardValue = (job.reward !== undefined && job.reward !== null) ? job.reward.toFixed(4) : '?';
     document.getElementById('current-block-reward').textContent = rewardValue + ' CC';
     
