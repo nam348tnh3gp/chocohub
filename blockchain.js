@@ -16,10 +16,10 @@ try {
 // CẤU HÌNH ĐỘ KHÓ (FLOAT)
 // ═══════════════════════════════════════════════════
 const BLOCK_TIME_TARGET = 10;            // Thời gian mục tiêu cho mỗi worker (giây)
-const DEFAULT_DIFFICULTY = 1;        // Độ khó mặc định cho worker mới
+const DEFAULT_DIFFICULTY = 1;            // Độ khó mặc định cho worker mới
 const MIN_DIFFICULTY = 1.0;
 const MAX_DIFFICULTY = 100.0;
-const MAX_DIFFICULTY_CHANGE = 0.25;     // Tối đa thay đổi 25% mỗi lần (rất ổn định)
+const MAX_DIFFICULTY_CHANGE = 0.25;      // Tối đa thay đổi 25% mỗi lần
 
 // Map lưu thời điểm giao job
 const jobAssignTime = new Map();
@@ -39,19 +39,17 @@ const AUTO_BOUNTY_INTERVAL = 3000;
  */
 function difficultyToTarget(difficulty) {
     const maxTarget = (1n << 256n) - 1n;
-    const scale = 1000n;
     const diffScaled = BigInt(Math.floor(difficulty * 1000));
-    if (diffScaled === 0n) return 'f'.repeat(64); // dễ nhất nếu difficulty = 0
+    if (diffScaled === 0n) return 'f'.repeat(64);
     const targetValue = maxTarget / diffScaled;
     return targetValue.toString(16).padStart(64, '0');
 }
 
 function createAutoBounty() {
-  // difficulty ngẫu nhiên xung quanh DEFAULT_DIFFICULTY (±20%)
-  const variation = (Math.random() - 0.5) * 0.4; // -0.2 .. +0.2
+  const variation = (Math.random() - 0.5) * 0.4;
   let difficulty = DEFAULT_DIFFICULTY * (1 + variation);
   difficulty = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, difficulty));
-  difficulty = Math.round(difficulty * 10) / 10; // làm tròn 1 chữ số thập phân
+  difficulty = Math.round(difficulty * 10) / 10;
 
   const reward = parseFloat((AUTO_BOUNTY_MIN + Math.random() * (AUTO_BOUNTY_MAX - AUTO_BOUNTY_MIN)).toFixed(3));
   const bountyId = 'auto_' + crypto.randomBytes(6).toString('hex');
@@ -94,7 +92,7 @@ function startAutoBounty() {
 }
 
 // ═══════════════════════════════════════════════════
-// PoS (giữ nguyên)
+// PoS
 // ═══════════════════════════════════════════════════
 const POS_BLOCK_INTERVAL = 30000;
 const MIN_STAKE = 10;
@@ -138,14 +136,12 @@ function adjustWorkerDifficulty(workerName, solveTime) {
   const currentDiff = db.getWorkerDifficulty(workerName) || DEFAULT_DIFFICULTY;
   const targetTime = BLOCK_TIME_TARGET;
 
-  // Tính difficulty lý tưởng
   let idealDiff = currentDiff * (targetTime / solveTime);
-  // Giới hạn thay đổi MAX_DIFFICULTY_CHANGE và làm mịn (chỉ điều chỉnh 50% chênh lệch)
   let newDiff = currentDiff + (idealDiff - currentDiff) * 0.5;
   const maxChange = currentDiff * MAX_DIFFICULTY_CHANGE;
   newDiff = Math.max(currentDiff - maxChange, Math.min(currentDiff + maxChange, newDiff));
   newDiff = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, newDiff));
-  newDiff = Math.round(newDiff * 10) / 10; // làm tròn 1 chữ số thập phân
+  newDiff = Math.round(newDiff * 10) / 10;
 
   db.setWorkerDifficulty(workerName, newDiff, Date.now());
   console.log(`👷 Worker ${workerName}: difficulty ${currentDiff.toFixed(1)} → ${newDiff.toFixed(1)} (solve time ${solveTime.toFixed(1)}s)`);
@@ -162,9 +158,9 @@ function getActiveBounties() {
       id: r.id,
       creator: r.creator_username,
       target_device: r.target_device,
-      difficulty: r.difficulty,       // float
+      difficulty: r.difficulty,
       reward: r.reward,
-      target_hex: r.binary_target,    // trường binary_target lưu target hex
+      target_hex: r.binary_target,
       last_hash: r.last_hash
     };
   });
@@ -178,7 +174,8 @@ function getJob(bountyId) {
     last_hash: bounty.last_hash,
     target_hex: bounty.binary_target,
     difficulty: bounty.difficulty,
-    bounty_id: bounty.id
+    bounty_id: bounty.id,
+    reward: bounty.reward
   };
 }
 
@@ -205,7 +202,8 @@ function getJobForWorker(workerName) {
     last_hash: bounty.last_hash,
     target_hex: bounty.binary_target,
     difficulty: bounty.difficulty,
-    bounty_id: bounty.id
+    bounty_id: bounty.id,
+    reward: bounty.reward
   };
 }
 
@@ -217,7 +215,6 @@ function submitSolution(bountyId, nonce, workerName, deviceType) {
   const input = bounty.last_hash + nonce + workerName;
   const hashHex = crypto.createHash('sha256').update(input).digest('hex');
 
-  // So sánh hash với target_hex (cả hai đều là chuỗi hex 64 ký tự)
   if (hashHex >= bounty.binary_target) {
     return { status: 'error', reason: `Invalid nonce: hash ${hashHex.substring(0, 12)}... >= target` };
   }
