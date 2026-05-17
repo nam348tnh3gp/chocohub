@@ -228,10 +228,12 @@ async function startMiningWithJob(job) {
     currentJob = job;
     currentBountyId = job.bounty_id;
     
-    // Hiển thị thông tin job
+    // Hiển thị thông tin job (bao gồm reward từ server)
     document.getElementById('current-block-id').textContent = '#' + job.bounty_id.substring(0, 12) + '...';
     document.getElementById('current-block-diff').textContent = (job.difficulty || '?').toString();
-    document.getElementById('current-block-reward').textContent = '? CC'; // reward có thể lấy từ job nếu server trả về
+    // SỬA: hiển thị reward từ job thay vì "? CC"
+    const rewardValue = (job.reward !== undefined && job.reward !== null) ? job.reward.toFixed(4) : '?';
+    document.getElementById('current-block-reward').textContent = rewardValue + ' CC';
     
     document.getElementById('job-card').classList.add('mining');
     
@@ -252,7 +254,7 @@ async function startMiningWithJob(job) {
     document.getElementById('btn-start').disabled = false;
     document.getElementById('btn-stop').disabled = false;
     
-    log('Mining #' + job.bounty_id.substring(0,10) + '... (diff: ' + job.difficulty + ')', 'log-info');
+    log('Mining #' + job.bounty_id.substring(0,10) + '... (diff: ' + job.difficulty + ', reward: ' + rewardValue + ' CC)', 'log-info');
     return true;
 }
 
