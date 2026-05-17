@@ -1,170 +1,123 @@
-// cpu.js – SHA-256 chính xác (có padding) + so sánh target hex
+// cpu.js – Web Crypto SHA-256 (tối ưu tốc độ cao)
 (function() {
-'use strict';
+    'use strict';
 
-let running = false;
-let bountyId = '';
-let targetHex = '';
-let lastHashStr, usernameStr;
-let prefixBytes, suffixBytes;
-let nonceBytes = new Uint8Array(20); // nonce dạng ASCII decimal (20 chữ số)
-let miningNonce = 0;
+    let running = false;
+    let bountyId = '';
+    let targetHex = '';
+    let lastHashBytes = null;
+    let suffixBytes = null;
+    let nonceBytes = new Uint8Array(20);   // nonce dạng ASCII (20 chữ số)
+    let miningNonce = 0;
 
-// Bảng K của SHA-256
-const K = new Uint32Array([
-    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-    0xe49b69c1,0xefbe4786,0xfc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x6ca6351,0x14292967,
-    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
-]);
-
-// Hàm SHA-256 chuẩn (xử lý padding)
-function sha256(message) {
-    const H = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-                               0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
-    const ml = message.length;
-    const newLen = ((ml + 8 + 63) >> 6) << 6; // bội số của 64
-    const buf = new Uint8Array(newLen);
-    buf.set(message);
-    buf[ml] = 0x80; // bit '1'
-    const bitLen = ml * 8;
-    const view = new DataView(buf.buffer);
-    view.setUint32(newLen - 4, bitLen >>> 0, false); // độ dài 64-bit (4 byte cuối)
-    // (4 byte đầu của phần độ dài 64-bit để mặc định 0)
-
-    const W = new Uint32Array(64);
-    for (let offset = 0; offset < newLen; offset += 64) {
-        for (let t = 0; t < 16; t++) {
-            const i = offset + t * 4;
-            W[t] = (buf[i] << 24) | (buf[i+1] << 16) | (buf[i+2] << 8) | buf[i+3];
-        }
-        for (let t = 16; t < 64; t++) {
-            const w15 = W[t-15], w2 = W[t-2];
-            const s0 = ((w15 >>> 7) | (w15 << 25)) ^ ((w15 >>> 18) | (w15 << 14)) ^ (w15 >>> 3);
-            const s1 = ((w2 >>> 17) | (w2 << 15)) ^ ((w2 >>> 19) | (w2 << 13)) ^ (w2 >>> 10);
-            W[t] = (W[t-16] + s0 + W[t-7] + s1) | 0;
-        }
-
-        let a = H[0], b = H[1], c = H[2], d = H[3];
-        let e = H[4], f = H[5], g = H[6], h = H[7];
-
-        for (let t = 0; t < 64; t++) {
-            const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
-            const ch = (e & f) ^ (~e & g);
-            const temp1 = (h + S1 + ch + K[t] + W[t]) | 0;
-            const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
-            const maj = (a & b) ^ (a & c) ^ (b & c);
-            const temp2 = (S0 + maj) | 0;
-            h = g; g = f; f = e; e = (d + temp1) | 0;
-            d = c; c = b; b = a; a = (temp1 + temp2) | 0;
-        }
-
-        H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0;
-        H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
-        H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0;
-        H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    // Chuyển buffer thành hex
+    function bufToHex(buffer) {
+        return Array.from(new Uint8Array(buffer))
+            .map(b => (b < 16 ? '0' : '') + b.toString(16))
+            .join('');
     }
 
-    const hash = new Uint8Array(32);
-    for (let i = 0; i < 8; i++) {
-        hash[i*4]   = (H[i] >>> 24) & 0xff;
-        hash[i*4+1] = (H[i] >>> 16) & 0xff;
-        hash[i*4+2] = (H[i] >>> 8) & 0xff;
-        hash[i*4+3] = H[i] & 0xff;
+    // Băm một nonce (dùng Web Crypto – hardware acceleration)
+    async function hashNonce(nonce) {
+        // Ghi nonce dạng thập phân, 20 chữ số, căn phải
+        const s = nonce.toString();
+        const len = s.length;
+        const start = 20 - len;
+        for (let i = 0; i < len; i++) nonceBytes[start + i] = s.charCodeAt(i);
+        for (let i = 0; i < start; i++) nonceBytes[i] = 48;
+
+        // Tạo buffer đầu vào: last_hash (32 byte) + nonce (20 byte) + worker_name
+        const total = lastHashBytes.length + 20 + suffixBytes.length;
+        const input = new Uint8Array(total);
+        input.set(lastHashBytes, 0);
+        input.set(nonceBytes, lastHashBytes.length);
+        input.set(suffixBytes, lastHashBytes.length + 20);
+
+        const hashBuffer = await crypto.subtle.digest('SHA-256', input);
+        const hashHex = bufToHex(hashBuffer);
+        return { nonce, hashHex };
     }
-    return hash;
-}
 
-// Ghi nonce (số) dạng thập phân vào mảng nonceBytes (20 ký tự, căn phải)
-function writeNonce(nonce) {
-    const s = nonce.toString();
-    const len = s.length;
-    const start = 20 - len;
-    for (let i = 0; i < len; i++) {
-        nonceBytes[start + i] = s.charCodeAt(i);
-    }
-    for (let i = 0; i < start; i++) nonceBytes[i] = 48; // '0'
-    return start;
-}
+    let batchSize = 500;          // số nonce mỗi lần chạy
+    let hashesSinceReport = 0;
 
-// Tạo buffer đầu vào: last_hash + nonce (20 byte) + worker_name
-function buildInput() {
-    const total = prefixBytes.length + 20 + suffixBytes.length;
-    const input = new Uint8Array(total);
-    input.set(prefixBytes, 0);
-    input.set(nonceBytes, prefixBytes.length);
-    input.set(suffixBytes, prefixBytes.length + 20);
-    return input;
-}
+    async function mineLoop() {
+        if (!running) return;
+        const startTime = performance.now();
+        let found = false;
+        let foundNonce = null;
+        let foundHash = null;
 
-// Kiểm tra hash có thoả mãn target (so sánh chuỗi hex)
-function meetsTarget(hashBytes) {
-    let hex = '';
-    for (let i = 0; i < 32; i++) {
-        const b = hashBytes[i];
-        hex += (b < 16 ? '0' : '') + b.toString(16);
-    }
-    return hex < targetHex;
-}
-
-// Vòng lặp đào (chạy bất đồng bộ, không block)
-function mine() {
-    if (!running) return;
-    writeNonce(miningNonce);
-    const input = buildInput();
-    const hash = sha256(input);
-    if (meetsTarget(hash)) {
-        self.postMessage({
-            type: 'found',
-            nonce: miningNonce,
-            hash: Array.from(hash).map(b => (b < 16 ? '0' : '') + b.toString(16)).join(''),
-            bounty_id: bountyId
-        });
-        running = false;
-        return;
-    }
-    miningNonce++;
-    if (miningNonce % 5000 === 0) {
-        self.postMessage({ type: 'progress', hashes: 5000 });
-    }
-    setTimeout(mine, 0);
-}
-
-// Khởi tạo job
-function initJob(lastHash, username, targetHexStr, bid) {
-    lastHashStr = lastHash;
-    usernameStr = username;
-    targetHex = targetHexStr;
-    bountyId = bid;
-    const enc = new TextEncoder();
-    prefixBytes = enc.encode(lastHashStr);
-    suffixBytes = enc.encode(usernameStr);
-    nonceBytes.fill(48); // '0'
-    miningNonce = 0;
-}
-
-// Nhận lệnh từ main thread
-self.onmessage = function(e) {
-    switch(e.data.type) {
-        case 'start':
-            if (!running) {
-                initJob(e.data.last_hash, e.data.username, e.data.target_hex, e.data.bounty_id);
-                running = true;
-                mine();
+        for (let i = 0; i < batchSize; i++) {
+            if (!running) break;
+            const { nonce, hashHex } = await hashNonce(miningNonce);
+            hashesSinceReport++;
+            if (hashHex < targetHex) {
+                found = true;
+                foundNonce = nonce;
+                foundHash = hashHex;
+                running = false;
+                break;
             }
-            break;
-        case 'stop':
-            running = false;
-            break;
-        case 'ping':
-            self.postMessage({ type: 'pong' });
-            break;
-    }
-};
+            miningNonce++;
+        }
 
-self.postMessage({ type: 'ready' });
+        const elapsed = performance.now() - startTime;
+
+        if (found) {
+            self.postMessage({
+                type: 'found',
+                nonce: foundNonce,
+                hash: foundHash,
+                bounty_id: bountyId
+            });
+            return;
+        }
+
+        // Báo cáo tiến trình mỗi 1000 hash
+        if (hashesSinceReport >= 1000) {
+            self.postMessage({ type: 'progress', hashes: hashesSinceReport });
+            hashesSinceReport = 0;
+        }
+
+        // Điều chỉnh batch size để mỗi lần chạy ~30ms
+        if (elapsed < 20 && batchSize < 2000) batchSize = Math.min(2000, batchSize * 2);
+        else if (elapsed > 50 && batchSize > 100) batchSize = Math.floor(batchSize / 2);
+
+        if (running) setTimeout(mineLoop, 0);
+    }
+
+    self.onmessage = function(e) {
+        switch (e.data.type) {
+            case 'start':
+                if (!running) {
+                    bountyId = e.data.bounty_id;
+                    targetHex = e.data.target_hex;
+
+                    // Chuyển last_hash từ hex (64 ký tự) sang mảng 32 byte
+                    const lastHashHex = e.data.last_hash;
+                    const bytes = new Uint8Array(32);
+                    for (let i = 0; i < 32; i++) {
+                        bytes[i] = parseInt(lastHashHex.substr(i * 2, 2), 16);
+                    }
+                    lastHashBytes = bytes;
+
+                    const enc = new TextEncoder();
+                    suffixBytes = enc.encode(e.data.username);
+                    nonceBytes.fill(48);
+                    miningNonce = 0;
+                    running = true;
+                    mineLoop();
+                }
+                break;
+            case 'stop':
+                running = false;
+                break;
+            case 'ping':
+                self.postMessage({ type: 'pong' });
+                break;
+        }
+    };
+
+    self.postMessage({ type: 'ready' });
 })();
