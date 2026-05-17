@@ -18,7 +18,7 @@ try {
 const BLOCK_TIME_TARGET = 10;            // Thời gian mục tiêu cho mỗi worker (giây)
 const DEFAULT_DIFFICULTY = 1;            // Độ khó mặc định cho worker mới
 const MIN_DIFFICULTY = 1.0;
-const MAX_DIFFICULTY = 100.0;
+const MAX_DIFFICULTY = 1000000.0;
 const MAX_DIFFICULTY_CHANGE = 0.25;      // Tối đa thay đổi 25% mỗi lần
 
 // Map lưu thời điểm giao job
