@@ -130,9 +130,9 @@
 <script>
 const API = window.location.origin;
 
-// Lấy username từ localStorage (đã lưu sau khi đăng nhập)
+// Lấy username từ localStorage với key 'choco_user'
 function getWorkerName() {
-    let username = localStorage.getItem('choco_username');
+    let username = localStorage.getItem('choco_user');
     if (!username) {
         alert('Vui lòng đăng nhập trước khi đào.');
         window.location.href = '/';
