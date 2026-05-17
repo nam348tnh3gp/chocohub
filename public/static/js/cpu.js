@@ -1,4 +1,4 @@
-// cpu.js – SHA‑256 chính xác với padding + so sánh target hex
+// cpu.js – SHA-256 chính xác (có padding) + so sánh target hex
 (function() {
 'use strict';
 
@@ -6,11 +6,11 @@ let running = false;
 let bountyId = '';
 let targetHex = '';
 let lastHashStr, usernameStr;
-let nonceBytes = new Uint8Array(20);  // lưu nonce dạng ASCII decimal
 let prefixBytes, suffixBytes;
-let totalLen = 0;
+let nonceBytes = new Uint8Array(20); // nonce dạng ASCII decimal (20 chữ số)
+let miningNonce = 0;
 
-// Bảng K của SHA‑256
+// Bảng K của SHA-256
 const K = new Uint32Array([
     0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
     0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
@@ -22,20 +22,19 @@ const K = new Uint32Array([
     0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
 ]);
 
-// Hàm SHA‑256 chuẩn (hỗ trợ padding)
+// Hàm SHA-256 chuẩn (xử lý padding)
 function sha256(message) {
-    // message là Uint8Array
     const H = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
                                0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
     const ml = message.length;
-    const newLen = ((ml + 8 + 63) >> 6) << 6; // độ dài sau padding (bội 64)
+    const newLen = ((ml + 8 + 63) >> 6) << 6; // bội số của 64
     const buf = new Uint8Array(newLen);
     buf.set(message);
-    buf[ml] = 0x80; // bit 1
+    buf[ml] = 0x80; // bit '1'
     const bitLen = ml * 8;
     const view = new DataView(buf.buffer);
-    view.setUint32(newLen - 4, bitLen >>> 0, false); // độ dài 64-bit (big-endian)
-    // 4 byte trên không cần set nếu newLen-4..newLen-1
+    view.setUint32(newLen - 4, bitLen >>> 0, false); // độ dài 64-bit (4 byte cuối)
+    // (4 byte đầu của phần độ dài 64-bit để mặc định 0)
 
     const W = new Uint32Array(64);
     for (let offset = 0; offset < newLen; offset += 64) {
@@ -80,7 +79,7 @@ function sha256(message) {
     return hash;
 }
 
-// Chuyển nonce (số) thành ASCII decimal và ghi vào mảng nonceBytes (20 byte, bên phải)
+// Ghi nonce (số) dạng thập phân vào mảng nonceBytes (20 ký tự, căn phải)
 function writeNonce(nonce) {
     const s = nonce.toString();
     const len = s.length;
@@ -89,11 +88,11 @@ function writeNonce(nonce) {
         nonceBytes[start + i] = s.charCodeAt(i);
     }
     for (let i = 0; i < start; i++) nonceBytes[i] = 48; // '0'
-    return start; // vị trí bắt đầu của nonce trong mảng
+    return start;
 }
 
-// Tạo buffer đầu vào cho mỗi nonce (last_hash + nonce + workerName)
-function buildInput(nonceStartIdx) {
+// Tạo buffer đầu vào: last_hash + nonce (20 byte) + worker_name
+function buildInput() {
     const total = prefixBytes.length + 20 + suffixBytes.length;
     const input = new Uint8Array(total);
     input.set(prefixBytes, 0);
@@ -102,18 +101,21 @@ function buildInput(nonceStartIdx) {
     return input;
 }
 
-// So sánh hash hex với target hex
+// Kiểm tra hash có thoả mãn target (so sánh chuỗi hex)
 function meetsTarget(hashBytes) {
-    const hex = Array.from(hashBytes).map(b => (b < 16 ? '0' : '') + b.toString(16)).join('');
+    let hex = '';
+    for (let i = 0; i < 32; i++) {
+        const b = hashBytes[i];
+        hex += (b < 16 ? '0' : '') + b.toString(16);
+    }
     return hex < targetHex;
 }
 
-// Hàm mining chính (chạy async nhưng đồng bộ từng nonce)
-let miningNonce = 0;
+// Vòng lặp đào (chạy bất đồng bộ, không block)
 function mine() {
     if (!running) return;
-    const startPos = writeNonce(miningNonce);
-    const input = buildInput(startPos);
+    writeNonce(miningNonce);
+    const input = buildInput();
     const hash = sha256(input);
     if (meetsTarget(hash)) {
         self.postMessage({
@@ -126,11 +128,9 @@ function mine() {
         return;
     }
     miningNonce++;
-    // Thông báo tiến trình mỗi 5000 nonce
     if (miningNonce % 5000 === 0) {
         self.postMessage({ type: 'progress', hashes: 5000 });
     }
-    // Dùng setTimeout để không block event loop
     setTimeout(mine, 0);
 }
 
