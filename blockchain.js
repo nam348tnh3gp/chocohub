@@ -212,7 +212,9 @@ function submitSolution(bountyId, nonce, workerName, deviceType) {
   if (!bounty) throw new Error('Bounty not found or already solved');
   if (bounty.worker_name && bounty.worker_name !== workerName) throw new Error('This bounty is assigned to another worker');
 
-  const input = bounty.last_hash + nonce + workerName;
+  // Đệm nonce thành 20 chữ số (khớp với cách worker tạo)
+  const noncePadded = String(nonce).padStart(20, '0');
+  const input = bounty.last_hash + noncePadded + workerName;
   const hashHex = crypto.createHash('sha256').update(input).digest('hex');
 
   if (hashHex >= bounty.binary_target) {
