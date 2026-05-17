@@ -38,18 +38,12 @@ const AUTO_BOUNTY_INTERVAL = 3000;
  * target = 2^256 / difficulty, biểu diễn thành hex 64 ký tự.
  */
 function difficultyToTarget(difficulty) {
-  // max_target = 2^256 - 1
-  const maxTarget = (1n << 256n) - 1n;
-  // difficulty > 0
-  const target = maxTarget / BigInt(Math.floor(difficulty * 1000)) * 1000n; // scale để giữ độ chính xác
-  // Cách đơn giản: target = maxTarget / BigInt(difficulty * 10^? ) gây mất mát.
-  // Ta dùng phép tính với BigInt và scale 1000 để giữ 3 chữ số thập phân.
-  const scale = 1000n;
-  const diffScaled = BigInt(Math.floor(difficulty * 1000));
-  if (diffScaled === 0n) diffScaled = 1n;
-  const target = maxTarget / diffScaled;
-  // Chuyển target thành hex 64 ký tự, không có '0x'
-  return target.toString(16).padStart(64, '0');
+    const maxTarget = (1n << 256n) - 1n;
+    const scale = 1000n;
+    const diffScaled = BigInt(Math.floor(difficulty * 1000));
+    if (diffScaled === 0n) return 'f'.repeat(64); // dễ nhất nếu difficulty = 0
+    const targetValue = maxTarget / diffScaled;
+    return targetValue.toString(16).padStart(64, '0');
 }
 
 function createAutoBounty() {
@@ -146,8 +140,8 @@ function adjustWorkerDifficulty(workerName, solveTime) {
 
   // Tính difficulty lý tưởng
   let idealDiff = currentDiff * (targetTime / solveTime);
-  // Giới hạn thay đổi MAX_DIFFICULTY_CHANGE
-  let newDiff = currentDiff + (idealDiff - currentDiff) * 0.5; // làm mịn: chỉ điều chỉnh 50% chênh lệch
+  // Giới hạn thay đổi MAX_DIFFICULTY_CHANGE và làm mịn (chỉ điều chỉnh 50% chênh lệch)
+  let newDiff = currentDiff + (idealDiff - currentDiff) * 0.5;
   const maxChange = currentDiff * MAX_DIFFICULTY_CHANGE;
   newDiff = Math.max(currentDiff - maxChange, Math.min(currentDiff + maxChange, newDiff));
   newDiff = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, newDiff));
@@ -258,5 +252,5 @@ module.exports = {
   startPoSMinting,
   mintPoSBlock,
   getCurrentValidator,
-  getCurrentDifficulty: () => DEFAULT_DIFFICULTY // trả về mặc định, không còn biến động
+  getCurrentDifficulty: () => DEFAULT_DIFFICULTY
 };
