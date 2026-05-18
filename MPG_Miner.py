@@ -155,7 +155,7 @@ class ChocoMiner:
             return {
                 "id": data['bounty_id'],
                 "last_hash": data['last_hash'],
-                "target_hex": data['target_hex'],   # hex string 64 chars
+                "target_hex": data['target_hex'],
                 "difficulty": float(data.get('difficulty', 1.0)),
                 "reward": data.get('reward', '?')
             }
@@ -188,7 +188,6 @@ class ChocoMiner:
                 for _ in range(batch_size):
                     nonce_padded = str(nonce).zfill(20)
                     hash_hex = sha256(lhb + nonce_padded.encode() + worker_b).hexdigest()
-                    # So sánh hex trực tiếp (giống web worker)
                     if hash_hex < target_hex:
                         if not self.found_event.is_set() and self.stats["current_job"]["id"] == jid:
                             self.solution = (jid, nonce, hash_hex)
@@ -263,35 +262,33 @@ class ChocoMiner:
             else:
                 self.log("WARN", "No compatible GPU found. Running CPU only.")
 
-        last_jid = None
+        # Vòng lặp chính sửa lỗi: chỉ fetch job khi không có job active
         while self.running:
-            job = self.fetch_job()
-            if not job:
-                time.sleep(self.args.poll)
-                continue
-
-            if job["id"] != last_jid:
+            if self.stats["current_job"] is None:
+                job = self.fetch_job()
+                if not job:
+                    time.sleep(self.args.poll)
+                    continue
                 self.log("NET", f"New Job: {ANSI.YEL}#{job['id'][:16]}{ANSI.RST} | Diff: {job['difficulty']:.1f} | Reward: {job['reward']} CC")
                 self.found_event.clear()
                 self.solution = None
                 self.stats["current_job"] = job
-                last_jid = job["id"]
+            else:
+                self.found_event.wait(timeout=0.5)
 
-            if self.found_event.wait(timeout=1):
-                sol = self.solution
-                if sol:
-                    bid, nonce, hx = sol
-                    self.solution = None
-                    self.found_event.clear()
-                    self.log("WIN", f"Solution found! Nonce: {nonce}")
-                    resp = self.submit(bid, nonce)
-                    if resp.get("status") == "success":
-                        with self.stats_lock:
-                            self.stats["blocks_found"] += 1
-                        self.log("OK", f"Block accepted! +{resp.get('reward','?')} CC")
-                    else:
-                        self.log("WARN", f"Rejected: {resp.get('reason', resp.get('message'))}")
-                    last_jid = None
+            if self.solution and self.stats["current_job"]:
+                bid, nonce, hx = self.solution
+                self.solution = None
+                self.found_event.clear()
+                self.log("WIN", f"Solution found! Nonce: {nonce}")
+                resp = self.submit(bid, nonce)
+                if resp.get("status") == "success":
+                    with self.stats_lock:
+                        self.stats["blocks_found"] += 1
+                    self.log("OK", f"Block accepted! +{resp.get('reward','?')} CC")
+                else:
+                    self.log("WARN", f"Rejected: {resp.get('reason', resp.get('message'))}")
+                self.stats["current_job"] = None
 
     def stop(self):
         self.running = False
