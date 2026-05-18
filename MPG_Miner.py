@@ -1,4 +1,4 @@
-import hashlib, requests, time, threading, argparse, sys, os, signal, platform
+import hashlib, requests, time, threading, argparse, sys, os, signal
 from datetime import datetime
 
 DEFAULT_SERVER  = "https://chocohub-r011.onrender.com"
@@ -45,16 +45,6 @@ ICONS = {
     "DBG":  f"{ANSI.MAG}D{ANSI.RST}",
     "GPU":  f"{ANSI.GRN}G{ANSI.RST}"
 }
-
-_HEX_TO_BIN = {
-    '0':'0000','1':'0001','2':'0010','3':'0011',
-    '4':'0100','5':'0101','6':'0110','7':'0111',
-    '8':'1000','9':'1001','a':'1010','b':'1011',
-    'c':'1100','d':'1101','e':'1110','f':'1111',
-}
-
-def hex_to_bin(hex_str):
-    return ''.join(_HEX_TO_BIN[c] for c in hex_str.lower())
 
 def get_cpu_count():
     try:
@@ -165,8 +155,7 @@ class ChocoMiner:
             return {
                 "id": data['bounty_id'],
                 "last_hash": data['last_hash'],
-                "target_hex": data['target_hex'],
-                "target_bin": hex_to_bin(data['target_hex']),
+                "target_hex": data['target_hex'],   # hex string 64 chars
                 "difficulty": float(data.get('difficulty', 1.0)),
                 "reward": data.get('reward', '?')
             }
@@ -189,7 +178,7 @@ class ChocoMiner:
 
             jid = job["id"]
             lhb = job["last_hash"].encode()
-            target_bin = job["target_bin"]
+            target_hex = job["target_hex"]
 
             if jid != local_jid:
                 nonce = tid
@@ -198,11 +187,11 @@ class ChocoMiner:
             while self.running and not self.found_event.is_set() and self.stats["current_job"]["id"] == jid:
                 for _ in range(batch_size):
                     nonce_padded = str(nonce).zfill(20)
-                    hx = sha256(lhb + nonce_padded.encode() + worker_b).hexdigest()
-                    bits = ''.join(_HEX_TO_BIN[c] for c in hx)
-                    if bits.startswith(target_bin):
+                    hash_hex = sha256(lhb + nonce_padded.encode() + worker_b).hexdigest()
+                    # So sánh hex trực tiếp (giống web worker)
+                    if hash_hex < target_hex:
                         if not self.found_event.is_set() and self.stats["current_job"]["id"] == jid:
-                            self.solution = (jid, nonce, hx)
+                            self.solution = (jid, nonce, hash_hex)
                             self.found_event.set()
                         break
                     nonce += nthreads
@@ -223,17 +212,16 @@ class ChocoMiner:
                 continue
 
             lhb = job["last_hash"].encode()
-            target_bin = job["target_bin"]
+            target_hex = job["target_hex"]
             jid = job["id"]
             nonce = gid * 1_000_000
 
             while self.running and not self.found_event.is_set() and self.stats["current_job"]["id"] == jid:
                 for _ in range(gpu_batch):
                     nonce_padded = str(nonce).zfill(20)
-                    hx = sha256(lhb + nonce_padded.encode() + worker_b).hexdigest()
-                    bits = ''.join(_HEX_TO_BIN[c] for c in hx)
-                    if bits.startswith(target_bin):
-                        self.solution = (jid, nonce, hx)
+                    hash_hex = sha256(lhb + nonce_padded.encode() + worker_b).hexdigest()
+                    if hash_hex < target_hex:
+                        self.solution = (jid, nonce, hash_hex)
                         self.found_event.set()
                         break
                     nonce += 1
