@@ -6,7 +6,8 @@ DEFAULT_WORKER  = None
 DEFAULT_THREADS = None
 DEFAULT_GPU     = False
 DEFAULT_POLL    = 10
-CONFIG_FILE = "miner_config.json"  # File lưu config
+DEFAULT_REPORT_INTERVAL = 300  # 5 phút (tính bằng giây)
+CONFIG_FILE = "miner_config.json"
 
 _gpu_available = False
 try:
@@ -65,7 +66,6 @@ def suggest_threads(device_type, gpu_enabled):
 
 # ========== LƯU / ĐỌC CONFIG ==========
 def load_config():
-    """Đọc config từ file JSON"""
     default_config = {
         "server": DEFAULT_SERVER,
         "worker": DEFAULT_WORKER,
@@ -78,7 +78,6 @@ def load_config():
     try:
         with open(CONFIG_FILE, 'r') as f:
             saved = json.load(f)
-            # Merge với default (tránh thiếu key)
             for key in default_config:
                 if key not in saved:
                     saved[key] = default_config[key]
@@ -88,7 +87,6 @@ def load_config():
         return default_config
 
 def save_config(config):
-    """Ghi config ra file JSON"""
     try:
         with open(CONFIG_FILE, 'w') as f:
             json.dump(config, f, indent=2)
@@ -97,7 +95,7 @@ def save_config(config):
         print(f"{ANSI.RED}⚠ Lỗi ghi config: {e}{ANSI.RST}")
         return False
 
-# ========== CLASS MINER (giữ nguyên) ==========
+# ========== CLASS MINER (đã sửa log và báo cáo) ==========
 class ChocoMiner:
     def __init__(self, args):
         self.args = args
@@ -106,15 +104,15 @@ class ChocoMiner:
             "hashes": 0,
             "blocks_found": 0,
             "start_time": time.time(),
+            "last_report_time": time.time(),
             "current_job": None
         }
         self.stats_lock = threading.Lock()
-        self.log_queue = []
-        self.log_lock = threading.Lock()
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "ChocoHub-Miner/v2"})
         self.found_event = threading.Event()
         self.solution = None
+        self.last_log_line = ""  # Dùng để refresh dòng log hiện tại
 
     def banner(self):
         print(f"""{ANSI.ORG}{ANSI.BOLD}
@@ -128,53 +126,78 @@ class ChocoMiner:
 {ANSI.GRY}    SHA256(last_hash + 20-digit-nonce + worker){ANSI.RST}
 """)
 
-    def _log_fmt(self, level, msg):
-        ts = f"{ANSI.GRY}{datetime.now().strftime('%H:%M:%S')}{ANSI.RST}"
-        return f"  {ts}  [{ICONS.get(level,'·')}]  {msg}"
-
-    def log(self, level, msg, direct=False):
-        formatted = self._log_fmt(level, msg)
+    def log(self, msg, direct=True):
+        """In log đơn giản, không chồng chéo"""
         if direct:
-            print(formatted)
+            # Xóa dòng cũ nếu có
+            if self.last_log_line:
+                sys.stdout.write(f"\r{ANSI.CLR}{' ' * len(self.last_log_line)}\r")
+            timestamp = f"{ANSI.GRY}{datetime.now().strftime('%H:%M:%S')}{ANSI.RST}"
+            log_line = f"  {timestamp}  {msg}"
+            print(log_line)
+            self.last_log_line = ""
         else:
-            with self.log_lock:
-                self.log_queue.append(formatted)
+            # Dùng cho các thông báo cần cập nhật trên cùng dòng (sẽ xử lý riêng)
+            pass
 
     def hr_str(self):
         h = self.stats["hashes"]
         t = time.time() - self.stats["start_time"]
-        if t < 0.5: return "—       "
+        if t < 0.5: return "0.00 H/s"
         r = h / t
         if r >= 1_000_000: return f"{r/1_000_000:.2f} MH/s"
-        if r >= 1_000:     return f"{r/1_000:.1f} KH/s "
-        return f"{int(r)} H/s   "
+        if r >= 1_000:     return f"{r/1_000:.1f} KH/s"
+        return f"{int(r)} H/s"
+
+    def progress_line(self):
+        """Tạo dòng trạng thái hiện tại"""
+        elapsed = time.time() - self.stats["start_time"]
+        job = self.stats["current_job"]
+        diff = f"{job['difficulty']:.1f}" if job and 'difficulty' in job else "—"
+        reward = str(job.get('reward', '?')) if job else "—"
+        return (f"  ⚡ HR:{ANSI.YEL}{self.hr_str():<12}{ANSI.RST} "
+                f"Diff:{ANSI.CYN}{diff:<6}{ANSI.RST} "
+                f"Reward:{ANSI.GRN}{reward:<4} CC{ANSI.RST} "
+                f"Blocks:{ANSI.MAG}{self.stats['blocks_found']}{ANSI.RST} "
+                f"Up:{ANSI.GRY}{int(elapsed):>4}s{ANSI.RST}")
 
     def display_loop(self):
-        sp = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
-        idx = 0
+        """Vòng lặp hiển thị trạng thái mỗi 0.5 giây (thay thế cho spinner cũ)"""
         while self.running:
-            with self.log_lock:
-                pending, self.log_queue[:] = self.log_queue[:], []
-            for line in pending:
-                sys.stdout.write(f"\r{ANSI.CLR}{line}\n")
-
-            elapsed = time.time() - self.stats["start_time"]
-            job = self.stats["current_job"]
-            diff = f"{job['difficulty']:.1f}" if job and 'difficulty' in job else "—"
-            reward = str(job.get('reward', '?')) if job else "—"
-
-            sys.stdout.write(
-                f"\r{ANSI.CLR}  {ANSI.ORG}{sp[idx%len(sp)]}{ANSI.RST} "
-                f"HR:{ANSI.YEL}{self.hr_str()}{ANSI.RST}  "
-                f"Diff:{ANSI.CYN}{diff}{ANSI.RST}  "
-                f"Reward:{ANSI.GRN}{reward} CC{ANSI.RST}  "
-                f"Blocks:{ANSI.MAG}{self.stats['blocks_found']}{ANSI.RST}  "
-                f"Up:{ANSI.GRY}{int(elapsed)}s{ANSI.RST}"
-            )
+            line = self.progress_line()
+            # In đè lên dòng hiện tại
+            sys.stdout.write(f"\r{line}")
             sys.stdout.flush()
-            idx += 1
-            time.sleep(0.1)
+            time.sleep(0.5)
         sys.stdout.write("\n")
+
+    def report_loop(self):
+        """In báo cáo chi tiết mỗi N giây (mặc định 5 phút)"""
+        while self.running:
+            time.sleep(self.args.report_interval)
+            if not self.running:
+                break
+            with self.stats_lock:
+                now = time.time()
+                elapsed = now - self.stats["start_time"]
+                elapsed_since_last = now - self.stats.get("last_report_time", self.stats["start_time"])
+                hashes_since = self.stats["hashes"] - self.stats.get("last_report_hashes", 0)
+                
+                if elapsed_since_last > 0:
+                    avg_rate = hashes_since / elapsed_since_last
+                    rate_str = f"{avg_rate/1e6:.2f} MH/s" if avg_rate >= 1e6 else f"{avg_rate/1e3:.1f} KH/s"
+                else:
+                    rate_str = "N/A"
+                
+                self.log(f"{ANSI.CYN}[REPORT]{ANSI.RST} "
+                        f"Time: {int(elapsed//3600)}h{int((elapsed%3600)//60)}m{int(elapsed%60)}s | "
+                        f"Total hashes: {self.stats['hashes']:,} | "
+                        f"Avg rate: {self.hr_str()} | "
+                        f"Last 5m: {rate_str} | "
+                        f"Blocks: {self.stats['blocks_found']}")
+                
+                self.stats["last_report_time"] = now
+                self.stats["last_report_hashes"] = self.stats["hashes"]
 
     def fetch_job(self):
         try:
@@ -196,7 +219,7 @@ class ChocoMiner:
                 "reward": data.get('reward', '?')
             }
         except Exception as e:
-            self.log("ERR", f"Fetch job error: {e}")
+            self.log(f"{ANSI.RED}[ERR] Fetch job error: {e}{ANSI.RST}")
             return None
 
     def mine_cpu(self, tid, nthreads):
@@ -235,7 +258,7 @@ class ChocoMiner:
                     self.stats["hashes"] += batch_size
 
     def mine_gpu_wrapper(self, gpu_info, gid):
-        self.log("GPU", f"Active on {ANSI.GRN}{gpu_info['name']}{ANSI.RST} ({gpu_info['vendor']})")
+        self.log(f"{ANSI.GPU}[GPU] Active on {ANSI.GRN}{gpu_info['name']}{ANSI.RST} ({gpu_info['vendor']})")
         sha256 = hashlib.sha256
         worker_b = self.args.worker.encode()
         gpu_batch = 100000
@@ -277,34 +300,41 @@ class ChocoMiner:
 
     def start(self):
         self.banner()
-        self.log("NET", f"Connecting to {ANSI.CYN}{self.args.server}{ANSI.RST}...", direct=True)
+        self.log(f"{ANSI.NET}[NET] Connecting to {ANSI.CYN}{self.args.server}{ANSI.RST}...")
         try:
             self.session.get(f"{self.args.server}/api/test", timeout=5)
-            self.log("OK", "Server is online", direct=True)
+            self.log(f"{ANSI.OK}[NET] Server is online{ANSI.RST}")
         except:
-            self.log("ERR", "Server unreachable", direct=True)
+            self.log(f"{ANSI.RED}[ERR] Server unreachable{ANSI.RST}")
             return
 
+        # Luồng hiển thị trạng thái (cập nhật mỗi 0.5s)
         threading.Thread(target=self.display_loop, daemon=True).start()
+        
+        # Luồng báo cáo định kỳ (mỗi report_interval giây)
+        threading.Thread(target=self.report_loop, daemon=True).start()
 
+        # Khởi động các luồng đào CPU
         for i in range(self.args.threads):
             threading.Thread(target=self.mine_cpu, args=(i, self.args.threads), daemon=True).start()
 
+        # GPU nếu được bật
         if self.args.gpu:
             gpus = discover_gpus()
             if gpus:
                 for i, gpu in enumerate(gpus):
                     threading.Thread(target=self.mine_gpu_wrapper, args=(gpu, i), daemon=True).start()
             else:
-                self.log("WARN", "No compatible GPU found. Running CPU only.")
+                self.log(f"{ANSI.WARN}[WARN] No compatible GPU found. Running CPU only.{ANSI.RST}")
 
+        # Vòng lặp chính quản lý job
         while self.running:
             if self.stats["current_job"] is None:
                 job = self.fetch_job()
                 if not job:
                     time.sleep(self.args.poll)
                     continue
-                self.log("NET", f"New Job: {ANSI.YEL}#{job['id'][:16]}{ANSI.RST} | Diff: {job['difficulty']:.1f} | Reward: {job['reward']} CC")
+                self.log(f"{ANSI.NET}[JOB] New: #{job['id'][:16]}... | Diff: {job['difficulty']:.1f} | Reward: {job['reward']} CC")
                 self.found_event.clear()
                 self.solution = None
                 self.stats["current_job"] = job
@@ -315,26 +345,27 @@ class ChocoMiner:
                 bid, nonce, hx = self.solution
                 self.solution = None
                 self.found_event.clear()
-                self.log("WIN", f"Solution found! Nonce: {nonce}")
+                self.log(f"{ANSI.WIN}[FOUND] Solution! Nonce: {nonce}{ANSI.RST}")
                 resp = self.submit(bid, nonce)
                 if resp.get("status") == "success":
                     with self.stats_lock:
                         self.stats["blocks_found"] += 1
-                    self.log("OK", f"Block accepted! +{resp.get('reward','?')} CC")
+                    reward_amount = resp.get('reward', '?')
+                    self.log(f"{ANSI.OK}[ACCEPT] Block accepted! +{reward_amount} CC{ANSI.RST}")
                 else:
-                    self.log("WARN", f"Rejected: {resp.get('reason', resp.get('message'))}")
+                    reason = resp.get('reason', resp.get('message', 'unknown'))
+                    self.log(f"{ANSI.WARN}[REJECT] {reason}{ANSI.RST}")
                 self.stats["current_job"] = None
 
     def stop(self):
         self.running = False
         print(f"\n{ANSI.CLR}")
-        self.log("INFO", f"Final stats - Hashes: {self.stats['hashes']:,} | Blocks: {self.stats['blocks_found']}", direct=True)
+        self.log(f"{ANSI.INFO}[FINAL] Hashes: {self.stats['hashes']:,} | Blocks: {self.stats['blocks_found']} | Runtime: {int(time.time() - self.stats['start_time'])}s{ANSI.RST}")
 
-# ========== INTERACTIVE SETUP (có lưu config) ==========
+# ========== INTERACTIVE SETUP ==========
 def interactive_setup():
     global DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL, DEFAULT_SERVER
 
-    # Load config cũ nếu có
     saved_config = load_config()
     
     os.system("clear" if os.name != "nt" else "cls")
@@ -342,7 +373,6 @@ def interactive_setup():
     print(f"{ANSI.BOLD}{ANSI.CYN}║           CHOCOHUB MINER - INTERACTIVE SETUP            ║{ANSI.RST}")
     print(f"{ANSI.BOLD}{ANSI.CYN}╚══════════════════════════════════════════════════════════╝{ANSI.RST}\n")
     
-    # Hiển thị config cũ nếu có
     if saved_config.get("worker"):
         print(f"  {ANSI.GRY}[Config cũ] Worker: {saved_config['worker']}{ANSI.RST}")
         print(f"  {ANSI.GRY}[Config cũ] Server: {saved_config['server']}{ANSI.RST}")
@@ -358,7 +388,6 @@ def interactive_setup():
             time.sleep(1)
             return
 
-    # Nhập worker
     while True:
         default_worker = saved_config.get("worker", "")
         prompt = f"  {ANSI.YEL}➤ Worker name{ANSI.RST}"
@@ -373,7 +402,6 @@ def interactive_setup():
             break
         print(f"  {ANSI.RED}Please enter worker name!{ANSI.RST}")
 
-    # Nhập server
     default_srv = saved_config.get("server", DEFAULT_SERVER)
     srv_input = input(f"  {ANSI.YEL}➤ Server URL{ANSI.RST} (current: {default_srv}): ").strip()
     DEFAULT_SERVER = srv_input if srv_input else default_srv
@@ -414,7 +442,6 @@ def interactive_setup():
     else:
         DEFAULT_POLL = default_poll
 
-    # Lưu config mới
     new_config = {
         "server": DEFAULT_SERVER,
         "worker": DEFAULT_WORKER,
@@ -429,11 +456,12 @@ def interactive_setup():
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="ChocoHub Python Miner")
-    parser.add_argument("--server", default=DEFAULT_SERVER, help=f"Server URL")
+    parser.add_argument("--server", default=DEFAULT_SERVER, help="Server URL")
     parser.add_argument("--worker", default=DEFAULT_WORKER, help="Worker name")
     parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="Number of CPU threads")
     parser.add_argument("--gpu", action="store_true", default=DEFAULT_GPU, help="Enable GPU mining")
     parser.add_argument("--poll", type=int, default=DEFAULT_POLL, help="Job fetch interval in seconds")
+    parser.add_argument("--report-interval", type=int, default=DEFAULT_REPORT_INTERVAL, help="Report interval in seconds (default: 300 = 5 minutes)")
     return parser.parse_args()
 
 def main():
@@ -442,11 +470,9 @@ def main():
     args_passed = sys.argv[1:]
     has_essential = any(x in args_passed for x in ['--worker', '--threads', '--gpu', '--poll'])
 
-    # Nếu không có tham số dòng lệnh -> chạy interactive (có lưu config)
     if not has_essential and sys.stdin.isatty():
         interactive_setup()
     else:
-        # Nếu có tham số nhưng thiếu worker -> thử load từ config
         config = load_config()
         if DEFAULT_WORKER is None and config.get("worker"):
             DEFAULT_WORKER = config["worker"]
