@@ -6,7 +6,7 @@ DEFAULT_WORKER  = None
 DEFAULT_THREADS = None
 DEFAULT_GPU     = False
 DEFAULT_POLL    = 10
-DEFAULT_REPORT_INTERVAL = 300  # 5 phút (tính bằng giây)
+DEFAULT_REPORT_INTERVAL = 300  # 5 phút
 CONFIG_FILE = "miner_config.json"
 
 _gpu_available = False
@@ -39,6 +39,11 @@ class ANSI:
     YEL="\033[93m"; ORG="\033[33m"; GRN="\033[92m"; RED="\033[91m"
     BLU="\033[94m"; CYN="\033[96m"; MAG="\033[95m"; WHT="\033[97m"
     GRY="\033[90m"; CLR="\033[2K"
+    NET = CYN      # alias cho network
+    OK = GRN       # alias cho success
+    WARN = YEL     # alias cho warning
+    INFO = BLU     # alias cho info
+    WIN = YEL      # alias cho found
 
 ICONS = {
     "INFO": f"{ANSI.BLU}i{ANSI.RST}", "OK":  f"{ANSI.GRN}+{ANSI.RST}",
@@ -95,7 +100,7 @@ def save_config(config):
         print(f"{ANSI.RED}⚠ Lỗi ghi config: {e}{ANSI.RST}")
         return False
 
-# ========== CLASS MINER (đã sửa log và báo cáo) ==========
+# ========== CLASS MINER ==========
 class ChocoMiner:
     def __init__(self, args):
         self.args = args
@@ -112,7 +117,7 @@ class ChocoMiner:
         self.session.headers.update({"User-Agent": "ChocoHub-Miner/v2"})
         self.found_event = threading.Event()
         self.solution = None
-        self.last_log_line = ""  # Dùng để refresh dòng log hiện tại
+        self.last_log_line = ""
 
     def banner(self):
         print(f"""{ANSI.ORG}{ANSI.BOLD}
@@ -127,9 +132,7 @@ class ChocoMiner:
 """)
 
     def log(self, msg, direct=True):
-        """In log đơn giản, không chồng chéo"""
         if direct:
-            # Xóa dòng cũ nếu có
             if self.last_log_line:
                 sys.stdout.write(f"\r{ANSI.CLR}{' ' * len(self.last_log_line)}\r")
             timestamp = f"{ANSI.GRY}{datetime.now().strftime('%H:%M:%S')}{ANSI.RST}"
@@ -137,7 +140,6 @@ class ChocoMiner:
             print(log_line)
             self.last_log_line = ""
         else:
-            # Dùng cho các thông báo cần cập nhật trên cùng dòng (sẽ xử lý riêng)
             pass
 
     def hr_str(self):
@@ -150,7 +152,6 @@ class ChocoMiner:
         return f"{int(r)} H/s"
 
     def progress_line(self):
-        """Tạo dòng trạng thái hiện tại"""
         elapsed = time.time() - self.stats["start_time"]
         job = self.stats["current_job"]
         diff = f"{job['difficulty']:.1f}" if job and 'difficulty' in job else "—"
@@ -162,17 +163,14 @@ class ChocoMiner:
                 f"Up:{ANSI.GRY}{int(elapsed):>4}s{ANSI.RST}")
 
     def display_loop(self):
-        """Vòng lặp hiển thị trạng thái mỗi 0.5 giây (thay thế cho spinner cũ)"""
         while self.running:
             line = self.progress_line()
-            # In đè lên dòng hiện tại
             sys.stdout.write(f"\r{line}")
             sys.stdout.flush()
             time.sleep(0.5)
         sys.stdout.write("\n")
 
     def report_loop(self):
-        """In báo cáo chi tiết mỗi N giây (mặc định 5 phút)"""
         while self.running:
             time.sleep(self.args.report_interval)
             if not self.running:
@@ -193,7 +191,7 @@ class ChocoMiner:
                         f"Time: {int(elapsed//3600)}h{int((elapsed%3600)//60)}m{int(elapsed%60)}s | "
                         f"Total hashes: {self.stats['hashes']:,} | "
                         f"Avg rate: {self.hr_str()} | "
-                        f"Last 5m: {rate_str} | "
+                        f"Last period: {rate_str} | "
                         f"Blocks: {self.stats['blocks_found']}")
                 
                 self.stats["last_report_time"] = now
@@ -258,7 +256,7 @@ class ChocoMiner:
                     self.stats["hashes"] += batch_size
 
     def mine_gpu_wrapper(self, gpu_info, gid):
-        self.log(f"{ANSI.GPU}[GPU] Active on {ANSI.GRN}{gpu_info['name']}{ANSI.RST} ({gpu_info['vendor']})")
+        self.log(f"{ANSI.GRN}[GPU] Active on {gpu_info['name']} ({gpu_info['vendor']}){ANSI.RST}")
         sha256 = hashlib.sha256
         worker_b = self.args.worker.encode()
         gpu_batch = 100000
@@ -300,41 +298,35 @@ class ChocoMiner:
 
     def start(self):
         self.banner()
-        self.log(f"{ANSI.NET}[NET] Connecting to {ANSI.CYN}{self.args.server}{ANSI.RST}...")
+        self.log(f"{ANSI.CYN}[NET] Connecting to {self.args.server}...{ANSI.RST}")
         try:
             self.session.get(f"{self.args.server}/api/test", timeout=5)
-            self.log(f"{ANSI.OK}[NET] Server is online{ANSI.RST}")
+            self.log(f"{ANSI.GRN}[NET] Server is online{ANSI.RST}")
         except:
             self.log(f"{ANSI.RED}[ERR] Server unreachable{ANSI.RST}")
             return
 
-        # Luồng hiển thị trạng thái (cập nhật mỗi 0.5s)
         threading.Thread(target=self.display_loop, daemon=True).start()
-        
-        # Luồng báo cáo định kỳ (mỗi report_interval giây)
         threading.Thread(target=self.report_loop, daemon=True).start()
 
-        # Khởi động các luồng đào CPU
         for i in range(self.args.threads):
             threading.Thread(target=self.mine_cpu, args=(i, self.args.threads), daemon=True).start()
 
-        # GPU nếu được bật
         if self.args.gpu:
             gpus = discover_gpus()
             if gpus:
                 for i, gpu in enumerate(gpus):
                     threading.Thread(target=self.mine_gpu_wrapper, args=(gpu, i), daemon=True).start()
             else:
-                self.log(f"{ANSI.WARN}[WARN] No compatible GPU found. Running CPU only.{ANSI.RST}")
+                self.log(f"{ANSI.YEL}[WARN] No compatible GPU found. Running CPU only.{ANSI.RST}")
 
-        # Vòng lặp chính quản lý job
         while self.running:
             if self.stats["current_job"] is None:
                 job = self.fetch_job()
                 if not job:
                     time.sleep(self.args.poll)
                     continue
-                self.log(f"{ANSI.NET}[JOB] New: #{job['id'][:16]}... | Diff: {job['difficulty']:.1f} | Reward: {job['reward']} CC")
+                self.log(f"{ANSI.CYN}[JOB] New: #{job['id'][:16]}... | Diff: {job['difficulty']:.1f} | Reward: {job['reward']} CC{ANSI.RST}")
                 self.found_event.clear()
                 self.solution = None
                 self.stats["current_job"] = job
@@ -345,22 +337,22 @@ class ChocoMiner:
                 bid, nonce, hx = self.solution
                 self.solution = None
                 self.found_event.clear()
-                self.log(f"{ANSI.WIN}[FOUND] Solution! Nonce: {nonce}{ANSI.RST}")
+                self.log(f"{ANSI.YEL}[FOUND] Solution! Nonce: {nonce}{ANSI.RST}")
                 resp = self.submit(bid, nonce)
                 if resp.get("status") == "success":
                     with self.stats_lock:
                         self.stats["blocks_found"] += 1
                     reward_amount = resp.get('reward', '?')
-                    self.log(f"{ANSI.OK}[ACCEPT] Block accepted! +{reward_amount} CC{ANSI.RST}")
+                    self.log(f"{ANSI.GRN}[ACCEPT] Block accepted! +{reward_amount} CC{ANSI.RST}")
                 else:
                     reason = resp.get('reason', resp.get('message', 'unknown'))
-                    self.log(f"{ANSI.WARN}[REJECT] {reason}{ANSI.RST}")
+                    self.log(f"{ANSI.YEL}[REJECT] {reason}{ANSI.RST}")
                 self.stats["current_job"] = None
 
     def stop(self):
         self.running = False
         print(f"\n{ANSI.CLR}")
-        self.log(f"{ANSI.INFO}[FINAL] Hashes: {self.stats['hashes']:,} | Blocks: {self.stats['blocks_found']} | Runtime: {int(time.time() - self.stats['start_time'])}s{ANSI.RST}")
+        self.log(f"{ANSI.BLU}[FINAL] Hashes: {self.stats['hashes']:,} | Blocks: {self.stats['blocks_found']} | Runtime: {int(time.time() - self.stats['start_time'])}s{ANSI.RST}")
 
 # ========== INTERACTIVE SETUP ==========
 def interactive_setup():
