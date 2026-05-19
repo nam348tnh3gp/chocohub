@@ -1,4 +1,4 @@
-import hashlib, requests, time, threading, argparse, sys, os, signal
+import hashlib, requests, time, threading, argparse, sys, os, signal, json
 from datetime import datetime
 
 DEFAULT_SERVER  = "https://chocohub-r011.onrender.com"
@@ -6,6 +6,7 @@ DEFAULT_WORKER  = None
 DEFAULT_THREADS = None
 DEFAULT_GPU     = False
 DEFAULT_POLL    = 10
+CONFIG_FILE = "miner_config.json"  # File lưu config
 
 _gpu_available = False
 try:
@@ -62,6 +63,41 @@ def suggest_threads(device_type, gpu_enabled):
         else:
             return cpu_cnt
 
+# ========== LƯU / ĐỌC CONFIG ==========
+def load_config():
+    """Đọc config từ file JSON"""
+    default_config = {
+        "server": DEFAULT_SERVER,
+        "worker": DEFAULT_WORKER,
+        "threads": DEFAULT_THREADS,
+        "gpu": DEFAULT_GPU,
+        "poll": DEFAULT_POLL
+    }
+    if not os.path.exists(CONFIG_FILE):
+        return default_config
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            saved = json.load(f)
+            # Merge với default (tránh thiếu key)
+            for key in default_config:
+                if key not in saved:
+                    saved[key] = default_config[key]
+            return saved
+    except Exception as e:
+        print(f"{ANSI.RED}⚠ Lỗi đọc config: {e}{ANSI.RST}")
+        return default_config
+
+def save_config(config):
+    """Ghi config ra file JSON"""
+    try:
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"{ANSI.RED}⚠ Lỗi ghi config: {e}{ANSI.RST}")
+        return False
+
+# ========== CLASS MINER (giữ nguyên) ==========
 class ChocoMiner:
     def __init__(self, args):
         self.args = args
@@ -262,7 +298,6 @@ class ChocoMiner:
             else:
                 self.log("WARN", "No compatible GPU found. Running CPU only.")
 
-        # Vòng lặp chính sửa lỗi: chỉ fetch job khi không có job active
         while self.running:
             if self.stats["current_job"] is None:
                 job = self.fetch_job()
@@ -295,20 +330,53 @@ class ChocoMiner:
         print(f"\n{ANSI.CLR}")
         self.log("INFO", f"Final stats - Hashes: {self.stats['hashes']:,} | Blocks: {self.stats['blocks_found']}", direct=True)
 
+# ========== INTERACTIVE SETUP (có lưu config) ==========
 def interactive_setup():
-    global DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL
+    global DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL, DEFAULT_SERVER
 
+    # Load config cũ nếu có
+    saved_config = load_config()
+    
     os.system("clear" if os.name != "nt" else "cls")
     print(f"{ANSI.BOLD}{ANSI.CYN}╔══════════════════════════════════════════════════════════╗{ANSI.RST}")
     print(f"{ANSI.BOLD}{ANSI.CYN}║           CHOCOHUB MINER - INTERACTIVE SETUP            ║{ANSI.RST}")
     print(f"{ANSI.BOLD}{ANSI.CYN}╚══════════════════════════════════════════════════════════╝{ANSI.RST}\n")
+    
+    # Hiển thị config cũ nếu có
+    if saved_config.get("worker"):
+        print(f"  {ANSI.GRY}[Config cũ] Worker: {saved_config['worker']}{ANSI.RST}")
+        print(f"  {ANSI.GRY}[Config cũ] Server: {saved_config['server']}{ANSI.RST}")
+        print(f"  {ANSI.GRY}[Config cũ] GPU: {'Bật' if saved_config['gpu'] else 'Tắt'}{ANSI.RST}\n")
+        use_old = input(f"  {ANSI.YEL}➤ Dùng lại config cũ? (y/n){ANSI.RST}: ").strip().lower()
+        if use_old == 'y':
+            DEFAULT_WORKER = saved_config["worker"]
+            DEFAULT_SERVER = saved_config["server"]
+            DEFAULT_THREADS = saved_config["threads"]
+            DEFAULT_GPU = saved_config["gpu"]
+            DEFAULT_POLL = saved_config["poll"]
+            print(f"\n{ANSI.GRN}✓ Đã load config cũ!{ANSI.RST}")
+            time.sleep(1)
+            return
 
+    # Nhập worker
     while True:
-        wrk = input(f"  {ANSI.YEL}➤ Worker name{ANSI.RST}: ").strip()
+        default_worker = saved_config.get("worker", "")
+        prompt = f"  {ANSI.YEL}➤ Worker name{ANSI.RST}"
+        if default_worker:
+            prompt += f" (current: {default_worker})"
+        wrk = input(f"{prompt}: ").strip()
         if wrk:
             DEFAULT_WORKER = wrk
             break
+        elif default_worker:
+            DEFAULT_WORKER = default_worker
+            break
         print(f"  {ANSI.RED}Please enter worker name!{ANSI.RST}")
+
+    # Nhập server
+    default_srv = saved_config.get("server", DEFAULT_SERVER)
+    srv_input = input(f"  {ANSI.YEL}➤ Server URL{ANSI.RST} (current: {default_srv}): ").strip()
+    DEFAULT_SERVER = srv_input if srv_input else default_srv
 
     print(f"\n  {ANSI.CYN}[?] Select device type:{ANSI.RST}")
     print(f"     1) {ANSI.BLU}Mobile{ANSI.RST}")
@@ -326,47 +394,73 @@ def interactive_setup():
         DEFAULT_GPU = use_gpu
 
     suggested = suggest_threads("mobile" if is_mobile else "pc", use_gpu)
-    thr_input = input(f"\n  {ANSI.YEL}➤ CPU threads{ANSI.RST} (suggested: {suggested}): ").strip()
+    default_thr = saved_config.get("threads", suggested)
+    thr_input = input(f"\n  {ANSI.YEL}➤ CPU threads{ANSI.RST} (suggested: {suggested}, current: {default_thr}): ").strip()
     if thr_input:
         try:
             DEFAULT_THREADS = int(thr_input)
         except:
             DEFAULT_THREADS = suggested
     else:
-        DEFAULT_THREADS = suggested
+        DEFAULT_THREADS = default_thr
 
-    poll_input = input(f"\n  {ANSI.YEL}➤ Job poll interval (seconds){ANSI.RST} [default {DEFAULT_POLL}]: ").strip()
+    default_poll = saved_config.get("poll", DEFAULT_POLL)
+    poll_input = input(f"\n  {ANSI.YEL}➤ Job poll interval (seconds){ANSI.RST} (current: {default_poll}): ").strip()
     if poll_input:
         try:
             DEFAULT_POLL = int(poll_input)
         except:
             pass
+    else:
+        DEFAULT_POLL = default_poll
 
-    print(f"\n{ANSI.GRN}✓ Setup complete!{ANSI.RST}")
+    # Lưu config mới
+    new_config = {
+        "server": DEFAULT_SERVER,
+        "worker": DEFAULT_WORKER,
+        "threads": DEFAULT_THREADS,
+        "gpu": DEFAULT_GPU,
+        "poll": DEFAULT_POLL
+    }
+    save_config(new_config)
+
+    print(f"\n{ANSI.GRN}✓ Setup complete! Config saved to {CONFIG_FILE}{ANSI.RST}")
     time.sleep(1.5)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="ChocoHub Python Miner")
-    parser.add_argument("--server", default=DEFAULT_SERVER, help=f"Server URL (default: {DEFAULT_SERVER})")
-    parser.add_argument("--worker", default=DEFAULT_WORKER, help="Worker name (login username)")
+    parser.add_argument("--server", default=DEFAULT_SERVER, help=f"Server URL")
+    parser.add_argument("--worker", default=DEFAULT_WORKER, help="Worker name")
     parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="Number of CPU threads")
-    parser.add_argument("--gpu", action="store_true", default=DEFAULT_GPU, help="Enable GPU mining (requires OpenCL)")
+    parser.add_argument("--gpu", action="store_true", default=DEFAULT_GPU, help="Enable GPU mining")
     parser.add_argument("--poll", type=int, default=DEFAULT_POLL, help="Job fetch interval in seconds")
     return parser.parse_args()
 
 def main():
+    global DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL, DEFAULT_SERVER
+    
     args_passed = sys.argv[1:]
     has_essential = any(x in args_passed for x in ['--worker', '--threads', '--gpu', '--poll'])
 
+    # Nếu không có tham số dòng lệnh -> chạy interactive (có lưu config)
     if not has_essential and sys.stdin.isatty():
         interactive_setup()
     else:
+        # Nếu có tham số nhưng thiếu worker -> thử load từ config
+        config = load_config()
+        if DEFAULT_WORKER is None and config.get("worker"):
+            DEFAULT_WORKER = config["worker"]
+            DEFAULT_SERVER = config.get("server", DEFAULT_SERVER)
+            DEFAULT_THREADS = config.get("threads", DEFAULT_THREADS)
+            DEFAULT_GPU = config.get("gpu", DEFAULT_GPU)
+            DEFAULT_POLL = config.get("poll", DEFAULT_POLL)
+
         if DEFAULT_WORKER is None:
             if sys.stdin.isatty():
                 print(f"{ANSI.YEL}⚠ No worker name. Enter worker name:{ANSI.RST}")
                 DEFAULT_WORKER = input("Worker: ").strip()
             else:
-                print(f"{ANSI.RED}Error: Missing --worker parameter when running non-interactive{ANSI.RST}")
+                print(f"{ANSI.RED}Error: Missing --worker parameter{ANSI.RST}")
                 sys.exit(1)
 
     args = parse_arguments()
@@ -374,7 +468,7 @@ def main():
         if DEFAULT_WORKER:
             args.worker = DEFAULT_WORKER
         else:
-            print(f"{ANSI.RED}Error: No worker name. Use --worker or run without parameters.{ANSI.RST}")
+            print(f"{ANSI.RED}Error: No worker name.{ANSI.RST}")
             sys.exit(1)
 
     if args.threads is None:
