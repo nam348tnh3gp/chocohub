@@ -1,38 +1,61 @@
-import sys
-import os
-import subprocess
-import json
-import hashlib
-import time
-import threading
-import argparse
-import signal
+import hashlib, requests, time, threading, argparse, sys, os, signal, subprocess, json
 from datetime import datetime
 
-# ------------------------------------------------------------
-# Auto-install required packages
-# ------------------------------------------------------------
-def install_package(package):
-    """Install a Python package using pip."""
-    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+# ---------------------------------------------------------------------------
+# Automatic library installer – missing packages will be fetched via pip
+# ---------------------------------------------------------------------------
+def ensure_libraries(gpu=False):
+    """Make sure requests (always) and pyopencl (if GPU) are available."""
+    try:
+        import requests  # already done at top but double-check
+    except ImportError:
+        print("Installing requests...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+        print("requests installed – please restart the miner.")
+        sys.exit(1)  # restart needed so the fresh import works
 
-# Ensure 'requests' is available
-try:
-    import requests
-except ImportError:
-    print("Installing required package: requests...")
-    install_package("requests")
-    import requests
+    if gpu:
+        try:
+            import pyopencl as cl
+        except ImportError:
+            print("Installing pyopencl...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "pyopencl"])
+            print("pyopencl installed – please restart the miner.")
+            sys.exit(1)
 
-# ------------------------------------------------------------
-# Default configuration (will be overwritten by config.txt or CLI)
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Configuration persistence (config.txt)
+# ---------------------------------------------------------------------------
+CONFIG_FILE = "config.txt"
+
+def load_config():
+    """Return a dictionary with saved settings or an empty dict."""
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_config(cfg):
+    """Write the configuration dictionary to config.txt (best effort)."""
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cfg, f, indent=4, ensure_ascii=False)
+    except Exception:
+        pass  # non-critical, just carry on
+
+# ---------------------------------------------------------------------------
+# Default values (will be overridden by config file if present)
+# ---------------------------------------------------------------------------
 DEFAULT_SERVER  = "https://chocohub-r011.onrender.com"
 DEFAULT_WORKER  = None
 DEFAULT_THREADS = None
 DEFAULT_GPU     = False
 DEFAULT_POLL    = 10
 
+# GPU probing helpers --------------------------------------------------------
 _gpu_available = False
 try:
     import pyopencl as cl
@@ -40,11 +63,7 @@ try:
 except ImportError:
     pass
 
-# ------------------------------------------------------------
-# GPU discovery
-# ------------------------------------------------------------
 def discover_gpus():
-    """Return list of GPU devices available through OpenCL."""
     if not _gpu_available:
         return []
     gpu_list = []
@@ -63,75 +82,43 @@ def discover_gpus():
         pass
     return gpu_list
 
-# ------------------------------------------------------------
-# ANSI colour / icon helpers
-# ------------------------------------------------------------
+# ANSI helpers ---------------------------------------------------------------
 class ANSI:
-    RST = "\033[0m"
-    BOLD = "\033[1m"
-    YEL = "\033[93m"
-    ORG = "\033[33m"
-    GRN = "\033[92m"
-    RED = "\033[91m"
-    BLU = "\033[94m"
-    CYN = "\033[96m"
-    MAG = "\033[95m"
-    WHT = "\033[97m"
-    GRY = "\033[90m"
-    CLR = "\033[2K"
+    RST = "\033[0m"; BOLD = "\033[1m"
+    YEL = "\033[93m"; ORG = "\033[33m"; GRN = "\033[92m"; RED = "\033[91m"
+    BLU = "\033[94m"; CYN = "\033[96m"; MAG = "\033[95m"; WHT = "\033[97m"
+    GRY = "\033[90m"; CLR = "\033[2K"
 
 ICONS = {
     "INFO": f"{ANSI.BLU}i{ANSI.RST}",
-    "OK":   f"{ANSI.GRN}+{ANSI.RST}",
+    "OK":  f"{ANSI.GRN}+{ANSI.RST}",
     "WARN": f"{ANSI.YEL}!{ANSI.RST}",
-    "ERR":  f"{ANSI.RED}x{ANSI.RST}",
+    "ERR": f"{ANSI.RED}x{ANSI.RST}",
     "WIN":  f"{ANSI.YEL}{ANSI.BOLD}*{ANSI.RST}",
-    "NET":  f"{ANSI.CYN}~{ANSI.RST}",
+    "NET": f"{ANSI.CYN}~{ANSI.RST}",
     "DBG":  f"{ANSI.MAG}D{ANSI.RST}",
     "GPU":  f"{ANSI.GRN}G{ANSI.RST}"
 }
 
-# ------------------------------------------------------------
-# Utility functions
-# ------------------------------------------------------------
 def get_cpu_count():
-    """Return number of logical CPUs."""
     try:
         return os.cpu_count() or 2
     except:
         return 2
 
 def suggest_threads(device_type, gpu_enabled):
-    """Suggest a sensible number of CPU mining threads."""
     cpu_cnt = get_cpu_count()
     if device_type == "mobile":
         return min(2, cpu_cnt)
-    if gpu_enabled:
-        return max(1, cpu_cnt - 2)
-    return cpu_cnt
+    else:
+        if gpu_enabled:
+            return max(1, cpu_cnt - 2)
+        else:
+            return cpu_cnt
 
-def load_config():
-    """Load persisted config from config.txt (JSON format)."""
-    cfg = {}
-    if os.path.exists("config.txt"):
-        try:
-            with open("config.txt", "r") as f:
-                cfg = json.load(f)
-        except (json.JSONDecodeError, IOError):
-            pass
-    return cfg
-
-def save_config(config_dict):
-    """Save current configuration to config.txt."""
-    try:
-        with open("config.txt", "w") as f:
-            json.dump(config_dict, f, indent=2)
-    except IOError:
-        pass  # non-critical
-
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Core miner class
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 class ChocoMiner:
     def __init__(self, args):
         self.args = args
@@ -152,8 +139,7 @@ class ChocoMiner:
         self.solution = None
 
     def banner(self):
-        """Print a fancy startup banner."""
-        print(f"""{ANSI.ORG}{ANSI.BOLD}
+        print(f"""\033[33m\033[1m
   ██████╗██╗  ██╗ ██████╗  ██████╗ ██████╗
  ██╔════╝██║  ██║██╔═══██╗██╔════╝██╔═══██╗
  ██║     ███████║██║   ██║██║     ██║   ██║
@@ -165,13 +151,10 @@ class ChocoMiner:
 """)
 
     def _log_fmt(self, level, msg):
-        """Format a log line with timestamp and icon."""
         ts = f"{ANSI.GRY}{datetime.now().strftime('%H:%M:%S')}{ANSI.RST}"
-        return f"  {ts}  [{ICONS.get(level, '·')}]  {msg}"
+        return f"  {ts}  [{ICONS.get(level,'·')}]  {msg}"
 
     def log(self, level, msg, direct=False):
-        """Queue a log message (or print immediately if direct)."""
-        # Only keep important levels; NET (job fetch) is suppressed to avoid clutter
         if level in ("ERR", "WARN", "WIN", "OK", "GPU"):
             formatted = self._log_fmt(level, msg)
             if direct:
@@ -181,7 +164,6 @@ class ChocoMiner:
                     self.log_queue.append(formatted)
 
     def hr_str(self):
-        """Return a human-readable hash rate string."""
         h = self.stats["hashes"]
         t = time.time() - self.stats["start_time"]
         if t < 0.5:
@@ -194,7 +176,6 @@ class ChocoMiner:
         return f"{int(r)} H/s   "
 
     def periodic_report(self):
-        """Print a detailed report every 5 minutes."""
         while self.running:
             time.sleep(300)
             if not self.running:
@@ -215,7 +196,6 @@ class ChocoMiner:
                 self.stats["last_report_time"] = now
 
     def display_loop(self):
-        """Continuously update the status line."""
         sp = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
         idx = 0
         while self.running:
@@ -243,7 +223,6 @@ class ChocoMiner:
         sys.stdout.write("\n")
 
     def fetch_job(self):
-        """Request a new mining job from the server."""
         try:
             resp = self.session.post(
                 f"{self.args.server}/get_job",
@@ -267,7 +246,6 @@ class ChocoMiner:
             return None
 
     def mine_cpu(self, tid, nthreads):
-        """CPU mining thread (stride = nthreads)."""
         sha256 = hashlib.sha256
         worker_b = self.args.worker.encode()
         batch_size = 2000
@@ -303,7 +281,6 @@ class ChocoMiner:
                     self.stats["hashes"] += batch_size
 
     def mine_gpu_wrapper(self, gpu_info, gid):
-        """GPU mining wrapper (currently uses CPU hashing for compatibility)."""
         self.log("GPU", f"Active on {ANSI.GRN}{gpu_info['name']}{ANSI.RST} ({gpu_info['vendor']})")
         sha256 = hashlib.sha256
         worker_b = self.args.worker.encode()
@@ -334,16 +311,10 @@ class ChocoMiner:
                     self.stats["hashes"] += gpu_batch
 
     def submit(self, bid, nonce):
-        """Submit a found solution to the server."""
         try:
             r = self.session.post(
                 f"{self.args.server}/submit_solution",
-                json={
-                    "bounty_id": bid,
-                    "nonce": nonce,
-                    "worker_name": self.args.worker,
-                    "device_type": "python_miner"
-                },
+                json={"bounty_id": bid, "nonce": nonce, "worker_name": self.args.worker, "device_type": "python_miner"},
                 timeout=10
             )
             return r.json()
@@ -351,7 +322,6 @@ class ChocoMiner:
             return {"status": "error", "message": str(e)}
 
     def start(self):
-        """Launch all mining threads and the main event loop."""
         self.banner()
         self.log("NET", f"Connecting to {ANSI.CYN}{self.args.server}{ANSI.RST}...", direct=True)
         try:
@@ -381,7 +351,6 @@ class ChocoMiner:
                 if not job:
                     time.sleep(self.args.poll)
                     continue
-                # Job successfully fetched – status line will show new difficulty/reward
                 self.found_event.clear()
                 self.solution = None
                 self.stats["current_job"] = job
@@ -403,16 +372,14 @@ class ChocoMiner:
                 self.stats["current_job"] = None
 
     def stop(self):
-        """Gracefully stop the miner."""
         self.running = False
         print(f"\n{ANSI.CLR}")
         self.log("INFO", f"Final stats - Hashes: {self.stats['hashes']:,} | Blocks: {self.stats['blocks_found']}", direct=True)
 
-# ------------------------------------------------------------
-# Interactive first-run setup
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Interactive setup
+# ---------------------------------------------------------------------------
 def interactive_setup():
-    """Ask user for configuration and return a populated dict."""
     global DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL
 
     os.system("clear" if os.name != "nt" else "cls")
@@ -425,7 +392,7 @@ def interactive_setup():
         if wrk:
             DEFAULT_WORKER = wrk
             break
-        print(f"  {ANSI.RED}Please enter a worker name!{ANSI.RST}")
+        print(f"  {ANSI.RED}Please enter worker name!{ANSI.RST}")
 
     print(f"\n  {ANSI.CYN}[?] Select device type:{ANSI.RST}")
     print(f"     1) {ANSI.BLU}Mobile{ANSI.RST}")
@@ -462,76 +429,58 @@ def interactive_setup():
     print(f"\n{ANSI.GRN}✓ Setup complete!{ANSI.RST}")
     time.sleep(1.5)
 
-# ------------------------------------------------------------
-# Argument parsing and config loading
-# ------------------------------------------------------------
 def parse_arguments():
     parser = argparse.ArgumentParser(description="ChocoHub Python Miner")
     parser.add_argument("--server", default=DEFAULT_SERVER, help=f"Server URL (default: {DEFAULT_SERVER})")
-    parser.add_argument("--worker", default=DEFAULT_WORKER, help="Worker name (your login username)")
+    parser.add_argument("--worker", default=DEFAULT_WORKER, help="Worker name (login username)")
     parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="Number of CPU threads")
     parser.add_argument("--gpu", action="store_true", default=DEFAULT_GPU, help="Enable GPU mining (requires OpenCL)")
     parser.add_argument("--poll", type=int, default=DEFAULT_POLL, help="Job fetch interval in seconds")
     return parser.parse_args()
 
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Main entry point
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 def main():
-    global DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL, _gpu_available
+    global DEFAULT_SERVER, DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL
 
-    # Load previous config if available
-    saved = load_config()
-    if saved:
-        DEFAULT_SERVER  = saved.get("server", DEFAULT_SERVER)
-        DEFAULT_WORKER  = saved.get("worker", DEFAULT_WORKER)
-        DEFAULT_THREADS = saved.get("threads", DEFAULT_THREADS)
-        DEFAULT_GPU     = saved.get("gpu", DEFAULT_GPU)
-        DEFAULT_POLL    = saved.get("poll", DEFAULT_POLL)
+    # Load persisted settings
+    config = load_config()
+    # Override globals with any saved values
+    DEFAULT_SERVER  = config.get("server", DEFAULT_SERVER)
+    DEFAULT_WORKER  = config.get("worker", DEFAULT_WORKER)
+    DEFAULT_THREADS = config.get("threads", DEFAULT_THREADS)
+    DEFAULT_GPU     = config.get("gpu", DEFAULT_GPU)
+    DEFAULT_POLL    = config.get("poll", DEFAULT_POLL)
 
-    # Determine if we need interactive setup
     args_passed = sys.argv[1:]
     has_essential = any(x in args_passed for x in ['--worker', '--threads', '--gpu', '--poll'])
 
+    # If no essential flags passed and we are in an interactive terminal → wizard
     if not has_essential and sys.stdin.isatty():
-        # No essential CLI args and we have a terminal → interactive
         interactive_setup()
     else:
-        # Still need a worker name if missing
         if DEFAULT_WORKER is None:
             if sys.stdin.isatty():
                 print(f"{ANSI.YEL}⚠ No worker name. Enter worker name:{ANSI.RST}")
                 DEFAULT_WORKER = input("Worker: ").strip()
             else:
-                print(f"{ANSI.RED}Error: Missing --worker parameter when running non-interactive.{ANSI.RST}")
+                print(f"{ANSI.RED}Error: Missing --worker parameter when running non-interactive{ANSI.RST}")
                 sys.exit(1)
 
-    # Parse final arguments (CLI overrides defaults)
+    # Parse final arguments (now using possibly updated globals)
     args = parse_arguments()
     if args.worker is None:
-        if DEFAULT_WORKER:
-            args.worker = DEFAULT_WORKER
-        else:
-            print(f"{ANSI.RED}Error: No worker name. Use --worker or run without parameters.{ANSI.RST}")
-            sys.exit(1)
+        print(f"{ANSI.RED}Error: No worker name. Use --worker or run without parameters.{ANSI.RST}")
+        sys.exit(1)
 
     if args.threads is None:
         args.threads = suggest_threads("pc" if not args.gpu else "pc", args.gpu)
 
-    # Auto-install pyopencl if GPU mining is requested and not available
-    if args.gpu and not _gpu_available:
-        print(f"{ANSI.YEL}GPU mining requested but pyopencl not found. Installing...{ANSI.RST}")
-        try:
-            install_package("pyopencl")
-            import pyopencl as cl
-            _gpu_available = True
-            print(f"{ANSI.GRN}pyopencl installed successfully.{ANSI.RST}")
-        except Exception as e:
-            print(f"{ANSI.RED}Failed to install pyopencl: {e}{ANSI.RST}")
-            print(f"{ANSI.YEL}Disabling GPU mode and continuing with CPU only.{ANSI.RST}")
-            args.gpu = False
+    # Install missing libraries if needed (requests, and pyopencl if GPU)
+    ensure_libraries(gpu=args.gpu)
 
-    # Save current config for next run
+    # Save current configuration for next time
     save_config({
         "server": args.server,
         "worker": args.worker,
