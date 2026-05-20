@@ -1,7 +1,67 @@
-import hashlib, requests, time, threading, argparse, sys, os, signal, subprocess
+#!/usr/bin/env python3
+"""
+ChocoHub Python Miner v2 (auto-dependency & config)
+SHA256(last_hash + 20-digit-nonce + worker)
+"""
+
+import sys
+import os
+import signal
+import time
+import threading
+import argparse
+import hashlib
+import subprocess
 from datetime import datetime
 
-# =========================== CONFIG FILE ===========================
+# ----------------------------------------------------------------------
+# 1. Auto-install essential libraries
+# ----------------------------------------------------------------------
+def _ensure_package(package_name, import_name=None):
+    """Install a package via pip if it's not available, then import it."""
+    if import_name is None:
+        import_name = package_name
+    try:
+        __import__(import_name)
+    except ImportError:
+        print(f"[...] Installing {package_name} ...")
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", package_name],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        __import__(import_name)
+
+# Ensure requests is always present
+_ensure_package("requests", "requests")
+import requests
+
+# ----------------------------------------------------------------------
+# 2. PyOpenCL will be installed on-demand when GPU is requested
+# ----------------------------------------------------------------------
+_gpu_available = False
+cl = None
+
+def _ensure_pyopencl():
+    """Install pyopencl if missing and make it importable."""
+    global cl, _gpu_available
+    try:
+        import pyopencl as cl
+        _gpu_available = True
+    except ImportError:
+        print("[...] Installing pyopencl (this may take a while) ...")
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "pyopencl"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        import pyopencl as cl
+        _gpu_available = True
+    return _gpu_available
+
+# ----------------------------------------------------------------------
+# 3. Configuration persistence
+# ----------------------------------------------------------------------
 CONFIG_FILE = "config.txt"
 
 DEFAULT_SERVER  = "https://chocohub-r011.onrender.com"
@@ -10,108 +70,55 @@ DEFAULT_THREADS = None
 DEFAULT_GPU     = False
 DEFAULT_POLL    = 10
 
-def load_config():
-    """Load settings from config.txt into global defaults."""
-    global DEFAULT_SERVER, DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL
-    if not os.path.isfile(CONFIG_FILE):
-        return
-    try:
-        with open(CONFIG_FILE, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                if '=' not in line:
-                    continue
-                key, val = line.split('=', 1)
-                key = key.strip().upper()
-                val = val.strip()
-                if key == "SERVER":
-                    DEFAULT_SERVER = val
-                elif key == "WORKER":
-                    DEFAULT_WORKER = val
-                elif key == "THREADS":
-                    try:
-                        DEFAULT_THREADS = int(val)
-                    except:
-                        pass
-                elif key == "GPU":
-                    DEFAULT_GPU = val.lower() in ("true", "1", "yes")
-                elif key == "POLL":
-                    try:
-                        DEFAULT_POLL = int(val)
-                    except:
-                        pass
-    except Exception as e:
-        print(f"Warning: Could not load config: {e}")
-
-def save_config(args):
+def save_config(server, worker, threads, gpu, poll_interval):
     """Write current settings to config.txt."""
-    try:
-        with open(CONFIG_FILE, 'w') as f:
-            f.write(f"SERVER={args.server}\n")
-            f.write(f"WORKER={args.worker}\n")
-            f.write(f"THREADS={args.threads}\n")
-            f.write(f"GPU={args.gpu}\n")
-            f.write(f"POLL={args.poll}\n")
-    except Exception as e:
-        print(f"Warning: Could not save config: {e}")
+    with open(CONFIG_FILE, "w") as f:
+        f.write(f"server={server}\n")
+        f.write(f"worker={worker}\n")
+        f.write(f"threads={threads}\n")
+        f.write(f"gpu={gpu}\n")
+        f.write(f"poll={poll_interval}\n")
 
-# =========================== PACKAGE CHECKER ===========================
-def ensure_package(package_name):
-    """Check if a package is installed, install it if not. Returns True on success."""
-    try:
-        __import__(package_name)
-        return True
-    except ImportError:
-        print(f"{ANSI.YEL}Installing required package: {package_name}...{ANSI.RST}")
+def load_config():
+    """Read settings from config.txt, return a dict."""
+    cfg = {}
+    if not os.path.exists(CONFIG_FILE):
+        return cfg
+    with open(CONFIG_FILE) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, val = line.split("=", 1)
+                cfg[key.strip()] = val.strip()
+    return cfg
+
+def apply_config_to_globals(cfg):
+    """Set DEFAULT_* globals from a config dict."""
+    global DEFAULT_SERVER, DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL
+    if "server" in cfg:
+        DEFAULT_SERVER = cfg["server"]
+    if "worker" in cfg:
+        DEFAULT_WORKER = cfg["worker"]
+    if "threads" in cfg:
         try:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", package_name],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-            __import__(package_name)
-            return True
-        except Exception as e:
-            print(f"{ANSI.RED}Failed to install {package_name}: {e}{ANSI.RST}")
-            return False
-
-# =========================== KEYBOARD INPUT CHECKER ===========================
-def get_keyboard_handler():
-    """Try to import keyboard listener for better Ctrl+C handling."""
-    try:
-        # Try pynput first (works on a-shell)
-        from pynput import keyboard
-        return "pynput"
-    except ImportError:
+            DEFAULT_THREADS = int(cfg["threads"])
+        except ValueError:
+            pass
+    if "gpu" in cfg:
+        DEFAULT_GPU = cfg["gpu"].lower() == "true"
+    if "poll" in cfg:
         try:
-            # Try getch for Unix systems
-            import termios, tty
-            return "termios"
-        except ImportError:
-            return None
+            DEFAULT_POLL = int(cfg["poll"])
+        except ValueError:
+            pass
 
-# =========================== ANSI / ICONS ===========================
-class ANSI:
-    RST="\033[0m"; BOLD="\033[1m"
-    YEL="\033[93m"; ORG="\033[33m"; GRN="\033[92m"; RED="\033[91m"
-    BLU="\033[94m"; CYN="\033[96m"; MAG="\033[95m"; WHT="\033[97m"
-    GRY="\033[90m"; CLR="\033[2K"
-
-ICONS = {
-    "INFO": f"{ANSI.BLU}i{ANSI.RST}", "OK":  f"{ANSI.GRN}+{ANSI.RST}",
-    "WARN": f"{ANSI.YEL}!{ANSI.RST}", "ERR": f"{ANSI.RED}x{ANSI.RST}",
-    "WIN":  f"{ANSI.YEL}{ANSI.BOLD}*{ANSI.RST}", "NET": f"{ANSI.CYN}~{ANSI.RST}",
-    "DBG":  f"{ANSI.MAG}D{ANSI.RST}",
-    "GPU":  f"{ANSI.GRN}G{ANSI.RST}"
-}
-
-# =========================== GPU DISCOVERY ===========================
+# ----------------------------------------------------------------------
+# 4. GPU discovery helpers
+# ----------------------------------------------------------------------
 def discover_gpus():
-    """Return list of available GPU devices (requires pyopencl)."""
-    try:
-        import pyopencl as cl
-    except ImportError:
+    if not _gpu_available:
         return []
     gpu_list = []
     try:
@@ -129,7 +136,34 @@ def discover_gpus():
         pass
     return gpu_list
 
-# =========================== HELPERS ===========================
+# ----------------------------------------------------------------------
+# 5. ANSI / icons / helpers
+# ----------------------------------------------------------------------
+class ANSI:
+    RST = "\033[0m"
+    BOLD = "\033[1m"
+    YEL = "\033[93m"
+    ORG = "\033[33m"
+    GRN = "\033[92m"
+    RED = "\033[91m"
+    BLU = "\033[94m"
+    CYN = "\033[96m"
+    MAG = "\033[95m"
+    WHT = "\033[97m"
+    GRY = "\033[90m"
+    CLR = "\033[2K"
+
+ICONS = {
+    "INFO": f"{ANSI.BLU}i{ANSI.RST}",
+    "OK":   f"{ANSI.GRN}+{ANSI.RST}",
+    "WARN": f"{ANSI.YEL}!{ANSI.RST}",
+    "ERR":  f"{ANSI.RED}x{ANSI.RST}",
+    "WIN":  f"{ANSI.YEL}{ANSI.BOLD}*{ANSI.RST}",
+    "NET":  f"{ANSI.CYN}~{ANSI.RST}",
+    "DBG":  f"{ANSI.MAG}D{ANSI.RST}",
+    "GPU":  f"{ANSI.GRN}G{ANSI.RST}"
+}
+
 def get_cpu_count():
     try:
         return os.cpu_count() or 2
@@ -146,7 +180,65 @@ def suggest_threads(device_type, gpu_enabled):
         else:
             return cpu_cnt
 
-# =========================== MINER CLASS ===========================
+# ----------------------------------------------------------------------
+# 6. Interactive setup
+# ----------------------------------------------------------------------
+def interactive_setup():
+    """First-run wizard, saves config afterwards."""
+    global DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL
+
+    os.system("clear" if os.name != "nt" else "cls")
+    print(f"{ANSI.BOLD}{ANSI.CYN}╔══════════════════════════════════════════════════════════╗{ANSI.RST}")
+    print(f"{ANSI.BOLD}{ANSI.CYN}║           CHOCOHUB MINER - INTERACTIVE SETUP             ║{ANSI.RST}")
+    print(f"{ANSI.BOLD}{ANSI.CYN}╚══════════════════════════════════════════════════════════╝{ANSI.RST}\n")
+
+    while True:
+        wrk = input(f"  {ANSI.YEL}➤ Worker name{ANSI.RST}: ").strip()
+        if wrk:
+            DEFAULT_WORKER = wrk
+            break
+        print(f"  {ANSI.RED}Please enter a worker name!{ANSI.RST}")
+
+    print(f"\n  {ANSI.CYN}[?] Select device type:{ANSI.RST}")
+    print(f"     1) {ANSI.BLU}Mobile{ANSI.RST}")
+    print(f"     2) {ANSI.GRN}PC{ANSI.RST}")
+    dev_choice = input(f"  {ANSI.YEL}➤ Choice (1/2){ANSI.RST}: ").strip()
+    is_mobile = dev_choice == "1"
+
+    use_gpu = False
+    if not is_mobile:
+        print(f"\n  {ANSI.CYN}[?] Use GPU for mining?{ANSI.RST}")
+        print(f"     1) {ANSI.GRN}CPU only{ANSI.RST}")
+        print(f"     2) {ANSI.MAG}CPU + GPU{ANSI.RST}")
+        gpu_choice = input(f"  {ANSI.YEL}➤ Choice (1/2){ANSI.RST}: ").strip()
+        use_gpu = gpu_choice == "2"
+        DEFAULT_GPU = use_gpu
+
+    suggested = suggest_threads("mobile" if is_mobile else "pc", use_gpu)
+    thr_input = input(f"\n  {ANSI.YEL}➤ CPU threads{ANSI.RST} (suggested: {suggested}): ").strip()
+    if thr_input:
+        try:
+            DEFAULT_THREADS = int(thr_input)
+        except ValueError:
+            DEFAULT_THREADS = suggested
+    else:
+        DEFAULT_THREADS = suggested
+
+    poll_input = input(f"\n  {ANSI.YEL}➤ Job poll interval (seconds){ANSI.RST} [default {DEFAULT_POLL}]: ").strip()
+    if poll_input:
+        try:
+            DEFAULT_POLL = int(poll_input)
+        except ValueError:
+            pass
+
+    # Save for next runs
+    save_config(DEFAULT_SERVER, DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL)
+    print(f"\n{ANSI.GRN}✓ Setup complete! Configuration saved to {CONFIG_FILE}{ANSI.RST}")
+    time.sleep(1.5)
+
+# ----------------------------------------------------------------------
+# 7. Miner class
+# ----------------------------------------------------------------------
 class ChocoMiner:
     def __init__(self, args):
         self.args = args
@@ -165,7 +257,6 @@ class ChocoMiner:
         self.session.headers.update({"User-Agent": "ChocoHub-Miner/v2"})
         self.found_event = threading.Event()
         self.solution = None
-        self.keyboard_handler = None
 
     def banner(self):
         print(f"""{ANSI.ORG}{ANSI.BOLD}
@@ -184,7 +275,6 @@ class ChocoMiner:
         return f"  {ts}  [{ICONS.get(level,'·')}]  {msg}"
 
     def log(self, level, msg, direct=False):
-        # Only show important levels; NET (new job fetch) is not printed separately
         if level in ("ERR", "WARN", "WIN", "OK", "GPU"):
             formatted = self._log_fmt(level, msg)
             if direct:
@@ -196,14 +286,16 @@ class ChocoMiner:
     def hr_str(self):
         h = self.stats["hashes"]
         t = time.time() - self.stats["start_time"]
-        if t < 0.5: return "—       "
+        if t < 0.5:
+            return "—       "
         r = h / t
-        if r >= 1_000_000: return f"{r/1_000_000:.2f} MH/s"
-        if r >= 1_000:     return f"{r/1_000:.1f} KH/s "
+        if r >= 1_000_000:
+            return f"{r/1_000_000:.2f} MH/s"
+        if r >= 1_000:
+            return f"{r/1_000:.1f} KH/s "
         return f"{int(r)} H/s   "
 
     def periodic_report(self):
-        """Print a report every 5 minutes."""
         while self.running:
             time.sleep(300)
             if not self.running:
@@ -214,51 +306,16 @@ class ChocoMiner:
                 hashes = self.stats["hashes"]
                 blocks = self.stats["blocks_found"]
                 rate = hashes / (now - self.stats["start_time"]) if (now - self.stats["start_time"]) > 0 else 0
-                report = (f"\n{ANSI.CLR}[REPORT] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-                          f"  Total hashes  : {hashes:,}\n"
-                          f"  Avg hashrate  : {rate/1e3:.2f} KH/s\n"
-                          f"  Blocks found  : {blocks}\n"
-                          f"  Uptime        : {int(elapsed)} seconds\n")
+                report = (
+                    f"\n{ANSI.CLR}[REPORT] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"  Total hashes  : {hashes:,}\n"
+                    f"  Avg hashrate  : {rate/1e3:.2f} KH/s\n"
+                    f"  Blocks found  : {blocks}\n"
+                    f"  Uptime        : {int(elapsed)} seconds\n"
+                )
                 sys.stdout.write(report)
                 sys.stdout.flush()
                 self.stats["last_report_time"] = now
-
-    def keyboard_listener_thread(self):
-        """Thread that listens for 'q' key to quit (alternative to Ctrl+C)."""
-        try:
-            handler_type = get_keyboard_handler()
-            
-            if handler_type == "pynput":
-                from pynput import keyboard
-                
-                def on_press(key):
-                    try:
-                        if key == keyboard.Key.ctrl_c or (hasattr(key, 'char') and key.char == 'q'):
-                            self.log("INFO", "Shutdown requested (keyboard)...", direct=True)
-                            self.stop()
-                            return False
-                    except AttributeError:
-                        pass
-                
-                with keyboard.Listener(on_press=on_press) as listener:
-                    self.keyboard_handler = listener
-                    listener.join()
-                    
-            elif handler_type == "termios":
-                import termios, tty
-                fd = sys.stdin.fileno()
-                old_settings = termios.tcgetattr(fd)
-                try:
-                    tty.setraw(fd)
-                    while self.running:
-                        if sys.stdin.read(1) == 'q':
-                            self.log("INFO", "Shutdown requested (keyboard)...", direct=True)
-                            self.stop()
-                            break
-                finally:
-                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        except Exception as e:
-            pass  # Silently fail if keyboard handling not available
 
     def display_loop(self):
         sp = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
@@ -280,8 +337,7 @@ class ChocoMiner:
                 f"Diff:{ANSI.CYN}{diff}{ANSI.RST}  "
                 f"Reward:{ANSI.GRN}{reward} CC{ANSI.RST}  "
                 f"Blocks:{ANSI.MAG}{self.stats['blocks_found']}{ANSI.RST}  "
-                f"Up:{ANSI.GRY}{int(elapsed)}s{ANSI.RST}  "
-                f"[q to quit]"
+                f"Up:{ANSI.GRY}{int(elapsed)}s{ANSI.RST}"
             )
             sys.stdout.flush()
             idx += 1
@@ -390,8 +446,6 @@ class ChocoMiner:
     def start(self):
         self.banner()
         self.log("NET", f"Connecting to {ANSI.CYN}{self.args.server}{ANSI.RST}...", direct=True)
-        print(f"\n  {ANSI.YEL}Press Ctrl+C or 'q' to quit the miner{ANSI.RST}\n")
-        
         try:
             self.session.get(f"{self.args.server}/api/test", timeout=5)
             self.log("OK", "Server is online", direct=True)
@@ -399,8 +453,6 @@ class ChocoMiner:
             self.log("ERR", "Server unreachable", direct=True)
             return
 
-        # Start keyboard listener thread for alternative quit methods
-        threading.Thread(target=self.keyboard_listener_thread, daemon=True).start()
         threading.Thread(target=self.display_loop, daemon=True).start()
         threading.Thread(target=self.periodic_report, daemon=True).start()
 
@@ -415,201 +467,115 @@ class ChocoMiner:
             else:
                 self.log("WARN", "No compatible GPU found. Running CPU only.")
 
-        try:
-            while self.running:
-                if self.stats["current_job"] is None:
-                    job = self.fetch_job()
-                    if not job:
-                        time.sleep(self.args.poll)
-                        continue
-                    self.found_event.clear()
-                    self.solution = None
-                    self.stats["current_job"] = job
-                else:
-                    self.found_event.wait(timeout=0.5)
+        while self.running:
+            if self.stats["current_job"] is None:
+                job = self.fetch_job()
+                if not job:
+                    time.sleep(self.args.poll)
+                    continue
+                self.found_event.clear()
+                self.solution = None
+                self.stats["current_job"] = job
+            else:
+                self.found_event.wait(timeout=0.5)
 
-                if self.solution and self.stats["current_job"]:
-                    bid, nonce, hx = self.solution
-                    self.solution = None
-                    self.found_event.clear()
-                    self.log("WIN", f"Solution found! Nonce: {nonce}")
-                    resp = self.submit(bid, nonce)
-                    if resp.get("status") == "success":
-                        with self.stats_lock:
-                            self.stats["blocks_found"] += 1
-                        self.log("OK", f"Block accepted! +{resp.get('reward','?')} CC")
-                    else:
-                        self.log("WARN", f"Rejected: {resp.get('reason', resp.get('message'))}")
-                    self.stats["current_job"] = None
-                    
-        except KeyboardInterrupt:
-            self.stop()
+            if self.solution and self.stats["current_job"]:
+                bid, nonce, hx = self.solution
+                self.solution = None
+                self.found_event.clear()
+                self.log("WIN", f"Solution found! Nonce: {nonce}")
+                resp = self.submit(bid, nonce)
+                if resp.get("status") == "success":
+                    with self.stats_lock:
+                        self.stats["blocks_found"] += 1
+                    self.log("OK", f"Block accepted! +{resp.get('reward','?')} CC")
+                else:
+                    self.log("WARN", f"Rejected: {resp.get('reason', resp.get('message'))}")
+                self.stats["current_job"] = None
 
     def stop(self):
         self.running = False
         print(f"\n{ANSI.CLR}")
         self.log("INFO", f"Final stats - Hashes: {self.stats['hashes']:,} | Blocks: {self.stats['blocks_found']}", direct=True)
-        # Force exit if needed
-        os._exit(0)
 
-# =========================== INTERACTIVE SETUP ===========================
-def interactive_setup():
-    global DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL
-
-    os.system("clear" if os.name != "nt" else "cls")
-    print(f"{ANSI.BOLD}{ANSI.CYN}╔══════════════════════════════════════════════════════════╗{ANSI.RST}")
-    print(f"{ANSI.BOLD}{ANSI.CYN}║           CHOCOHUB MINER - INTERACTIVE SETUP             ║{ANSI.RST}")
-    print(f"{ANSI.BOLD}{ANSI.CYN}╚══════════════════════════════════════════════════════════╝{ANSI.RST}\n")
-
-    while True:
-        try:
-            wrk = input(f"  {ANSI.YEL}➤ Worker name{ANSI.RST}: ").strip()
-            if wrk:
-                DEFAULT_WORKER = wrk
-                break
-            print(f"  {ANSI.RED}Please enter worker name!{ANSI.RST}")
-        except (KeyboardInterrupt, EOFError):
-            print(f"\n{ANSI.YEL}Exiting setup...{ANSI.RST}")
-            sys.exit(0)
-
-    print(f"\n  {ANSI.CYN}[?] Select device type:{ANSI.RST}")
-    print(f"     1) {ANSI.BLU}Mobile{ANSI.RST}")
-    print(f"     2) {ANSI.GRN}PC{ANSI.RST}")
-    try:
-        dev_choice = input(f"  {ANSI.YEL}➤ Choice (1/2){ANSI.RST}: ").strip()
-    except (KeyboardInterrupt, EOFError):
-        print(f"\n{ANSI.YEL}Exiting setup...{ANSI.RST}")
-        sys.exit(0)
-    is_mobile = (dev_choice == "1")
-
-    use_gpu = False
-    if not is_mobile:
-        print(f"\n  {ANSI.CYN}[?] Use GPU for mining?{ANSI.RST}")
-        print(f"     1) {ANSI.GRN}CPU only{ANSI.RST}")
-        print(f"     2) {ANSI.MAG}CPU + GPU{ANSI.RST}")
-        try:
-            gpu_choice = input(f"  {ANSI.YEL}➤ Choice (1/2){ANSI.RST}: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print(f"\n{ANSI.YEL}Exiting setup...{ANSI.RST}")
-            sys.exit(0)
-        use_gpu = (gpu_choice == "2")
-        DEFAULT_GPU = use_gpu
-
-    suggested = suggest_threads("mobile" if is_mobile else "pc", use_gpu)
-    try:
-        thr_input = input(f"\n  {ANSI.YEL}➤ CPU threads{ANSI.RST} (suggested: {suggested}): ").strip()
-    except (KeyboardInterrupt, EOFError):
-        print(f"\n{ANSI.YEL}Exiting setup...{ANSI.RST}")
-        sys.exit(0)
-    if thr_input:
-        try:
-            DEFAULT_THREADS = int(thr_input)
-        except:
-            DEFAULT_THREADS = suggested
-    else:
-        DEFAULT_THREADS = suggested
-
-    try:
-        poll_input = input(f"\n  {ANSI.YEL}➤ Job poll interval (seconds){ANSI.RST} [default {DEFAULT_POLL}]: ").strip()
-    except (KeyboardInterrupt, EOFError):
-        print(f"\n{ANSI.YEL}Exiting setup...{ANSI.RST}")
-        sys.exit(0)
-    if poll_input:
-        try:
-            DEFAULT_POLL = int(poll_input)
-        except:
-            pass
-
-    print(f"\n{ANSI.GRN}✓ Setup complete!{ANSI.RST}")
-    time.sleep(1.5)
-
-# =========================== ARGUMENT PARSER ===========================
+# ----------------------------------------------------------------------
+# 8. CLI / argument parsing
+# ----------------------------------------------------------------------
 def parse_arguments():
     parser = argparse.ArgumentParser(description="ChocoHub Python Miner")
-    parser.add_argument("--server", default=DEFAULT_SERVER, help=f"Server URL (default: {DEFAULT_SERVER})")
-    parser.add_argument("--worker", default=DEFAULT_WORKER, help="Worker name (login username)")
+    parser.add_argument("--server",  default=DEFAULT_SERVER,   help=f"Server URL (default: {DEFAULT_SERVER})")
+    parser.add_argument("--worker",  default=DEFAULT_WORKER,   help="Worker name (login username)")
     parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="Number of CPU threads")
-    parser.add_argument("--gpu", action="store_true", default=DEFAULT_GPU, help="Enable GPU mining (requires OpenCL)")
-    parser.add_argument("--poll", type=int, default=DEFAULT_POLL, help="Job fetch interval in seconds")
+    parser.add_argument("--gpu",     action="store_true", default=DEFAULT_GPU, help="Enable GPU mining (requires OpenCL)")
+    parser.add_argument("--poll",    type=int, default=DEFAULT_POLL, help="Job fetch interval in seconds")
     return parser.parse_args()
 
-# =========================== MAIN ===========================
+# ----------------------------------------------------------------------
+# 9. Main entry point
+# ----------------------------------------------------------------------
 def main():
-    # 1. Load saved configuration (if any)
-    load_config()
+    global DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL, DEFAULT_SERVER
 
-    # 2. Check if essential arguments are missing
     args_passed = sys.argv[1:]
-    has_essential = any(x in args_passed for x in ['--worker', '--threads', '--gpu', '--poll'])
 
-    if not has_essential and sys.stdin.isatty():
-        # Interactive setup will update the global defaults
-        try:
-            interactive_setup()
-        except KeyboardInterrupt:
-            print(f"\n{ANSI.YEL}Setup cancelled. Exiting...{ANSI.RST}")
-            sys.exit(0)
-
-    # 3. Parse final arguments (uses current global defaults)
-    args = parse_arguments()
-
-    # 4. If still no worker, error out (non-interactive)
-    if args.worker is None:
-        if sys.stdin.isatty():
-            try:
-                print(f"{ANSI.YEL}⚠ No worker name. Enter worker name:{ANSI.RST}")
-                args.worker = input("Worker: ").strip()
-            except KeyboardInterrupt:
-                print(f"\n{ANSI.YEL}Exiting...{ANSI.RST}")
-                sys.exit(0)
+    # If no arguments were given and a config file exists, use it automatically
+    if not args_passed and os.path.exists(CONFIG_FILE):
+        cfg = load_config()
+        if cfg:
+            apply_config_to_globals(cfg)
+            # Continue directly without interactive setup
+            args = parse_arguments()
+            if args.worker is None:
+                print(f"{ANSI.RED}Error: No worker name found in config. Please run interactively or provide --worker.{ANSI.RST}")
+                sys.exit(1)
         else:
-            print(f"{ANSI.RED}Error: Missing --worker parameter when running non-interactive{ANSI.RST}")
-            sys.exit(1)
+            # Config file exists but is empty/corrupt – fall through to interactive
+            pass
+    elif not args_passed and sys.stdin.isatty():
+        # No config, no args, interactive terminal -> setup wizard
+        interactive_setup()
+        # After interactive setup, globals have been updated, now parse
+        args = parse_arguments()
+    else:
+        # Some arguments given, or non-interactive without config
+        if DEFAULT_WORKER is None and '--worker' not in args_passed:
+            if sys.stdin.isatty():
+                print(f"{ANSI.YEL}⚠ No worker name. Enter worker name:{ANSI.RST}")
+                DEFAULT_WORKER = input("Worker: ").strip()
+            else:
+                print(f"{ANSI.RED}Error: Missing --worker parameter when running non-interactive{ANSI.RST}")
+                sys.exit(1)
+        args = parse_arguments()
 
-    # 5. If threads not provided, auto-suggest
+    # Post-parse: if still None, try to fill from defaults (e.g. threads)
+    if args.worker is None:
+        # Could still be None if config didn't have it and no input
+        print(f"{ANSI.RED}Error: No worker name. Use --worker or run without parameters.{ANSI.RST}")
+        sys.exit(1)
+
     if args.threads is None:
         args.threads = suggest_threads("pc" if not args.gpu else "pc", args.gpu)
 
-    # 6. Save config for next run
-    save_config(args)
-
-    # 7. Ensure required packages are installed
-    if not ensure_package("requests"):
-        print(f"{ANSI.RED}Fatal: requests library could not be installed.{ANSI.RST}")
-        sys.exit(1)
-
+    # Ensure GPU library if needed
     if args.gpu:
-        if ensure_package("pyopencl"):
-            # If pyopencl installed, GPU discovery will work
-            pass
+        if not _ensure_pyopencl():
+            print(f"{ANSI.RED}Error: Failed to initialise OpenCL. GPU mining disabled.{ANSI.RST}")
+            # Optionally fall back: args.gpu = False (but we won't modify args)
         else:
-            print(f"{ANSI.YEL}Warning: pyopencl not available, GPU mining will be skipped.{ANSI.RST}")
-            args.gpu = False
+            # Re-check GPU availability
+            gpus = discover_gpus()
+            if not gpus:
+                print(f"{ANSI.YEL}Warning: PyOpenCL installed but no GPU devices found. Running CPU only.{ANSI.RST}")
 
-    # 8. Start the miner
     os.system("clear" if os.name != "nt" else "cls")
     miner = ChocoMiner(args)
 
     def signal_handler(sig, frame):
-        print(f"\n{ANSI.YEL}Signal received, shutting down...{ANSI.RST}")
         miner.stop()
-        os._exit(0)
+        sys.exit(0)
 
-    # Register multiple signal handlers
     signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
-    # Try to register SIGQUIT if available (not on Windows)
-    try:
-        signal.signal(signal.SIGQUIT, signal_handler)
-    except AttributeError:
-        pass
-
-    try:
-        miner.start()
-    except Exception as e:
-        print(f"{ANSI.RED}Fatal error: {e}{ANSI.RST}")
-        miner.stop()
+    miner.start()
 
 if __name__ == "__main__":
     main()
