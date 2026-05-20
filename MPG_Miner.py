@@ -168,7 +168,7 @@ class ChocoMiner:
         return f"  {ts}  [{ICONS.get(level,'·')}]  {msg}"
 
     def log(self, level, msg, direct=False):
-        # Chỉ hiển thị các mức quan trọng, không hiển thị NET (lấy job mới)
+        # Only show important levels; NET (new job fetch) is not printed separately
         if level in ("ERR", "WARN", "WIN", "OK", "GPU"):
             formatted = self._log_fmt(level, msg)
             if direct:
@@ -187,7 +187,7 @@ class ChocoMiner:
         return f"{int(r)} H/s   "
 
     def periodic_report(self):
-        """In báo cáo mỗi 5 phút"""
+        """Print a report every 5 minutes."""
         while self.running:
             time.sleep(300)
             if not self.running:
@@ -363,7 +363,6 @@ class ChocoMiner:
                 if not job:
                     time.sleep(self.args.poll)
                     continue
-                # Không in log NET nữa, chỉ cập nhật trên dòng trạng thái
                 self.found_event.clear()
                 self.solution = None
                 self.stats["current_job"] = job
@@ -507,4 +506,4 @@ def main():
     miner.start()
 
 if __name__ == "__main__":
-    main()
+    main() 
