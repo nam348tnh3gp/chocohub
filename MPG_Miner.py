@@ -76,6 +76,21 @@ def ensure_package(package_name):
             print(f"{ANSI.RED}Failed to install {package_name}: {e}{ANSI.RST}")
             return False
 
+# =========================== KEYBOARD INPUT CHECKER ===========================
+def get_keyboard_handler():
+    """Try to import keyboard listener for better Ctrl+C handling."""
+    try:
+        # Try pynput first (works on a-shell)
+        from pynput import keyboard
+        return "pynput"
+    except ImportError:
+        try:
+            # Try getch for Unix systems
+            import termios, tty
+            return "termios"
+        except ImportError:
+            return None
+
 # =========================== ANSI / ICONS ===========================
 class ANSI:
     RST="\033[0m"; BOLD="\033[1m"
@@ -150,6 +165,7 @@ class ChocoMiner:
         self.session.headers.update({"User-Agent": "ChocoHub-Miner/v2"})
         self.found_event = threading.Event()
         self.solution = None
+        self.keyboard_handler = None
 
     def banner(self):
         print(f"""{ANSI.ORG}{ANSI.BOLD}
@@ -207,6 +223,43 @@ class ChocoMiner:
                 sys.stdout.flush()
                 self.stats["last_report_time"] = now
 
+    def keyboard_listener_thread(self):
+        """Thread that listens for 'q' key to quit (alternative to Ctrl+C)."""
+        try:
+            handler_type = get_keyboard_handler()
+            
+            if handler_type == "pynput":
+                from pynput import keyboard
+                
+                def on_press(key):
+                    try:
+                        if key == keyboard.Key.ctrl_c or (hasattr(key, 'char') and key.char == 'q'):
+                            self.log("INFO", "Shutdown requested (keyboard)...", direct=True)
+                            self.stop()
+                            return False
+                    except AttributeError:
+                        pass
+                
+                with keyboard.Listener(on_press=on_press) as listener:
+                    self.keyboard_handler = listener
+                    listener.join()
+                    
+            elif handler_type == "termios":
+                import termios, tty
+                fd = sys.stdin.fileno()
+                old_settings = termios.tcgetattr(fd)
+                try:
+                    tty.setraw(fd)
+                    while self.running:
+                        if sys.stdin.read(1) == 'q':
+                            self.log("INFO", "Shutdown requested (keyboard)...", direct=True)
+                            self.stop()
+                            break
+                finally:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        except Exception as e:
+            pass  # Silently fail if keyboard handling not available
+
     def display_loop(self):
         sp = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
         idx = 0
@@ -227,7 +280,8 @@ class ChocoMiner:
                 f"Diff:{ANSI.CYN}{diff}{ANSI.RST}  "
                 f"Reward:{ANSI.GRN}{reward} CC{ANSI.RST}  "
                 f"Blocks:{ANSI.MAG}{self.stats['blocks_found']}{ANSI.RST}  "
-                f"Up:{ANSI.GRY}{int(elapsed)}s{ANSI.RST}"
+                f"Up:{ANSI.GRY}{int(elapsed)}s{ANSI.RST}  "
+                f"[q to quit]"
             )
             sys.stdout.flush()
             idx += 1
@@ -336,6 +390,8 @@ class ChocoMiner:
     def start(self):
         self.banner()
         self.log("NET", f"Connecting to {ANSI.CYN}{self.args.server}{ANSI.RST}...", direct=True)
+        print(f"\n  {ANSI.YEL}Press Ctrl+C or 'q' to quit the miner{ANSI.RST}\n")
+        
         try:
             self.session.get(f"{self.args.server}/api/test", timeout=5)
             self.log("OK", "Server is online", direct=True)
@@ -343,6 +399,8 @@ class ChocoMiner:
             self.log("ERR", "Server unreachable", direct=True)
             return
 
+        # Start keyboard listener thread for alternative quit methods
+        threading.Thread(target=self.keyboard_listener_thread, daemon=True).start()
         threading.Thread(target=self.display_loop, daemon=True).start()
         threading.Thread(target=self.periodic_report, daemon=True).start()
 
@@ -357,36 +415,42 @@ class ChocoMiner:
             else:
                 self.log("WARN", "No compatible GPU found. Running CPU only.")
 
-        while self.running:
-            if self.stats["current_job"] is None:
-                job = self.fetch_job()
-                if not job:
-                    time.sleep(self.args.poll)
-                    continue
-                self.found_event.clear()
-                self.solution = None
-                self.stats["current_job"] = job
-            else:
-                self.found_event.wait(timeout=0.5)
-
-            if self.solution and self.stats["current_job"]:
-                bid, nonce, hx = self.solution
-                self.solution = None
-                self.found_event.clear()
-                self.log("WIN", f"Solution found! Nonce: {nonce}")
-                resp = self.submit(bid, nonce)
-                if resp.get("status") == "success":
-                    with self.stats_lock:
-                        self.stats["blocks_found"] += 1
-                    self.log("OK", f"Block accepted! +{resp.get('reward','?')} CC")
+        try:
+            while self.running:
+                if self.stats["current_job"] is None:
+                    job = self.fetch_job()
+                    if not job:
+                        time.sleep(self.args.poll)
+                        continue
+                    self.found_event.clear()
+                    self.solution = None
+                    self.stats["current_job"] = job
                 else:
-                    self.log("WARN", f"Rejected: {resp.get('reason', resp.get('message'))}")
-                self.stats["current_job"] = None
+                    self.found_event.wait(timeout=0.5)
+
+                if self.solution and self.stats["current_job"]:
+                    bid, nonce, hx = self.solution
+                    self.solution = None
+                    self.found_event.clear()
+                    self.log("WIN", f"Solution found! Nonce: {nonce}")
+                    resp = self.submit(bid, nonce)
+                    if resp.get("status") == "success":
+                        with self.stats_lock:
+                            self.stats["blocks_found"] += 1
+                        self.log("OK", f"Block accepted! +{resp.get('reward','?')} CC")
+                    else:
+                        self.log("WARN", f"Rejected: {resp.get('reason', resp.get('message'))}")
+                    self.stats["current_job"] = None
+                    
+        except KeyboardInterrupt:
+            self.stop()
 
     def stop(self):
         self.running = False
         print(f"\n{ANSI.CLR}")
         self.log("INFO", f"Final stats - Hashes: {self.stats['hashes']:,} | Blocks: {self.stats['blocks_found']}", direct=True)
+        # Force exit if needed
+        os._exit(0)
 
 # =========================== INTERACTIVE SETUP ===========================
 def interactive_setup():
@@ -398,16 +462,24 @@ def interactive_setup():
     print(f"{ANSI.BOLD}{ANSI.CYN}╚══════════════════════════════════════════════════════════╝{ANSI.RST}\n")
 
     while True:
-        wrk = input(f"  {ANSI.YEL}➤ Worker name{ANSI.RST}: ").strip()
-        if wrk:
-            DEFAULT_WORKER = wrk
-            break
-        print(f"  {ANSI.RED}Please enter worker name!{ANSI.RST}")
+        try:
+            wrk = input(f"  {ANSI.YEL}➤ Worker name{ANSI.RST}: ").strip()
+            if wrk:
+                DEFAULT_WORKER = wrk
+                break
+            print(f"  {ANSI.RED}Please enter worker name!{ANSI.RST}")
+        except (KeyboardInterrupt, EOFError):
+            print(f"\n{ANSI.YEL}Exiting setup...{ANSI.RST}")
+            sys.exit(0)
 
     print(f"\n  {ANSI.CYN}[?] Select device type:{ANSI.RST}")
     print(f"     1) {ANSI.BLU}Mobile{ANSI.RST}")
     print(f"     2) {ANSI.GRN}PC{ANSI.RST}")
-    dev_choice = input(f"  {ANSI.YEL}➤ Choice (1/2){ANSI.RST}: ").strip()
+    try:
+        dev_choice = input(f"  {ANSI.YEL}➤ Choice (1/2){ANSI.RST}: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print(f"\n{ANSI.YEL}Exiting setup...{ANSI.RST}")
+        sys.exit(0)
     is_mobile = (dev_choice == "1")
 
     use_gpu = False
@@ -415,12 +487,20 @@ def interactive_setup():
         print(f"\n  {ANSI.CYN}[?] Use GPU for mining?{ANSI.RST}")
         print(f"     1) {ANSI.GRN}CPU only{ANSI.RST}")
         print(f"     2) {ANSI.MAG}CPU + GPU{ANSI.RST}")
-        gpu_choice = input(f"  {ANSI.YEL}➤ Choice (1/2){ANSI.RST}: ").strip()
+        try:
+            gpu_choice = input(f"  {ANSI.YEL}➤ Choice (1/2){ANSI.RST}: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print(f"\n{ANSI.YEL}Exiting setup...{ANSI.RST}")
+            sys.exit(0)
         use_gpu = (gpu_choice == "2")
         DEFAULT_GPU = use_gpu
 
     suggested = suggest_threads("mobile" if is_mobile else "pc", use_gpu)
-    thr_input = input(f"\n  {ANSI.YEL}➤ CPU threads{ANSI.RST} (suggested: {suggested}): ").strip()
+    try:
+        thr_input = input(f"\n  {ANSI.YEL}➤ CPU threads{ANSI.RST} (suggested: {suggested}): ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print(f"\n{ANSI.YEL}Exiting setup...{ANSI.RST}")
+        sys.exit(0)
     if thr_input:
         try:
             DEFAULT_THREADS = int(thr_input)
@@ -429,7 +509,11 @@ def interactive_setup():
     else:
         DEFAULT_THREADS = suggested
 
-    poll_input = input(f"\n  {ANSI.YEL}➤ Job poll interval (seconds){ANSI.RST} [default {DEFAULT_POLL}]: ").strip()
+    try:
+        poll_input = input(f"\n  {ANSI.YEL}➤ Job poll interval (seconds){ANSI.RST} [default {DEFAULT_POLL}]: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print(f"\n{ANSI.YEL}Exiting setup...{ANSI.RST}")
+        sys.exit(0)
     if poll_input:
         try:
             DEFAULT_POLL = int(poll_input)
@@ -460,7 +544,11 @@ def main():
 
     if not has_essential and sys.stdin.isatty():
         # Interactive setup will update the global defaults
-        interactive_setup()
+        try:
+            interactive_setup()
+        except KeyboardInterrupt:
+            print(f"\n{ANSI.YEL}Setup cancelled. Exiting...{ANSI.RST}")
+            sys.exit(0)
 
     # 3. Parse final arguments (uses current global defaults)
     args = parse_arguments()
@@ -468,8 +556,12 @@ def main():
     # 4. If still no worker, error out (non-interactive)
     if args.worker is None:
         if sys.stdin.isatty():
-            print(f"{ANSI.YEL}⚠ No worker name. Enter worker name:{ANSI.RST}")
-            args.worker = input("Worker: ").strip()
+            try:
+                print(f"{ANSI.YEL}⚠ No worker name. Enter worker name:{ANSI.RST}")
+                args.worker = input("Worker: ").strip()
+            except KeyboardInterrupt:
+                print(f"\n{ANSI.YEL}Exiting...{ANSI.RST}")
+                sys.exit(0)
         else:
             print(f"{ANSI.RED}Error: Missing --worker parameter when running non-interactive{ANSI.RST}")
             sys.exit(1)
@@ -499,11 +591,25 @@ def main():
     miner = ChocoMiner(args)
 
     def signal_handler(sig, frame):
+        print(f"\n{ANSI.YEL}Signal received, shutting down...{ANSI.RST}")
         miner.stop()
-        sys.exit(0)
+        os._exit(0)
 
+    # Register multiple signal handlers
     signal.signal(signal.SIGINT, signal_handler)
-    miner.start()
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Try to register SIGQUIT if available (not on Windows)
+    try:
+        signal.signal(signal.SIGQUIT, signal_handler)
+    except AttributeError:
+        pass
+
+    try:
+        miner.start()
+    except Exception as e:
+        print(f"{ANSI.RED}Fatal error: {e}{ANSI.RST}")
+        miner.stop()
 
 if __name__ == "__main__":
-    main() 
+    main()
