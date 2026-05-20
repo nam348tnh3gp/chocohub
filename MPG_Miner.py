@@ -1,5 +1,8 @@
-import hashlib, requests, time, threading, argparse, sys, os, signal
+import hashlib, requests, time, threading, argparse, sys, os, signal, subprocess
 from datetime import datetime
+
+# =========================== CONFIG FILE ===========================
+CONFIG_FILE = "config.txt"
 
 DEFAULT_SERVER  = "https://chocohub-r011.onrender.com"
 DEFAULT_WORKER  = None
@@ -7,15 +10,94 @@ DEFAULT_THREADS = None
 DEFAULT_GPU     = False
 DEFAULT_POLL    = 10
 
-_gpu_available = False
-try:
-    import pyopencl as cl
-    _gpu_available = True
-except ImportError:
-    pass
+def load_config():
+    """Load settings from config.txt into global defaults."""
+    global DEFAULT_SERVER, DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL
+    if not os.path.isfile(CONFIG_FILE):
+        return
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if '=' not in line:
+                    continue
+                key, val = line.split('=', 1)
+                key = key.strip().upper()
+                val = val.strip()
+                if key == "SERVER":
+                    DEFAULT_SERVER = val
+                elif key == "WORKER":
+                    DEFAULT_WORKER = val
+                elif key == "THREADS":
+                    try:
+                        DEFAULT_THREADS = int(val)
+                    except:
+                        pass
+                elif key == "GPU":
+                    DEFAULT_GPU = val.lower() in ("true", "1", "yes")
+                elif key == "POLL":
+                    try:
+                        DEFAULT_POLL = int(val)
+                    except:
+                        pass
+    except Exception as e:
+        print(f"Warning: Could not load config: {e}")
 
+def save_config(args):
+    """Write current settings to config.txt."""
+    try:
+        with open(CONFIG_FILE, 'w') as f:
+            f.write(f"SERVER={args.server}\n")
+            f.write(f"WORKER={args.worker}\n")
+            f.write(f"THREADS={args.threads}\n")
+            f.write(f"GPU={args.gpu}\n")
+            f.write(f"POLL={args.poll}\n")
+    except Exception as e:
+        print(f"Warning: Could not save config: {e}")
+
+# =========================== PACKAGE CHECKER ===========================
+def ensure_package(package_name):
+    """Check if a package is installed, install it if not. Returns True on success."""
+    try:
+        __import__(package_name)
+        return True
+    except ImportError:
+        print(f"{ANSI.YEL}Installing required package: {package_name}...{ANSI.RST}")
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", package_name],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            __import__(package_name)
+            return True
+        except Exception as e:
+            print(f"{ANSI.RED}Failed to install {package_name}: {e}{ANSI.RST}")
+            return False
+
+# =========================== ANSI / ICONS ===========================
+class ANSI:
+    RST="\033[0m"; BOLD="\033[1m"
+    YEL="\033[93m"; ORG="\033[33m"; GRN="\033[92m"; RED="\033[91m"
+    BLU="\033[94m"; CYN="\033[96m"; MAG="\033[95m"; WHT="\033[97m"
+    GRY="\033[90m"; CLR="\033[2K"
+
+ICONS = {
+    "INFO": f"{ANSI.BLU}i{ANSI.RST}", "OK":  f"{ANSI.GRN}+{ANSI.RST}",
+    "WARN": f"{ANSI.YEL}!{ANSI.RST}", "ERR": f"{ANSI.RED}x{ANSI.RST}",
+    "WIN":  f"{ANSI.YEL}{ANSI.BOLD}*{ANSI.RST}", "NET": f"{ANSI.CYN}~{ANSI.RST}",
+    "DBG":  f"{ANSI.MAG}D{ANSI.RST}",
+    "GPU":  f"{ANSI.GRN}G{ANSI.RST}"
+}
+
+# =========================== GPU DISCOVERY ===========================
 def discover_gpus():
-    if not _gpu_available: return []
+    """Return list of available GPU devices (requires pyopencl)."""
+    try:
+        import pyopencl as cl
+    except ImportError:
+        return []
     gpu_list = []
     try:
         for platform in cl.get_platforms():
@@ -32,20 +114,7 @@ def discover_gpus():
         pass
     return gpu_list
 
-class ANSI:
-    RST="\033[0m"; BOLD="\033[1m"
-    YEL="\033[93m"; ORG="\033[33m"; GRN="\033[92m"; RED="\033[91m"
-    BLU="\033[94m"; CYN="\033[96m"; MAG="\033[95m"; WHT="\033[97m"
-    GRY="\033[90m"; CLR="\033[2K"
-
-ICONS = {
-    "INFO": f"{ANSI.BLU}i{ANSI.RST}", "OK":  f"{ANSI.GRN}+{ANSI.RST}",
-    "WARN": f"{ANSI.YEL}!{ANSI.RST}", "ERR": f"{ANSI.RED}x{ANSI.RST}",
-    "WIN":  f"{ANSI.YEL}{ANSI.BOLD}*{ANSI.RST}", "NET": f"{ANSI.CYN}~{ANSI.RST}",
-    "DBG":  f"{ANSI.MAG}D{ANSI.RST}",
-    "GPU":  f"{ANSI.GRN}G{ANSI.RST}"
-}
-
+# =========================== HELPERS ===========================
 def get_cpu_count():
     try:
         return os.cpu_count() or 2
@@ -62,6 +131,7 @@ def suggest_threads(device_type, gpu_enabled):
         else:
             return cpu_cnt
 
+# =========================== MINER CLASS ===========================
 class ChocoMiner:
     def __init__(self, args):
         self.args = args
@@ -319,6 +389,7 @@ class ChocoMiner:
         print(f"\n{ANSI.CLR}")
         self.log("INFO", f"Final stats - Hashes: {self.stats['hashes']:,} | Blocks: {self.stats['blocks_found']}", direct=True)
 
+# =========================== INTERACTIVE SETUP ===========================
 def interactive_setup():
     global DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL
 
@@ -369,6 +440,7 @@ def interactive_setup():
     print(f"\n{ANSI.GRN}✓ Setup complete!{ANSI.RST}")
     time.sleep(1.5)
 
+# =========================== ARGUMENT PARSER ===========================
 def parse_arguments():
     parser = argparse.ArgumentParser(description="ChocoHub Python Miner")
     parser.add_argument("--server", default=DEFAULT_SERVER, help=f"Server URL (default: {DEFAULT_SERVER})")
@@ -378,32 +450,52 @@ def parse_arguments():
     parser.add_argument("--poll", type=int, default=DEFAULT_POLL, help="Job fetch interval in seconds")
     return parser.parse_args()
 
+# =========================== MAIN ===========================
 def main():
+    # 1. Load saved configuration (if any)
+    load_config()
+
+    # 2. Check if essential arguments are missing
     args_passed = sys.argv[1:]
     has_essential = any(x in args_passed for x in ['--worker', '--threads', '--gpu', '--poll'])
 
     if not has_essential and sys.stdin.isatty():
+        # Interactive setup will update the global defaults
         interactive_setup()
-    else:
-        if DEFAULT_WORKER is None:
-            if sys.stdin.isatty():
-                print(f"{ANSI.YEL}⚠ No worker name. Enter worker name:{ANSI.RST}")
-                DEFAULT_WORKER = input("Worker: ").strip()
-            else:
-                print(f"{ANSI.RED}Error: Missing --worker parameter when running non-interactive{ANSI.RST}")
-                sys.exit(1)
 
+    # 3. Parse final arguments (uses current global defaults)
     args = parse_arguments()
+
+    # 4. If still no worker, error out (non-interactive)
     if args.worker is None:
-        if DEFAULT_WORKER:
-            args.worker = DEFAULT_WORKER
+        if sys.stdin.isatty():
+            print(f"{ANSI.YEL}⚠ No worker name. Enter worker name:{ANSI.RST}")
+            args.worker = input("Worker: ").strip()
         else:
-            print(f"{ANSI.RED}Error: No worker name. Use --worker or run without parameters.{ANSI.RST}")
+            print(f"{ANSI.RED}Error: Missing --worker parameter when running non-interactive{ANSI.RST}")
             sys.exit(1)
 
+    # 5. If threads not provided, auto-suggest
     if args.threads is None:
         args.threads = suggest_threads("pc" if not args.gpu else "pc", args.gpu)
 
+    # 6. Save config for next run
+    save_config(args)
+
+    # 7. Ensure required packages are installed
+    if not ensure_package("requests"):
+        print(f"{ANSI.RED}Fatal: requests library could not be installed.{ANSI.RST}")
+        sys.exit(1)
+
+    if args.gpu:
+        if ensure_package("pyopencl"):
+            # If pyopencl installed, GPU discovery will work
+            pass
+        else:
+            print(f"{ANSI.YEL}Warning: pyopencl not available, GPU mining will be skipped.{ANSI.RST}")
+            args.gpu = False
+
+    # 8. Start the miner
     os.system("clear" if os.name != "nt" else "cls")
     miner = ChocoMiner(args)
 
