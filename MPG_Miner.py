@@ -1,4 +1,4 @@
-import hashlib, requests, time, threading, argparse, sys, os, signal, subprocess, json, numpy as np
+import hashlib, requests, time, threading, argparse, sys, os, signal, subprocess, json
 from datetime import datetime
 from typing import Optional, Tuple
 
@@ -15,13 +15,15 @@ def ensure_libraries(gpu=False):
         print("requests installed – please restart the miner.")
         sys.exit(1)
 
-    try:
-        import numpy
-    except ImportError:
-        print("Installing numpy...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy"])
-        print("numpy installed – please restart the miner.")
-        sys.exit(1)
+    # Only check numpy if GPU is enabled
+    if gpu:
+        try:
+            import numpy
+        except ImportError:
+            print("Installing numpy (required for GPU mining)...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy"])
+            print("numpy installed – please restart the miner.")
+            sys.exit(1)
 
     if gpu:
         try:
@@ -211,6 +213,14 @@ class GPUMiner:
         self.max_work = 0
         self.device = None
         self.platform = None
+        self.np = None  # Will be set when needed
+        
+    def _import_numpy(self):
+        """Lazy import numpy only when needed"""
+        if self.np is None:
+            import numpy as np
+            self.np = np
+        return self.np
         
     def init_gpu(self, platform_idx: Optional[int] = None, device_idx: Optional[int] = None) -> bool:
         try:
@@ -263,7 +273,7 @@ class GPUMiner:
         Solve a mining job using GPU
         Returns: (nonce, hashrate, elapsed_time)
         """
-        import numpy as np
+        np = self._import_numpy()
         
         last_bytes = bytes.fromhex(last_hash_hex)
         target_bytes = bytes.fromhex(target_hex)
@@ -352,17 +362,15 @@ def discover_gpus():
             for dev in devices:
                 gpu_list.append({
                     "device": dev,
-                    "platform_idx": None,  # Will fill later
+                    "platform_idx": None,
                     "device_idx": None,
                     "platform_name": platform.name.strip(),
                     "name": dev.name.strip(),
                     "vendor": dev.vendor.strip(),
                     "version": dev.version.strip()
                 })
-        # Add indices
         for i, gpu in enumerate(gpu_list):
             gpu["device_idx"] = i
-        # Find platform indices
         for p_idx, platform in enumerate(cl.get_platforms()):
             for gpu in gpu_list:
                 if gpu["platform_name"] == platform.name.strip():
@@ -427,10 +435,9 @@ class ChocoMiner:
         self.found_event = threading.Event()
         self.solution = None
         
-        # GPU miner instance
+        # GPU miner instance - only if GPU enabled and available
         self.gpu_miner = None
         if self.args.gpu and _gpu_available:
-            import pyopencl as cl
             self.gpu_miner = GPUMiner(cl)
 
     def banner(self):
@@ -602,12 +609,11 @@ class ChocoMiner:
             # Solve using GPU
             nonce, hashrate, elapsed = self.gpu_miner.solve_job(
                 last_hash, target_hex, self.args.worker,
-                gpu_load_percent=90  # High GPU load for mining
+                gpu_load_percent=90
             )
             
             if nonce is not None and not self.found_event.is_set():
                 if self.stats["current_job"] and self.stats["current_job"]["id"] == jid:
-                    # Format nonce to 20 digits
                     nonce_padded = str(nonce).zfill(20)
                     sha256 = hashlib.sha256
                     worker_b = self.args.worker.encode()
@@ -689,7 +695,7 @@ class ChocoMiner:
         self.log("INFO", f"Final stats - Hashes: {self.stats['hashes']:,} | Blocks: {self.stats['blocks_found']}", direct=True)
 
 # ---------------------------------------------------------------------------
-# Interactive setup (unchanged but updated)
+# Interactive setup
 # ---------------------------------------------------------------------------
 def interactive_setup():
     global DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL
@@ -786,7 +792,7 @@ def main():
     if args.threads is None:
         args.threads = suggest_threads("pc" if not args.gpu else "pc", args.gpu)
 
-    # Install required libraries
+    # Install required libraries (only numpy if GPU enabled)
     ensure_libraries(gpu=args.gpu)
 
     # Save configuration
