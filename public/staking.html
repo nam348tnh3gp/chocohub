@@ -222,9 +222,15 @@
     <div id="toast"></div>
 
     <script>
-        const API = '/pos'; // PoS API prefix
-        let user = localStorage.getItem('choco_user');
+        // Lấy thông tin từ localStorage
+        let username = localStorage.getItem('choco_user');
         const token = localStorage.getItem('choco_token');
+
+        if (!username || !token) {
+            // Chưa đăng nhập, chuyển về dashboard
+            alert('Vui lòng đăng nhập trước.');
+            window.location.href = 'index.html';
+        }
 
         function showToast(msg, type='') {
             const t = document.getElementById('toast');
@@ -234,19 +240,27 @@
             t._timeout = setTimeout(() => t.className = '', 3000);
         }
 
-        async function apiCall(method, path, body) {
-            const res = await fetch(API + path, {
+        // Hàm gọi API có token
+        async function apiCall(method, path, body = null) {
+            const options = {
                 method,
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: body ? JSON.stringify(body) : undefined
-            });
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                }
+            };
+            if (body) options.body = JSON.stringify(body);
+            const res = await fetch('/pos' + path, options);
             return res.json();
         }
 
+        // Lấy thông tin staking (không cần token nhưng vẫn gửi để đồng bộ)
         async function refreshUI() {
-            if (!user || !token) return;
             try {
-                const data = await apiCall('GET', `/info?username=${encodeURIComponent(user)}`);
+                const res = await fetch(`/pos/info?username=${encodeURIComponent(username)}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await res.json();
                 if (data.status === 'success') {
                     document.getElementById('user-balance').textContent = data.balance.toFixed(4) + ' CC';
                     document.getElementById('staked-amount').textContent = (data.staked || 0).toFixed(4) + ' CC';
@@ -261,41 +275,64 @@
                     }
                     document.getElementById('pending-reward').textContent = (data.pending_reward || 0).toFixed(4) + ' CC';
                 } else {
-                    showToast(data.message || 'Failed to load data', 'error');
+                    if (data.message === 'User not found') {
+                        // Có thể token hết hạn hoặc user không tồn tại
+                        showToast('Session expired. Please login again.', 'error');
+                        setTimeout(() => { window.location.href = 'index.html'; }, 1500);
+                    } else {
+                        showToast(data.message || 'Failed to load data', 'error');
+                    }
                 }
             } catch (e) {
                 showToast('Network error', 'error');
             }
         }
 
+        // Stake: chỉ gửi amount (server lấy username từ token)
         document.getElementById('stake-btn').addEventListener('click', async () => {
             const amount = parseFloat(document.getElementById('stake-input').value);
-            if (isNaN(amount) || amount < 10) return showToast('Minimum stake is 10 CC', 'error');
-            if (!user || !token) return showToast('Please login first', 'error');
-            const pin = sessionStorage.getItem('choco_pin_temp');
-            if (!pin) return showToast('Session expired, please login again', 'error');
-
-            const result = await apiCall('POST', '/stake', { username: user, pin, amount });
-            if (result.status === 'success') {
-                showToast(result.message, 'success');
-                document.getElementById('stake-input').value = '';
-                refreshUI();
-            } else {
-                showToast(result.message, 'error');
+            if (isNaN(amount) || amount < 10) {
+                showToast('Minimum stake is 10 CC', 'error');
+                return;
+            }
+            const btn = document.getElementById('stake-btn');
+            btn.disabled = true;
+            btn.textContent = 'STAKING...';
+            try {
+                const result = await apiCall('POST', '/stake', { amount });
+                if (result.status === 'success') {
+                    showToast(result.message, 'success');
+                    document.getElementById('stake-input').value = '';
+                    refreshUI();
+                } else {
+                    showToast(result.message, 'error');
+                }
+            } catch (e) {
+                showToast('Request failed', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'STAKE';
             }
         });
 
+        // Unstake: không cần body
         document.getElementById('unstake-btn').addEventListener('click', async () => {
-            if (!user || !token) return showToast('Please login first', 'error');
-            const pin = sessionStorage.getItem('choco_pin_temp');
-            if (!pin) return showToast('Session expired, please login again', 'error');
-
-            const result = await apiCall('POST', '/unstake', { username: user, pin });
-            if (result.status === 'success') {
-                showToast(result.message, 'success');
-                refreshUI();
-            } else {
-                showToast(result.message, 'error');
+            const btn = document.getElementById('unstake-btn');
+            btn.disabled = true;
+            btn.textContent = 'UNSTAKING...';
+            try {
+                const result = await apiCall('POST', '/unstake');
+                if (result.status === 'success') {
+                    showToast(result.message, 'success');
+                    refreshUI();
+                } else {
+                    showToast(result.message, 'error');
+                }
+            } catch (e) {
+                showToast('Request failed', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'UNSTAKE ALL';
             }
         });
 
