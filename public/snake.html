@@ -79,7 +79,6 @@
             100% { transform: translate(var(--tx),var(--ty)) scale(0); opacity: 0; }
         }
         
-        /* Liquid background */
         .liquid-bg {
             position: fixed; top: -25%; left: -25%; width: 150%; height: 150%;
             background: radial-gradient(circle at center, rgba(255, 149, 0, 0.04) 0%, rgba(30, 20, 10, 0.2) 30%, transparent 60%);
@@ -87,7 +86,6 @@
             animation: liquidMove 20s ease-in-out infinite alternate;
         }
         
-        /* Back Button */
         .btn-back {
             position: fixed; top: 20px; left: 20px; z-index: 1000;
             color: var(--mid); font-family: 'Space Mono', monospace; font-size: 0.7rem; font-weight: 700;
@@ -101,7 +99,6 @@
             background: rgba(255, 149, 0, 0.1); transform: translateX(-3px);
         }
         
-        /* Header */
         header {
             position: relative; z-index: 2; text-align: center; padding: 40px 20px 15px;
         }
@@ -115,12 +112,10 @@
             letter-spacing: 2px; text-transform: uppercase; margin-top: 6px;
         }
         
-        /* Hub container */
         .hub {
             position: relative; z-index: 2; width: min(500px, 96vw); margin: 10px auto 60px;
         }
         
-        /* Panel */
         .panel {
             position: relative; z-index: 1; width: 100%; max-width: 680px;
             background: var(--surface); backdrop-filter: blur(14px) saturate(160%);
@@ -136,7 +131,6 @@
         .c-tr { top: -1px; right: -1px; border-width: 2px 2px 0 0; border-radius: 0 18px 0 0; }
         .c-bl { bottom: -1px; left: -1px; border-width: 0 0 2px 2px; border-radius: 0 0 0 18px; }
         
-        /* Setup Screen */
         #setup-screen { text-align: center; }
         .game-title {
             font-family: 'Outfit'; font-weight: 800; font-size: 2.2rem;
@@ -157,7 +151,6 @@
         }
         .rcard-lbl { font-size: .7rem; color: var(--mid); }
         
-        /* Hardcore Switch & Badges */
         .hc-wrap {
             background: rgba(255, 45, 120, .04); border: 1px solid rgba(255, 45, 120, .12);
             border-radius: 12px; padding: 15px; margin-bottom: 12px; cursor: pointer; transition: 0.3s;
@@ -194,7 +187,6 @@
             margin-bottom: 15px; display: none; line-height: 1.4;
         }
         
-        /* Inputs & Buttons */
         .field-lbl {
             font-family: 'Space Mono', monospace; font-size: .65rem; color: var(--dim);
             letter-spacing: 1px; text-transform: uppercase; margin-bottom: 7px; text-align: left;
@@ -215,7 +207,6 @@
         }
         .btn-start:hover { background: var(--amber-soft); transform: translateY(-2px); }
         
-        /* Leaderboard */
         .lb-container {
             margin: 60px auto 100px auto;
             background: rgba(15, 15, 25, 0.8);
@@ -245,7 +236,6 @@
             padding: 25px; font-size: .8rem; color: var(--dim);
         }
         
-        /* Game HUD & Canvas */
         #game-screen { display: none; }
         .hud {
             display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7px;
@@ -304,7 +294,6 @@
             width: 4%; transition: width 0.6s ease;
         }
         
-        /* D-PAD Mobile */
         .dpad {
             display: grid; grid-template-columns: repeat(3, 1fr);
             gap: 10px; margin: 25px auto; max-width: 210px;
@@ -325,7 +314,6 @@
         }
         .gbtn:hover { border-color: var(--amber); color: var(--amber); }
         
-        /* Modal Overlay */
         .overlay {
             position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.92);
             backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
@@ -366,7 +354,6 @@
         .mbtn-exit { background: rgba(255,255,255,0.05); color: var(--mid); border: 1px solid var(--border); }
         .mbtn:active { transform: scale(0.96); }
         
-        /* Cooldown & Toast */
         .cd-wrap { margin-top: 15px; }
         .cd-lbl {
             font-size: .7rem; color: var(--dim); margin-bottom: 6px;
@@ -387,7 +374,6 @@
         #toast.success { border-color: var(--green); color: var(--green); }
         #toast.error { border-color: var(--red); color: var(--red); }
         
-        /* Particles */
         .particle {
             position: absolute; border-radius: 50%; pointer-events: none; z-index: 50;
             animation: pBurst 0.6s ease-out forwards;
@@ -401,7 +387,6 @@
             white-space: nowrap; z-index: 10005; box-shadow: 0 0 30px rgba(255,153,0,0.4);
         }
         
-        /* Responsive */
         @media (max-width: 600px) {
             .panel { padding: 20px; }
             .game-title { font-size: 1.6rem; }
@@ -411,10 +396,7 @@
 </head>
 <body>
 
-    <!-- Back Button -->
     <a href="/" class="btn-back">← BACK</a>
-    
-    <!-- Animated Background -->
     <div class="liquid-bg"></div>
 
     <header>
@@ -423,16 +405,13 @@
     </header>
 
     <div class="hub">
-        <!-- Main Game Panel -->
         <div class="panel">
             <div class="c-tr"></div><div class="c-bl"></div>
 
-            <!-- Setup Screen (Login & Config) -->
             <div id="setup-screen">
                 <div class="game-title">Snake Faucet</div>
                 <p class="game-sub">Play and earn CC Points directly to your account.</p>
              
-                <!-- Reward Info Cards -->
                 <div class="reward-row">
                     <div class="rcard">
                         <div class="rcard-val" id="val-apple">0.5 CC</div>
@@ -448,7 +427,6 @@
                     </div>
                 </div>
 
-                <!-- Hardcore Mode Toggle -->
                 <div class="hc-wrap" id="hc-wrap" onclick="toggleHardcoreMode()">
                     <div class="hc-row">
                         <div class="hc-label">🔥 HARDCORE CHAOS MODE</div>
@@ -461,24 +439,19 @@
                     </div>
                 </div>
 
-                <!-- Epilepsy Warning -->
                 <div id="epilepsy-warning">
                     ⚠️ EPILEPSY WARNING: Rapid flashing and intense visual chaos.
                 </div>
 
-                <!-- Authentication Fields -->
+                <!-- Chỉ cần username, không cần PIN -->
                 <div style="margin-bottom:15px">
                     <div class="field-lbl">Username</div>
                     <input type="text" id="player-user" class="field-inp" placeholder="your_username" autocomplete="off">
-                    
-                    <div class="field-lbl" style="margin-top:10px;">Security PIN</div>
-                    <input type="password" id="player-pin" class="field-inp" placeholder="Enter PIN" maxlength="8">
                 </div>
 
-                <button class="btn-start" onclick="checkUser()">▶ START GAME</button>
+                <button class="btn-start" id="start-game-btn">▶ START GAME</button>
             </div>
 
-            <!-- Game Screen (active after login) -->
             <div id="game-screen">
                 <div class="hud">
                     <div class="hud-cell">
@@ -501,12 +474,10 @@
                     <div class="pu-banner" id="pu-banner"></div>
                 </div>
 
-                <!-- Speed Bar -->
                 <div class="spd-bar-bg">
                     <div class="spd-bar" id="spd-bar"></div>
                 </div>
 
-                <!-- D-PAD Touch Controls -->
                 <div class="dpad">
                     <div></div>
                     <button class="dpad-btn" onpointerdown="dpadHit('UP',event)">▲</button>
@@ -527,7 +498,6 @@
             </div>
         </div>
 
-        <!-- Leaderboard Section -->
         <div class="lb-container">
             <div class="lb-header">
                 <button id="lb-tab-normal" class="lb-tab active-n" onclick="showLb('normal')">NORMAL</button>
@@ -539,7 +509,6 @@
         </div>
     </div>
 
-    <!-- Game Over / Claim Modal -->
     <div class="overlay" id="modal">
         <div class="modal">
             <div class="modal-em" id="modal-em">💀</div>
@@ -568,7 +537,6 @@
                 <button class="mbtn mbtn-exit" onclick="exitToDashboard()">🏠 EXIT TO DASHBOARD</button>
             </div>
 
-            <!-- Cooldown Bar (appears after claim) -->
             <div class="cd-wrap" id="cooldown-wrap" style="display:none">
                 <div class="cd-lbl" id="cooldown-label">⏳ Wait: --</div>
                 <div class="cd-bg"><div class="cd-fill" id="cooldown-fill"></div></div>
@@ -576,15 +544,209 @@
         </div>
     </div>
 
-    <!-- Toast Notification -->
     <div id="toast"></div>
 
-    <!-- Audio Elements -->
     <audio id="normalMusic" src="OSTS/High_Score_Chase.mp3" loop></audio>
     <audio id="hardcoreMusic" src="OSTS/High_Score_Overdrive_Hardcore.mp3"></audio>
 
-    <!-- Game Scripts (defer để đảm bảo DOM sẵn sàng) -->
+    <!-- Các game script gốc (giữ nguyên) -->
     <script src="static/js/hardcore.js" defer></script>
     <script src="static/js/game.js" defer></script>
+
+    <!-- Script bổ sung để xử lý xác thực bằng token (không dùng PIN) -->
+    <script>
+        (function() {
+            // Override / bổ sung các hàm cần thiết để dùng token thay vì PIN
+            const originalCheckUser = window.checkUser;
+            const originalClaimReward = window.claimReward;
+            const originalShowLb = window.showLb;
+            
+            // Helper toast
+            function showToast(msg, type) {
+                const t = document.getElementById('toast');
+                if (!t) return;
+                t.textContent = msg;
+                t.className = 'show ' + (type || '');
+                clearTimeout(t._timeout);
+                t._timeout = setTimeout(() => { t.className = ''; }, 3000);
+            }
+            
+            // Kiểm tra token và username đồng bộ
+            function isAuthenticated() {
+                const token = localStorage.getItem('choco_token');
+                const user = localStorage.getItem('choco_user');
+                if (!token || !user) return false;
+                // Có thể verify token với server nếu muốn, nhưng tạm thời tin tưởng
+                return true;
+            }
+            
+            // Hàm checkUser mới - dùng token thay vì PIN
+            window.checkUser = async function() {
+                const username = document.getElementById('player-user').value.trim();
+                if (username.length < 3) {
+                    showToast('Username must be at least 3 characters', 'error');
+                    return;
+                }
+                
+                // Lấy token từ localStorage
+                const token = localStorage.getItem('choco_token');
+                const storedUser = localStorage.getItem('choco_user');
+                
+                if (!token || storedUser !== username) {
+                    // Nếu chưa đăng nhập hoặc user khác, chuyển về dashboard để đăng nhập lại
+                    showToast('Please login first', 'error');
+                    setTimeout(() => { window.location.href = 'index.html'; }, 1500);
+                    return;
+                }
+                
+                // Xác thực token bằng cách gọi một endpoint bất kỳ cần token
+                try {
+                    const res = await fetch('/get_user/' + encodeURIComponent(username), {
+                        headers: { 'Authorization': 'Bearer ' + token }
+                    });
+                    if (!res.ok) throw new Error('Token invalid');
+                    const data = await res.json();
+                    if (data.status === 'error') throw new Error(data.message);
+                    
+                    // Thành công - chuyển sang game
+                    window.currentPlayer = username;
+                    // Gọi hàm khởi tạo game (nếu có trong game.js)
+                    if (typeof window.initGame === 'function') {
+                        window.initGame();
+                    } else if (typeof window.startGame === 'function') {
+                        window.startGame();
+                    } else {
+                        // Nếu không có, ẩn setup và hiện game screen
+                        document.getElementById('setup-screen').style.display = 'none';
+                        document.getElementById('game-screen').style.display = 'block';
+                        if (typeof window.resetGame === 'function') window.resetGame();
+                    }
+                    showToast(`Welcome, ${username}!`, 'success');
+                } catch (e) {
+                    console.error(e);
+                    showToast('Session expired. Please login again.', 'error');
+                    localStorage.removeItem('choco_token');
+                    localStorage.removeItem('choco_user');
+                    setTimeout(() => { window.location.href = 'index.html'; }, 1500);
+                }
+            };
+            
+            // Hàm claimReward mới - gửi token thay vì PIN
+            window.claimReward = async function() {
+                const username = localStorage.getItem('choco_user');
+                const token = localStorage.getItem('choco_token');
+                if (!username || !token) {
+                    showToast('Please login first', 'error');
+                    window.location.href = 'index.html';
+                    return;
+                }
+                
+                // Lấy số apples và mode từ game (các biến toàn cục do game.js cung cấp)
+                const apples = typeof window.gameScore !== 'undefined' ? window.gameScore : 
+                              (typeof window.score !== 'undefined' ? window.score : 0);
+                const mode = (typeof window.hardcoreMode !== 'undefined' && window.hardcoreMode) ? 'hardcore' : 'normal';
+                
+                const claimBtn = document.getElementById('btn-claim');
+                if (claimBtn) {
+                    claimBtn.disabled = true;
+                    claimBtn.textContent = 'CLAIMING...';
+                }
+                
+                try {
+                    const res = await fetch('/snake/claim', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer ' + token
+                        },
+                        body: JSON.stringify({ apples, mode })
+                    });
+                    
+                    const data = await res.json();
+                    if (data.status === 'success') {
+                        showToast(`Claimed ${data.reward || 0} CC!`, 'success');
+                        // Cập nhật lại balance trên UI nếu có
+                        if (typeof window.updateBalance === 'function') window.updateBalance();
+                        // Đóng modal
+                        document.getElementById('modal').classList.remove('show');
+                        // Reset game nếu cần
+                        if (typeof window.resetGame === 'function') window.resetGame();
+                    } else {
+                        let errMsg = data.message || 'Claim failed';
+                        if (res.status === 429) errMsg = 'Too many claims. Please wait.';
+                        showToast(errMsg, 'error');
+                    }
+                } catch (e) {
+                    console.error(e);
+                    showToast('Network error', 'error');
+                } finally {
+                    if (claimBtn) {
+                        claimBtn.disabled = false;
+                        claimBtn.textContent = '💰 CLAIM';
+                    }
+                }
+            };
+            
+            // Leaderboard - vẫn hoạt động bình thường (không cần token)
+            window.showLb = async function(mode) {
+                try {
+                    const res = await fetch('/leaderboard');
+                    const data = await res.json();
+                    const lbBody = document.getElementById('lb-body');
+                    if (!lbBody) return;
+                    
+                    const scores = mode === 'normal' ? data.normal : data.hardcore;
+                    if (!scores || scores.length === 0) {
+                        lbBody.innerHTML = '<div class="lb-empty">No scores yet</div>';
+                        return;
+                    }
+                    
+                    const listHtml = scores.map((s, i) => `
+                        <div class="lb-row">
+                            <span class="lb-user">${i+1}. ${escapeHtml(s.username)}</span>
+                            <span class="lb-score">${s.score} 🍎</span>
+                        </div>
+                    `).join('');
+                    lbBody.innerHTML = listHtml;
+                    
+                    // Cập nhật active tab style
+                    document.querySelectorAll('.lb-tab').forEach(btn => btn.classList.remove('active-n', 'active-h'));
+                    if (mode === 'normal') document.getElementById('lb-tab-normal').classList.add('active-n');
+                    else document.getElementById('lb-tab-hardcore').classList.add('active-h');
+                } catch (e) {
+                    console.error('Leaderboard error:', e);
+                }
+            };
+            
+            function escapeHtml(str) {
+                if (!str) return '';
+                return str.replace(/[&<>]/g, function(m) {
+                    if (m === '&') return '&amp;';
+                    if (m === '<') return '&lt;';
+                    if (m === '>') return '&gt;';
+                    return m;
+                });
+            }
+            
+            // Gán sự kiện cho nút START GAME
+            const startBtn = document.getElementById('start-game-btn');
+            if (startBtn) {
+                startBtn.onclick = window.checkUser;
+            }
+            
+            // Tự động điền username nếu đã lưu
+            const storedUser = localStorage.getItem('choco_user');
+            if (storedUser) {
+                const userInput = document.getElementById('player-user');
+                if (userInput) userInput.value = storedUser;
+            }
+            
+            // Nếu đã có token và username, có thể tự động checkUser (tuỳ chọn)
+            if (isAuthenticated() && storedUser) {
+                // Không tự động start, để người dùng nhấn nút
+                // Nhưng có thể hiển thị username đã nhập
+            }
+        })();
+    </script>
 </body>
 </html>
