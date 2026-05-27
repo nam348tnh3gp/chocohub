@@ -1,4 +1,4 @@
-// server.js – Hybrid PoW + PoS + Diffie-Hellman + HTTP/2 + TLS 1.3 + Session Token (JWT) + Rate Limit
+// server.js – Hybrid PoW + PoS + Diffie-Hellman + HTTP/2 + TLS 1.3 + Session Token (JWT) + Rate Limit + Trust Proxy
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const http2 = require('http2');
 const selfsigned = require('selfsigned');
 const rateLimit = require('express-rate-limit');
-const jwt = require('jsonwebtoken');  // ✅ ĐÃ THÊM DÒNG NÀY
+const jwt = require('jsonwebtoken');
 const db = require('./db');
 const blockchain = require('./blockchain');
 const snake = require('./snake');
@@ -148,6 +148,8 @@ async function sendMinerWebhook(worker, bountyId, device) {
 const registeredBackupNodes = {};
 
 const app = express();
+app.set('trust proxy', 1); // ✅ THÊM DÒNG NÀY ĐỂ FIX LỖI VALIDATIONERROR KHI CHẠY SAU PROXY
+
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -165,7 +167,7 @@ function verifyToken(req, res, next) {
   const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
-    req.user = decoded; // { username, iat, exp }
+    req.user = decoded;
     next();
   } catch (err) {
     return res.status(403).json({ status: 'error', message: 'Invalid or expired token' });
