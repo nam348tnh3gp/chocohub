@@ -1,20 +1,26 @@
 // snake.js – Full fix: dùng chung DB, có getCooldown, cooldown 15 phút
+// KHÔNG còn xác thực PIN (đã có JWT token ở server)
 const db = require('./db');
 
 const REWARD_NORMAL = 0.5;
 const REWARD_HARDCORE = 2.0;
-const COOLDOWN_MS = 15 * 60 * 1000; // Đã sửa thành 15 phút
+const COOLDOWN_MS = 15 * 60 * 1000; // 15 phút
 
 function processClaim(username, pin, apples, mode) {
-  username = username.toLowerCase().trim();
-
-  // Bỏ xác thực ở đây vì frontend đã làm rồi, nhưng vẫn nên giữ để kiểm tra lại
-  db.authenticate(username, pin);
-
-  // Kiểm tra cooldown (sử dụng hàm dùng chung)
+  // ⚠️ Không còn authenticate (pin không được dùng nữa, giữ tham số để tương thích)
+  // Xác thực đã được thực hiện bởi middleware token ở server.js
+  username = username.trim();
+  
+  // Kiểm tra cooldown
   const lastClaim = db.getLastSnakeClaim(username);
   if (lastClaim) {
-    const lastTime = new Date(lastClaim.claimed_at + 'Z').getTime();
+    // Xử lý chuỗi ngày tháng từ SQLite (dạng 'YYYY-MM-DD HH:MM:SS')
+    let lastTime;
+    if (lastClaim.claimed_at.includes('Z')) {
+      lastTime = new Date(lastClaim.claimed_at).getTime();
+    } else {
+      lastTime = new Date(lastClaim.claimed_at + ' UTC').getTime();
+    }
     const elapsed = Date.now() - lastTime;
     if (elapsed < COOLDOWN_MS) {
       const remaining = Math.ceil((COOLDOWN_MS - elapsed) / 1000 / 60);
@@ -37,11 +43,17 @@ function processClaim(username, pin, apples, mode) {
 }
 
 function getCooldown(username) {
-  username = username.toLowerCase().trim();
+  username = username.trim();
   const lastClaim = db.getLastSnakeClaim(username);
   if (!lastClaim) return { cooldown: false };
 
-  const elapsed = Date.now() - new Date(lastClaim.claimed_at + 'Z').getTime();
+  let lastTime;
+  if (lastClaim.claimed_at.includes('Z')) {
+    lastTime = new Date(lastClaim.claimed_at).getTime();
+  } else {
+    lastTime = new Date(lastClaim.claimed_at + ' UTC').getTime();
+  }
+  const elapsed = Date.now() - lastTime;
   const remaining = COOLDOWN_MS - elapsed;
 
   return {
