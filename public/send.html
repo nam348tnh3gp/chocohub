@@ -395,11 +395,7 @@
             <label class="field-lbl">Amount (CC)</label>
             <input type="number" id="amount" class="field-inp" placeholder="0.0" min="0.001" step="any">
 
-            <!-- PIN (for security) -->
-            <label class="field-lbl">Your PIN</label>
-            <input type="password" id="pin" class="field-inp" placeholder="4 to 8 digits" maxlength="8">
-
-            <!-- Send Button -->
+            <!-- Send Button (no PIN field) -->
             <button class="btn-send" id="send-btn">SEND CC</button>
         </div>
 
@@ -419,7 +415,6 @@
         const sendBtn = document.getElementById('send-btn');
         const recipientEl = document.getElementById('recipient');
         const amountEl = document.getElementById('amount');
-        const pinEl = document.getElementById('pin');
         const balanceEl = document.getElementById('current-balance');
         const historyContainer = document.getElementById('history-container');
 
@@ -473,7 +468,6 @@
                 return;
             }
             try {
-                // 🔧 Endpoint này cần được thêm vào server.js (xem hướng dẫn bên dưới)
                 const res = await fetch('/get_transactions?username=' + encodeURIComponent(user));
                 if (!res.ok) throw new Error('Failed to fetch');
                 const data = await res.json();
@@ -515,17 +509,20 @@
 
         async function handleSend() {
             const user = localStorage.getItem('choco_user');
-            if (!user) return showToast('Please login first', 'error');
+            const token = localStorage.getItem('choco_token');
+            if (!user || !token) {
+                showToast('Please login first', 'error');
+                window.location.href = 'index.html';
+                return;
+            }
 
             const recipient = recipientEl.value.trim();
             const amount = parseFloat(amountEl.value);
-            const pin = pinEl.value.trim();
 
             if (!recipient) return showToast('Enter recipient username', 'error');
             if (recipient === user) return showToast('Cannot send to yourself', 'error');
             if (isNaN(amount) || amount <= 0) return showToast('Enter a valid amount', 'error');
             if (amount > currentBalance) return showToast('Insufficient balance', 'error');
-            if (pin.length < 4) return showToast('Enter your PIN (min 4 digits)', 'error');
 
             sendBtn.disabled = true;
             sendBtn.textContent = 'SENDING...';
@@ -533,10 +530,11 @@
             try {
                 const res = await fetch('/send_cc', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + token
+                    },
                     body: JSON.stringify({
-                        from_username: user,
-                        pin: pin,
                         to_username: recipient,
                         amount: amount
                     })
@@ -549,11 +547,11 @@
                     balanceEl.textContent = currentBalance.toFixed(4) + ' CC';
                     recipientEl.value = '';
                     amountEl.value = '';
-                    pinEl.value = '';
-                    // Refresh lịch sử sau khi gửi thành công
-                    loadHistory();
+                    loadHistory(); // Refresh history
                 } else {
-                    showToast(data.message || 'Transfer failed', 'error');
+                    let errMsg = data.message || 'Transfer failed';
+                    if (res.status === 429) errMsg = 'Too many requests. Please wait.';
+                    showToast(errMsg, 'error');
                 }
             } catch (e) {
                 showToast('Network error', 'error');
@@ -563,6 +561,15 @@
             sendBtn.disabled = false;
             sendBtn.textContent = 'SEND CC';
         }
+
+        // Auto redirect to login if no token
+        (function checkAuth() {
+            const token = localStorage.getItem('choco_token');
+            if (!token) {
+                showToast('Please login first', 'error');
+                setTimeout(() => { window.location.href = 'index.html'; }, 1500);
+            }
+        })();
 
         // Init
         loadBalance();
