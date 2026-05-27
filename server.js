@@ -9,13 +9,14 @@ const crypto = require('crypto');
 const http2 = require('http2');
 const selfsigned = require('selfsigned');
 const rateLimit = require('express-rate-limit');
+const jwt = require('jsonwebtoken');  // ✅ ĐÃ THÊM DÒNG NÀY
 const db = require('./db');
 const blockchain = require('./blockchain');
 const snake = require('./snake');
 const backupClient = require('./backupSync');
 const DHExchange = require('./dh');
 
-// ─── Helper: canonical JSON (sắp xếp key alphabet) ─────────────
+// ─── Helper: canonical JSON ─────────────
 function canonicalStringify(obj) {
   if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
   if (Array.isArray(obj)) return '[' + obj.map(canonicalStringify).join(',') + ']';
@@ -28,7 +29,7 @@ function canonicalStringify(obj) {
 //  RATE LIMITERS
 // ════════════════════════════════════════════════════════════════
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 phút
+  windowMs: 15 * 60 * 1000,
   max: 10,
   message: { status: 'error', message: 'Too many login attempts, please try again later.' },
   standardHeaders: true,
@@ -36,7 +37,7 @@ const authLimiter = rateLimit({
 });
 
 const sendLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 phút
+  windowMs: 60 * 1000,
   max: 5,
   message: { status: 'error', message: 'Too many send requests, please slow down.' },
 });
@@ -86,7 +87,6 @@ const TLS_CERT_PATH = path.join(__dirname, 'tls_cert.pem');
 let tlsKey, tlsCert;
 
 function generateSelfSignedCert() {
-  // Tạo key pair 2048-bit
   const attrs = [{ name: 'commonName', value: 'ChocoHub' }];
   const pem = selfsigned.generate(attrs, { days: 365, keySize: 2048 });
   return {
@@ -155,7 +155,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ════════════════════════════════════════════════════
-//  MIDDLEWARE: Verify JWT token (session token)
+//  MIDDLEWARE: Verify JWT token
 // ════════════════════════════════════════════════════
 function verifyToken(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -173,7 +173,7 @@ function verifyToken(req, res, next) {
 }
 
 // ════════════════════════════════════════════════════
-//  ENDPOINT: Lấy public key dài hạn của server
+//  PUBLIC ENDPOINTS
 // ════════════════════════════════════════════════════
 app.get('/api/server/public-key', (req, res) => {
   res.json({
@@ -184,9 +184,6 @@ app.get('/api/server/public-key', (req, res) => {
   });
 });
 
-// ════════════════════════════════════════════════════
-//  DH KEY EXCHANGE ENDPOINT (có chữ ký server)
-// ════════════════════════════════════════════════════
 app.post('/api/dh/exchange', (req, res) => {
   const { clientId, clientPublicKey, token } = req.body;
   if (!clientId || !clientPublicKey || !token) {
@@ -230,7 +227,6 @@ app.post('/api/dh/exchange', (req, res) => {
   }
 });
 
-// Middleware kiểm tra chữ ký HMAC (cho backup)
 function verifyDHSignature(req, res, next) {
   if (!req.path.startsWith('/api/backup')) return next();
 
@@ -253,22 +249,19 @@ function verifyDHSignature(req, res, next) {
 
 app.use(verifyDHSignature);
 
-// ════════════════════════════════════════════════════
-//  AUTHENTICATION (có rate limit, trả về JWT)
-// ════════════════════════════════════════════════════
+// AUTH
 app.post('/auth', authLimiter, (req, res) => {
   const { username, pin } = req.body;
   if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing fields' });
   try {
     const result = db.authenticate(username, pin);
-    // result trả về { status, message, token, balance }
     res.json(result);
   } catch (e) {
     res.status(401).json({ status: 'error', message: e.message });
   }
 });
 
-// ─── Các route yêu cầu token (thay thế PIN bằng token) ───
+// Các route công khai (không cần token)
 app.get('/get_user/:username', (req, res) => {
   try {
     const user = db.getUser(req.params.username);
@@ -291,7 +284,67 @@ app.get('/get_balance', (req, res) => {
   }
 });
 
-// SEND CC – dùng token thay vì PIN
+app.get('/get_transactions', (req, res) => {
+  const username = req.query.username;
+  if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
+  try {
+    const transactions = db.getTransactions(username, 20);
+    res.json({ status: 'success', transactions });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+app.get('/network_status', (req, res) => {
+  try {
+    const recent = db.getRecentBlocks(10);
+    const validators = db.getValidators(10).map(v => ({ username: v.username, stake: v.amount }));
+    res.json({ recent_blocks: recent, active_validators: validators });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+app.get('/snake/cooldown', (req, res) => {
+  const username = req.query.username;
+  if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
+  try {
+    const result = snake.getCooldown(username);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+app.get('/leaderboard', (req, res) => {
+  try {
+    const normal = db.getLeaderboard('normal', 10);
+    const hardcore = db.getLeaderboard('hardcore', 10);
+    res.json({ normal, hardcore });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+app.get('/pos/info', (req, res) => {
+  try {
+    const username = (req.query.username || '').trim();
+    if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
+    const user = db.getUser(username);
+    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+    const stake = db.getStake(username);
+    const balance = Number(user.balance) || 0;
+    const staked = Number(stake.amount) || 0;
+    const pending = Number(stake.pending_reward) || 0;
+    const currentVal = blockchain.getCurrentValidator();
+    res.json({ status: 'success', balance, staked, is_validator: username === currentVal, pending_reward: pending, current_validator: currentVal || null });
+  } catch (e) {
+    console.error('/pos/info error:', e);
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+// Các route yêu cầu token
 app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
   const { to_username, amount } = req.body;
   const from_username = req.user.username;
@@ -321,37 +374,11 @@ app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
   }
 });
 
-// Lấy lịch sử giao dịch – sắp xếp đúng, không bị invalidate
-app.get('/get_transactions', (req, res) => {
-  const username = req.query.username;
-  if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
-  try {
-    const transactions = db.getTransactions(username, 20);
-    // Đảm bảo mỗi giao dịch có trường timestamp (created_at đã có)
-    res.json({ status: 'success', transactions });
-  } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message });
-  }
-});
-
-app.get('/network_status', (req, res) => {
-  try {
-    const recent = db.getRecentBlocks(10);
-    const validators = db.getValidators(10).map(v => ({ username: v.username, stake: v.amount }));
-    res.json({ recent_blocks: recent, active_validators: validators });
-  } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message });
-  }
-});
-
-// SNAKE CLAIM – dùng token thay vì PIN
 app.post('/snake/claim', verifyToken, snakeLimiter, (req, res) => {
   const { apples, mode } = req.body;
   const username = req.user.username;
   if (apples == null) return res.status(400).json({ status: 'error', message: 'Missing fields' });
   try {
-    // PIN không còn được dùng – truyền placeholder hoặc sửa snake.processClaim để bỏ PIN
-    // Ta sẽ sửa snake.js ở bước sau, tạm thời gọi với pin = null
     const result = snake.processClaim(username, null, apples, mode);
     res.json(result);
   } catch (e) {
@@ -359,47 +386,6 @@ app.post('/snake/claim', verifyToken, snakeLimiter, (req, res) => {
   }
 });
 
-app.get('/snake/cooldown', (req, res) => {
-  const username = req.query.username;
-  if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
-  try {
-    const result = snake.getCooldown(username);
-    res.json(result);
-  } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message });
-  }
-});
-
-app.get('/leaderboard', (req, res) => {
-  try {
-    const normal = db.getLeaderboard('normal', 10);
-    const hardcore = db.getLeaderboard('hardcore', 10);
-    res.json({ normal, hardcore });
-  } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message });
-  }
-});
-
-// POS INFO – không cần xác thực mạnh
-app.get('/pos/info', (req, res) => {
-  try {
-    const username = (req.query.username || '').trim();
-    if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
-    const user = db.getUser(username);
-    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
-    const stake = db.getStake(username);
-    const balance = Number(user.balance) || 0;
-    const staked = Number(stake.amount) || 0;
-    const pending = Number(stake.pending_reward) || 0;
-    const currentVal = blockchain.getCurrentValidator();
-    res.json({ status: 'success', balance, staked, is_validator: username === currentVal, pending_reward: pending, current_validator: currentVal || null });
-  } catch (e) {
-    console.error('/pos/info error:', e);
-    res.status(500).json({ status: 'error', message: e.message });
-  }
-});
-
-// STAKE – dùng token
 app.post('/pos/stake', verifyToken, stakeLimiter, (req, res) => {
   try {
     const { amount } = req.body;
@@ -407,7 +393,6 @@ app.post('/pos/stake', verifyToken, stakeLimiter, (req, res) => {
     if (!amount) return res.status(400).json({ status: 'error', message: 'Missing amount' });
     const stakeAmount = parseFloat(amount);
     if (isNaN(stakeAmount) || stakeAmount < 10) throw new Error('Minimum stake is 10 CC');
-    // Không cần xác thực PIN nữa, token đã đảm bảo
     const result = db.stake(username, stakeAmount);
     res.json({ status: 'success', message: 'Staked ' + stakeAmount + ' CC', staked: Number(result.amount) || 0 });
   } catch (e) {
@@ -415,7 +400,6 @@ app.post('/pos/stake', verifyToken, stakeLimiter, (req, res) => {
   }
 });
 
-// UNSTAKE – dùng token
 app.post('/pos/unstake', verifyToken, stakeLimiter, (req, res) => {
   try {
     const username = req.user.username;
@@ -428,7 +412,7 @@ app.post('/pos/unstake', verifyToken, stakeLimiter, (req, res) => {
   }
 });
 
-// MINING ROUTES (giữ nguyên, không cần token vì công khai)
+// Mining routes (công khai)
 app.get('/active_bounties_list', (req, res) => {
   try {
     const bounties = blockchain.getActiveBounties();
@@ -494,7 +478,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString(), dbHash: getDbHash() });
 });
 
-// BACKUP NODE REGISTRATION (giữ nguyên)
+// Backup
 app.post('/api/backup/register', (req, res) => {
   const { url, token, name, description, owner, platform, clientId } = req.body;
   if (!url || !token) return res.status(400).json({ status: 'error', message: 'Missing url or token' });
