@@ -1,6 +1,5 @@
 # backup.py – Backup Server (Flask) với canonical JSON, DH + RSA, history, chống ghi đè
-# ĐÃ SỬA: mỗi lần gửi snapshot đều tạo DH session mới (giống backup.js)
-# Không dùng session cache cho outgoing request
+# ĐÃ SỬA: phát hiện 401 -> xoá session cũ + tạo DH mới (cả nhận và gửi)
 
 import os
 import sys
@@ -20,7 +19,7 @@ from dotenv import dotenv_values
 from dh import DHExchange
 
 # ------------------------------------------------------------
-# 1. Canonical JSON (sắp xếp key alphabet)
+# 1. Canonical JSON
 # ------------------------------------------------------------
 def canonical_stringify(obj):
     if obj is None or isinstance(obj, (str, int, float, bool)):
@@ -34,7 +33,7 @@ def canonical_stringify(obj):
     raise TypeError(f'Unsupported type: {type(obj)}')
 
 # ------------------------------------------------------------
-# 2. Cấu hình từ .env
+# 2. Cấu hình
 # ------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(BASE_DIR, '.env')
@@ -54,10 +53,10 @@ MAX_BACKUPS     = int(config.get('MAX_BACKUPS', '3'))
 SELF_URL        = config.get('SELF_URL', '')
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = None   # không giới hạn kích thước snapshot
+app.config['MAX_CONTENT_LENGTH'] = None
 
 # ------------------------------------------------------------
-# 3. RSA long‑term keys (server authentication)
+# 3. RSA long‑term keys
 # ------------------------------------------------------------
 RSA_PRIVATE_PATH = os.path.join(BASE_DIR, 'backup_private.pem')
 RSA_PUBLIC_PATH  = os.path.join(BASE_DIR, 'backup_public.pem')
@@ -88,13 +87,13 @@ else:
     print('🔧 Generated new RSA long‑term keys.')
 
 # ------------------------------------------------------------
-# 4. DH keys & sessions (chỉ dùng cho incoming requests)
+# 4. DH keys & sessions
 # ------------------------------------------------------------
 server_dh_keys = DHExchange.generate_standard_keypair('modp2048')
-dh_sessions = {}   # client_id -> {'session_key': str, 'created_at': str} (chỉ dùng cho client gọi đến backup server)
+dh_sessions = {}   # client_id -> {'session_key': str, 'created_at': str}
 
 # ------------------------------------------------------------
-# 5. SQLite DB (snapshot + history)
+# 5. SQLite DB
 # ------------------------------------------------------------
 def init_db():
     conn = sqlite3.connect(DB_PATH, timeout=10)
@@ -118,7 +117,7 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
-    print('✅ Backup database ready (snapshot + history)')
+    print('✅ Backup database ready')
 
 def count_snapshot_size(state):
     users = len(state.get('users', []))
@@ -184,7 +183,7 @@ def get_snapshot_time():
     return row[0] if row else 'unknown'
 
 # ------------------------------------------------------------
-# 6. Middleware xác thực HMAC (dùng canonical JSON)
+# 6. Middleware xác thực HMAC – XÓA SESSION KHI SAI CHỮ KÝ
 # ------------------------------------------------------------
 @app.before_request
 def verify_dh_signature():
@@ -193,7 +192,7 @@ def verify_dh_signature():
     client_id = request.headers.get('X-Client-Id') or request.args.get('clientId')
     signature = request.headers.get('X-Signature')
     if not client_id or not signature:
-        return  # không có chữ ký -> để route tự xử lý token
+        return
     session = dh_sessions.get(client_id)
     if not session:
         return
@@ -208,12 +207,15 @@ def verify_dh_signature():
             body_str = request.get_data(as_text=True)
     message = f"{request.method}{request.path}{timestamp}{body_str}"
     if not DHExchange.verify(message, signature, session['session_key']):
+        # Xoá session cũ để client phải tạo lại
+        del dh_sessions[client_id]
+        print(f'⚠️ Invalid HMAC signature from {client_id}, session cleared')
         response = jsonify({'status': 'error', 'message': 'Invalid HMAC signature'})
         response.status_code = 401
         return response
 
 # ------------------------------------------------------------
-# 7. Routes public
+# 7. Routes public (giữ nguyên)
 # ------------------------------------------------------------
 @app.route('/api/backup/health', methods=['GET'])
 def health():
@@ -296,7 +298,7 @@ def server_public_key():
     })
 
 # ------------------------------------------------------------
-# 8. DH key exchange (có chữ ký server) – dành cho client gọi đến backup này
+# 8. DH exchange
 # ------------------------------------------------------------
 @app.route('/api/dh/exchange', methods=['POST'])
 def dh_exchange():
@@ -346,7 +348,7 @@ def dh_exchange():
         return jsonify({'status': 'error', 'message': 'Key exchange failed'}), 500
 
 # ------------------------------------------------------------
-# 9. Đồng bộ snapshot (giao thức READY / REQUEST_SNAPSHOT / FULL_SNAPSHOT)
+# 9. Đồng bộ snapshot – xoá session nếu không hợp lệ
 # ------------------------------------------------------------
 @app.route('/api/backup/sync', methods=['POST'])
 def sync():
@@ -359,6 +361,9 @@ def sync():
 
     session = dh_sessions.get(client_id) if client_id else None
     if not session and token != BACKUP_TOKEN:
+        # Nếu có client_id nhưng không session, xoá nó đi (dọn dẹp)
+        if client_id and client_id in dh_sessions:
+            del dh_sessions[client_id]
         return jsonify({'status': 'error', 'message': 'Invalid token or no session'}), 401
 
     if msg_type == 'READY':
@@ -413,7 +418,7 @@ def sync():
         return jsonify({'status': 'error', 'message': f'Unknown type: {msg_type}'}), 400
 
 # ------------------------------------------------------------
-# 10. Gửi snapshot lên main server – MỖI LẦN TẠO SESSION MỚI (giống backup.js)
+# 10. Gửi snapshot lên main server – retry khi gặp 401
 # ------------------------------------------------------------
 main_server_public_key = None
 
@@ -429,27 +434,25 @@ def fetch_main_server_public_key():
         print(f'❌ Could not fetch main server public key: {e}')
     return False
 
-def send_snapshot_to_main_server():
-    """Gửi snapshot lên main server – luôn tạo DH session mới, không dùng cache"""
+def send_snapshot_to_main_server(retry_count=0):
+    """Gửi snapshot lên main server, nếu gặp 401 và retry_count < 1 thì thử lại"""
     snap = get_snapshot()
     if not snap or not snap.get('users'):
         print('⚠️ No snapshot data to send')
         return
 
-    # Lấy public key của main server (cache lại, nhưng nếu lỗi thì fetch lại)
     global main_server_public_key
     if not main_server_public_key and not fetch_main_server_public_key():
         print('❌ Cannot get main server public key, aborting send')
         return
 
-    # Tạo clientId (giống backup.js: hostname + pid)
     client_id = f'backup-{socket.gethostname()}-{os.getpid()}'
 
     try:
-        # 1. Tạo cặp DH tạm thời cho client
+        # 1. Tạo cặp DH tạm thời
         client_dh = DHExchange.generate_standard_keypair('modp2048')
 
-        # 2. Gửi yêu cầu DH exchange đến main server
+        # 2. DH exchange với main server
         dh_resp = requests.post(
             f'{MAIN_SERVER_URL}/api/dh/exchange',
             json={
@@ -469,7 +472,7 @@ def send_snapshot_to_main_server():
             print('❌ Invalid DH response from main server')
             return
 
-        # 3. Xác thực chữ ký của main server
+        # 3. Xác thực chữ ký main server
         server_pub_data = canonical_stringify({
             'publicKey': dh_data['serverPublicKey'],
             'prime': dh_data['prime'],
@@ -480,7 +483,7 @@ def send_snapshot_to_main_server():
             print('❌ Main server signature verification failed!')
             return
 
-        # 4. Tính shared secret và session key
+        # 4. Tính session key
         shared = DHExchange.compute_shared_secret(
             client_dh['private_key'],
             dh_data['serverPublicKey'],
@@ -490,7 +493,7 @@ def send_snapshot_to_main_server():
         session_key = DHExchange.derive_session_key(shared)
         print('🔐 Created new DH session with main server')
 
-        # 5. Tạo payload snapshot
+        # 5. Tạo payload và chữ ký
         payload = {
             'type': 'FULL_SNAPSHOT',
             'token': BACKUP_TOKEN,
@@ -520,6 +523,10 @@ def send_snapshot_to_main_server():
         )
         if resp.status_code == 200:
             print('✅ Snapshot sent to main server')
+        elif resp.status_code == 401 and retry_count == 0:
+            # Lỗi xác thực, thử lại một lần nữa (session mới)
+            print('⚠️ Received 401, retrying with fresh session...')
+            send_snapshot_to_main_server(retry_count=1)
         else:
             print(f'❌ Send snapshot failed: {resp.status_code} - {resp.text[:200]}')
 
@@ -528,7 +535,7 @@ def send_snapshot_to_main_server():
         traceback.print_exc()
 
 # ------------------------------------------------------------
-# 11. Đăng ký với main server (nếu SELF_URL được cấu hình)
+# 11. Đăng ký với main server
 # ------------------------------------------------------------
 def register_with_main_server():
     if not SELF_URL:
@@ -555,7 +562,7 @@ def register_with_main_server():
         print(f'❌ Could not register with main server: {e}')
 
 # ------------------------------------------------------------
-# 12. Giám sát main server (gửi snapshot khi online lại)
+# 12. Giám sát main server
 # ------------------------------------------------------------
 def check_main_server():
     try:
@@ -599,7 +606,8 @@ if __name__ == '__main__':
     print('║  Canonical JSON: ON                 ║')
     print('║  REQUEST_SNAPSHOT: ON               ║')
     print('║  Anti-overwrite: HASH-BASED         ║')
-    print('║  Outgoing DH: FRESH SESSION         ║')
+    print('║  Outgoing DH: FRESH SESSION + RETRY ║')
+    print('║  Incoming: auto-clear invalid sess  ║')
     print('╚══════════════════════════════════════╝')
     print('')
 
