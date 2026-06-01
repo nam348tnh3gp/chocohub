@@ -37,6 +37,7 @@
 
 **CC (Choco Coins)** is the **main** & **stable** coin on chocohub, you can use for activities and others.
 **ChocoCoinPolygon** is the non-stable coin on chocohub, powers AI, POC (Proof-of-Capacity), Poc Validators (Micro), Real mining (mine XMR, receive CCpol), its price varies based on **sell** and **buy** with matic **duco**, other pairs will come soon, use **UNISWAP** For swapping them.
+
 **ChocoCoinPolygon (CCpol) Contract: 0x748454b64c415A2cb2EFD0162319479c5958d2D1 add to your wallet now !**
 
 | 🔁 Exchange Rate | 💡 Utility |
