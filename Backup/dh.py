@@ -1,14 +1,12 @@
-# dh.py – Diffie-Hellman (RFC 5114 / modp2048) + RSA signing for server authentication
-# Đồng bộ với dh.js: sử dụng raw private key (x), raw public key (y),
-# prime/generator base64, padding public key khi cần.
-# ✅ ĐÃ SỬA LỖI: dùng parameters.private_key(x) thay vì DHPrivateNumbers
+# dh.py – Diffie-Hellman (RFC 5114 / modp2048) + RSA signing
+# Đã sửa lỗi tái tạo private key từ raw x bằng DHPrivateNumbers + DHPublicNumbers
 
 import os
 import base64
 import hashlib
 import hmac
 from cryptography.hazmat.primitives.asymmetric import dh, rsa, padding
-from cryptography.hazmat.primitives.asymmetric.dh import DHPublicNumbers
+from cryptography.hazmat.primitives.asymmetric.dh import DHPublicNumbers, DHPrivateNumbers
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.serialization import (
     Encoding, PublicFormat, PrivateFormat, NoEncryption,
@@ -66,29 +64,37 @@ class DHExchange:
 
     @staticmethod
     def compute_shared_secret(our_private_key_b64, their_public_key_b64, prime_b64, generator_b64):
+        # Giải mã private key raw (x)
         raw_private = base64.b64decode(our_private_key_b64)
         x = int.from_bytes(raw_private, 'big')
 
+        # Khôi phục prime, generator
         prime_bytes = base64.b64decode(prime_b64)
         generator_bytes = base64.b64decode(generator_b64)
         prime_int = int.from_bytes(prime_bytes, 'big')
         generator_int = int.from_bytes(generator_bytes, 'big')
         key_size = len(prime_bytes)
 
+        # Xử lý public key đối tác (đệm nếu cần)
         their_pub_raw = base64.b64decode(their_public_key_b64)
         if len(their_pub_raw) < key_size:
             padded = b'\x00' * (key_size - len(their_pub_raw)) + their_pub_raw
             their_pub_raw = padded
-        y = int.from_bytes(their_pub_raw, 'big')
+        y_their = int.from_bytes(their_pub_raw, 'big')
 
+        # Tạo tham số nhóm
         param_numbers = dh.DHParameterNumbers(prime_int, generator_int)
         parameters = param_numbers.parameters()
 
-        # ✅ CÁCH ĐÚNG: tái tạo private key từ raw x
-        private_key = parameters.private_key(x)
+        # Tái tạo private key từ x (cần public key tương ứng)
+        y_mine = pow(generator_int, x, prime_int)              # public key của chính mình
+        mine_public_numbers = DHPublicNumbers(y_mine, param_numbers)
+        private_numbers = DHPrivateNumbers(x, mine_public_numbers)
+        private_key = private_numbers.private_key(parameters)
 
-        public_numbers = DHPublicNumbers(y, param_numbers)
-        their_public_key = public_numbers.public_key(parameters)
+        # Tái tạo public key của đối tác
+        their_public_numbers = DHPublicNumbers(y_their, param_numbers)
+        their_public_key = their_public_numbers.public_key(parameters)
 
         shared = private_key.exchange(their_public_key)
         return base64.b64encode(shared).decode()
@@ -109,7 +115,7 @@ class DHExchange:
         expected = DHExchange.sign(message, session_key_b64)
         return hmac.compare_digest(expected, signature)
 
-    # ───────────── RSA signing (server authentication) ────────────
+    # ───────────── RSA signing ─────────────────────────────
     @staticmethod
     def sign_with_private_key(data, private_key_pem):
         key = load_pem_private_key(private_key_pem.encode(), password=None)
