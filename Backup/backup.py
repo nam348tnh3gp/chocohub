@@ -1,4 +1,6 @@
 # backup.py – Backup Server (Flask) với canonical JSON, DH + RSA, history, chống ghi đè
+# ĐÃ SỬA: middleware dùng canonical JSON để verify HMAC
+
 import os
 import sys
 import json
@@ -95,7 +97,6 @@ dh_sessions = {}   # client_id -> {'session_key': str, 'created_at': str}
 def init_db():
     conn = sqlite3.connect(DB_PATH, timeout=10)
     cursor = conn.cursor()
-    # Bảng snapshot chính
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS snapshot (
             id INTEGER PRIMARY KEY CHECK(id = 1),
@@ -104,7 +105,6 @@ def init_db():
         )
     ''')
     cursor.execute('INSERT OR IGNORE INTO snapshot (id, state) VALUES (1, "{}")')
-    # Bảng lịch sử backup
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS snapshot_backups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -127,17 +127,14 @@ def count_snapshot_size(state):
     return {'total': total, 'users': users}
 
 def save_snapshot(state):
-    """Lưu snapshot hiện tại, đồng thời backup bản cũ vào history nếu thay đổi."""
     json_state = canonical_stringify(state)
     new_size = count_snapshot_size(state)
     conn = sqlite3.connect(DB_PATH, timeout=10)
     cursor = conn.cursor()
     try:
-        # Lấy snapshot cũ
         old_row = cursor.execute('SELECT state FROM snapshot WHERE id = 1').fetchone()
         old_state_json = old_row[0] if old_row else '{}'
         if old_state_json != json_state:
-            # Backup bản cũ vào history
             old_state = json.loads(old_state_json) if old_state_json != '{}' else {}
             old_size = count_snapshot_size(old_state)
             cursor.execute('''
@@ -145,14 +142,12 @@ def save_snapshot(state):
                 VALUES (?, ?, ?)
             ''', (old_state_json, old_size['users'], old_size['total']))
             print(f'📦 Backup bản cũ ({old_size["users"]} users) vào history')
-            # Xóa những bản backup cũ hơn giữ lại tối đa MAX_BACKUPS
             cursor.execute('''
                 DELETE FROM snapshot_backups WHERE id NOT IN (
                     SELECT id FROM snapshot_backups
                     ORDER BY created_at DESC LIMIT ?
                 )
             ''', (MAX_BACKUPS,))
-        # Cập nhật snapshot chính
         cursor.execute('''
             INSERT OR REPLACE INTO snapshot (id, state, updated_at)
             VALUES (1, ?, datetime('now'))
@@ -187,7 +182,7 @@ def get_snapshot_time():
     return row[0] if row else 'unknown'
 
 # ------------------------------------------------------------
-# 6. Middleware xác thực HMAC (cho các route /api/backup/*)
+# 6. Middleware xác thực HMAC (dùng canonical JSON)
 # ------------------------------------------------------------
 @app.before_request
 def verify_dh_signature():
@@ -196,15 +191,22 @@ def verify_dh_signature():
     client_id = request.headers.get('X-Client-Id') or request.args.get('clientId')
     signature = request.headers.get('X-Signature')
     if not client_id or not signature:
-        return  # không có chữ ký -> bỏ qua, các route sẽ tự xử lý token
+        return  # không có chữ ký -> để route tự xử lý token
     session = dh_sessions.get(client_id)
     if not session:
         return
     timestamp = request.headers.get('X-Timestamp', '')
-    body_str = request.get_data(as_text=True) if request.method == 'POST' else ''
+    # Lấy body và canonicalize nếu là POST
+    body_str = ''
+    if request.method == 'POST':
+        try:
+            body_json = request.get_json()
+            if body_json:
+                body_str = canonical_stringify(body_json)
+        except:
+            body_str = request.get_data(as_text=True)
     message = f"{request.method}{request.path}{timestamp}{body_str}"
     if not DHExchange.verify(message, signature, session['session_key']):
-        # Trả về 401 và ngắt request
         response = jsonify({'status': 'error', 'message': 'Invalid HMAC signature'})
         response.status_code = 401
         return response
@@ -264,13 +266,11 @@ def restore_backup(backup_id):
         state = json.loads(row[0])
         current = get_snapshot()
         if current and current.get('users'):
-            # Backup snapshot hiện tại trước khi ghi đè
             current_size = count_snapshot_size(current)
             cursor.execute('''
                 INSERT INTO snapshot_backups (state, users_count, total_items)
                 VALUES (?, ?, ?)
             ''', (canonical_stringify(current), current_size['users'], current_size['total']))
-        # Ghi đè snapshot chính
         cursor.execute('''
             INSERT OR REPLACE INTO snapshot (id, state, updated_at)
             VALUES (1, ?, datetime('now'))
@@ -323,7 +323,6 @@ def dh_exchange():
             'session_key': session_key,
             'created_at': datetime.now().isoformat()
         }
-        # Ký dữ liệu public key của server bằng RSA private key
         server_pub_data = canonical_stringify({
             'publicKey': server_dh_keys['public_key'],
             'prime': server_dh_keys['prime'],
@@ -357,7 +356,6 @@ def sync():
     token = data.get('token', '')
     client_id = request.headers.get('X-Client-Id')
 
-    # Xác thực: ưu tiên session, nếu không có thì dùng token
     session = dh_sessions.get(client_id) if client_id else None
     if not session and token != BACKUP_TOKEN:
         return jsonify({'status': 'error', 'message': 'Invalid token or no session'}), 401
@@ -395,7 +393,6 @@ def sync():
         new_size = count_snapshot_size(state)
         current = get_snapshot()
 
-        # Tính hash của snapshot mới (dùng canonical JSON)
         new_hash = hashlib.sha256(canonical_stringify(state).encode()).hexdigest()
         if current and current.get('users'):
             current_hash = hashlib.sha256(canonical_stringify(current).encode()).hexdigest()
@@ -408,7 +405,6 @@ def sync():
                 return jsonify({'type': 'SNAPSHOT_ACK', 'status': 'skipped', 'message': 'Less data'})
 
         print(f'📥 Receiving snapshot ({new_size["users"]} users, {new_size["total"]} items)...')
-        # Lưu snapshot (đồng bộ để đảm bảo dữ liệu nhất quán)
         save_snapshot(state)
         return jsonify({'type': 'SNAPSHOT_ACK', 'status': 'success', 'message': f'OK ({new_size["users"]} users)'})
 
@@ -433,7 +429,6 @@ def fetch_main_server_public_key():
     return False
 
 def get_session_with_main_server():
-    """Thiết lập DH session với main server, trả về (client_id, session_key) hoặc (None, None)."""
     global main_server_public_key
     client_id = f'backup-{os.uname().nodename}'
     session = dh_sessions.get(client_id)
@@ -459,7 +454,6 @@ def get_session_with_main_server():
             data = resp.json()
             if 'serverPublicKey' not in data or 'serverSignature' not in data:
                 return None, None
-            # Xác minh chữ ký của main server
             server_pub_data = canonical_stringify({
                 'publicKey': data['serverPublicKey'],
                 'prime': data['prime'],
@@ -601,10 +595,7 @@ if __name__ == '__main__':
     print('')
 
     init_db()
-    # Đăng ký với main server nếu có SELF_URL
     register_with_main_server()
-    # Chạy luồng giám sát
     monitor_thread = threading.Thread(target=monitor_main_server, daemon=True)
     monitor_thread.start()
-    # Chạy Flask
     app.run(host='0.0.0.0', port=BACKUP_PORT, debug=False, threaded=True)
