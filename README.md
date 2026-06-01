@@ -1,9 +1,17 @@
 <div align="center">
 
-[![Website](https://img.shields.io/badge/🌐_Official_Website-6e45e2?style=for-the-badge&logo=google-chrome&logoColor=white)](https://chocohub-r011.onrender.com/)
-[![Discord](https://img.shields.io/badge/💬_Join_Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/sztTse9p)
+# 🍫 ChocoHub
+
+<a href="https://chocohub-r011.onrender.com/">
+  <img src="https://img.shields.io/badge/🌐_Official_Website-6e45e2?style=for-the-badge&logo=google-chrome&logoColor=white" width="260">
+</a>
+<a href="https://discord.gg/sztTse9p">
+  <img src="https://img.shields.io/badge/💬_Join_Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" width="260">
+</a>
 
 </div>
+
+---
 
 ### What is ChocoHub?
 
@@ -26,9 +34,3 @@
 
 * **Exchange Ratio:** 10 CC = 1 DUCO.
 * **Utility:** Used for rewards in games, staking, mining, and soon for swapping into other major micro-currencies.
-
----
-
-<div align="center">
-  <sub>
-</div>
