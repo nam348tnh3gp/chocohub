@@ -3,10 +3,10 @@
 # 🍫 ChocoHub
 
 <a href="https://chocohub-r011.onrender.com/">
-  <img src="https://img.shields.io/badge/🌐_Official_Website-6e45e2?style=for-the-badge&logo=google-chrome&logoColor=white" width="260">
+  <img src="https://img.shields.io/badge/🌐_Official_Website-6e45e2?style=for-the-badge&logo=google-chrome&logoColor=white" width="260" style="height: 50px;">
 </a>
 <a href="https://discord.gg/sztTse9p">
-  <img src="https://img.shields.io/badge/💬_Join_Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" width="260">
+  <img src="https://img.shields.io/badge/💬_Join_Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" width="260" style="height: 50px;">
 </a>
 
 </div>
