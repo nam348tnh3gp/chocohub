@@ -1,5 +1,6 @@
 # backup.py – Backup Server (Flask) với canonical JSON, DH + RSA, history, chống ghi đè
-# ĐÃ SỬA: middleware dùng canonical JSON để verify HMAC
+# ĐÃ SỬA: mỗi lần gửi snapshot đều tạo DH session mới (giống backup.js)
+# Không dùng session cache cho outgoing request
 
 import os
 import sys
@@ -9,6 +10,7 @@ import threading
 import traceback
 import hashlib
 import sqlite3
+import socket
 from datetime import datetime
 
 import requests
@@ -86,10 +88,10 @@ else:
     print('🔧 Generated new RSA long‑term keys.')
 
 # ------------------------------------------------------------
-# 4. DH keys & sessions
+# 4. DH keys & sessions (chỉ dùng cho incoming requests)
 # ------------------------------------------------------------
 server_dh_keys = DHExchange.generate_standard_keypair('modp2048')
-dh_sessions = {}   # client_id -> {'session_key': str, 'created_at': str}
+dh_sessions = {}   # client_id -> {'session_key': str, 'created_at': str} (chỉ dùng cho client gọi đến backup server)
 
 # ------------------------------------------------------------
 # 5. SQLite DB (snapshot + history)
@@ -196,7 +198,6 @@ def verify_dh_signature():
     if not session:
         return
     timestamp = request.headers.get('X-Timestamp', '')
-    # Lấy body và canonicalize nếu là POST
     body_str = ''
     if request.method == 'POST':
         try:
@@ -295,7 +296,7 @@ def server_public_key():
     })
 
 # ------------------------------------------------------------
-# 8. DH key exchange (có chữ ký server)
+# 8. DH key exchange (có chữ ký server) – dành cho client gọi đến backup này
 # ------------------------------------------------------------
 @app.route('/api/dh/exchange', methods=['POST'])
 def dh_exchange():
@@ -412,7 +413,7 @@ def sync():
         return jsonify({'status': 'error', 'message': f'Unknown type: {msg_type}'}), 400
 
 # ------------------------------------------------------------
-# 10. Gửi snapshot lên main server (khi main server online lại)
+# 10. Gửi snapshot lên main server – MỖI LẦN TẠO SESSION MỚI (giống backup.js)
 # ------------------------------------------------------------
 main_server_public_key = None
 
@@ -428,19 +429,28 @@ def fetch_main_server_public_key():
         print(f'❌ Could not fetch main server public key: {e}')
     return False
 
-def get_session_with_main_server():
-    global main_server_public_key
-    client_id = f'backup-{os.uname().nodename}'
-    session = dh_sessions.get(client_id)
-    if session:
-        return client_id, session['session_key']
+def send_snapshot_to_main_server():
+    """Gửi snapshot lên main server – luôn tạo DH session mới, không dùng cache"""
+    snap = get_snapshot()
+    if not snap or not snap.get('users'):
+        print('⚠️ No snapshot data to send')
+        return
 
+    # Lấy public key của main server (cache lại, nhưng nếu lỗi thì fetch lại)
+    global main_server_public_key
     if not main_server_public_key and not fetch_main_server_public_key():
-        return None, None
+        print('❌ Cannot get main server public key, aborting send')
+        return
+
+    # Tạo clientId (giống backup.js: hostname + pid)
+    client_id = f'backup-{socket.gethostname()}-{os.getpid()}'
 
     try:
+        # 1. Tạo cặp DH tạm thời cho client
         client_dh = DHExchange.generate_standard_keypair('modp2048')
-        resp = requests.post(
+
+        # 2. Gửi yêu cầu DH exchange đến main server
+        dh_resp = requests.post(
             f'{MAIN_SERVER_URL}/api/dh/exchange',
             json={
                 'clientId': client_id,
@@ -450,61 +460,57 @@ def get_session_with_main_server():
             timeout=10,
             verify=True
         )
-        if resp.status_code == 200:
-            data = resp.json()
-            if 'serverPublicKey' not in data or 'serverSignature' not in data:
-                return None, None
-            server_pub_data = canonical_stringify({
-                'publicKey': data['serverPublicKey'],
-                'prime': data['prime'],
-                'generator': data['generator'],
-                'group': data.get('group', 'modp2048')
-            })
-            if not DHExchange.verify_with_public_key(server_pub_data, data['serverSignature'], main_server_public_key):
-                print('❌ Main server signature verification failed!')
-                return None, None
-            shared = DHExchange.compute_shared_secret(
-                client_dh['private_key'],
-                data['serverPublicKey'],
-                data['prime'],
-                data['generator']
-            )
-            session_key = DHExchange.derive_session_key(shared)
-            dh_sessions[client_id] = {
-                'session_key': session_key,
-                'created_at': datetime.now().isoformat()
-            }
-            print('🔐 Authenticated DH session with main server')
-            return client_id, session_key
-    except Exception as e:
-        print(f'❌ DH exchange with main server failed: {e}')
-    return None, None
+        if dh_resp.status_code != 200:
+            print(f'❌ DH exchange failed: {dh_resp.status_code}')
+            return
 
-def send_snapshot_to_main_server():
-    snap = get_snapshot()
-    if not snap or not snap.get('users'):
-        print('⚠️ No snapshot data to send')
-        return
-    client_id, session_key = get_session_with_main_server()
-    payload = {
-        'type': 'FULL_SNAPSHOT',
-        'token': BACKUP_TOKEN,
-        'state': snap
-    }
-    body_str = canonical_stringify(payload)
-    headers = {
-        'Content-Type': 'application/json',
-        'User-Agent': 'ChocoHub-BackupServer/1.0'
-    }
-    if client_id and session_key:
+        dh_data = dh_resp.json()
+        if 'serverPublicKey' not in dh_data or 'serverSignature' not in dh_data:
+            print('❌ Invalid DH response from main server')
+            return
+
+        # 3. Xác thực chữ ký của main server
+        server_pub_data = canonical_stringify({
+            'publicKey': dh_data['serverPublicKey'],
+            'prime': dh_data['prime'],
+            'generator': dh_data['generator'],
+            'group': dh_data.get('group', 'modp2048')
+        })
+        if not DHExchange.verify_with_public_key(server_pub_data, dh_data['serverSignature'], main_server_public_key):
+            print('❌ Main server signature verification failed!')
+            return
+
+        # 4. Tính shared secret và session key
+        shared = DHExchange.compute_shared_secret(
+            client_dh['private_key'],
+            dh_data['serverPublicKey'],
+            dh_data['prime'],
+            dh_data['generator']
+        )
+        session_key = DHExchange.derive_session_key(shared)
+        print('🔐 Created new DH session with main server')
+
+        # 5. Tạo payload snapshot
+        payload = {
+            'type': 'FULL_SNAPSHOT',
+            'token': BACKUP_TOKEN,
+            'state': snap
+        }
+        body_str = canonical_stringify(payload)
         timestamp = str(int(time.time()))
         message = f'POST/api/backup/sync{timestamp}{body_str}'
         signature = DHExchange.sign(message, session_key)
-        headers['X-Client-Id'] = client_id
-        headers['X-Timestamp'] = timestamp
-        headers['X-Signature'] = signature
-    print(f'📤 Sending snapshot to main server ({len(snap.get("users", []))} users, {len(body_str)/1024:.1f} KB)...')
-    try:
+
+        headers = {
+            'Content-Type': 'application/json',
+            'User-Agent': 'ChocoHub-BackupServer/1.0',
+            'X-Client-Id': client_id,
+            'X-Timestamp': timestamp,
+            'X-Signature': signature
+        }
+
+        # 6. Gửi snapshot
+        print(f'📤 Sending snapshot to main server ({len(snap["users"])} users, {len(body_str)/1024:.1f} KB)...')
         resp = requests.post(
             f'{MAIN_SERVER_URL}/api/backup/sync',
             data=body_str,
@@ -516,8 +522,10 @@ def send_snapshot_to_main_server():
             print('✅ Snapshot sent to main server')
         else:
             print(f'❌ Send snapshot failed: {resp.status_code} - {resp.text[:200]}')
+
     except Exception as e:
         print(f'❌ Error sending snapshot: {e}')
+        traceback.print_exc()
 
 # ------------------------------------------------------------
 # 11. Đăng ký với main server (nếu SELF_URL được cấu hình)
@@ -591,6 +599,7 @@ if __name__ == '__main__':
     print('║  Canonical JSON: ON                 ║')
     print('║  REQUEST_SNAPSHOT: ON               ║')
     print('║  Anti-overwrite: HASH-BASED         ║')
+    print('║  Outgoing DH: FRESH SESSION         ║')
     print('╚══════════════════════════════════════╝')
     print('')
 
