@@ -8,10 +8,11 @@
 <a href="https://discord.gg/sztTse9p">
   <img src="https://img.shields.io/badge/💬_Join_Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" width="260" style="height: 50px;">
 </a>
+<a href="https://app.uniswap.org/swap?chain=bnb&inputCurrency=0x748454b64c415A2cb2EFD0162319479c5958d2D1&outputCurrency=0xaf965beB8C830aE5dc8280d1c7215B8F0aCC0CeA">
+  <img src="https://img.shields.io/badge/Swap_on_Uniswap-FF007A?style=for-the-badge&logo=uniswap&logoColor=white" width="260" style="height: 50px;">
+</a>
 
 </div>
-
----
 
 ## 📖 What is ChocoHub?
 
