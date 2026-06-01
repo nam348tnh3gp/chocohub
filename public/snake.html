@@ -443,13 +443,20 @@
                     ⚠️ EPILEPSY WARNING: Rapid flashing and intense visual chaos.
                 </div>
 
-                <!-- Chỉ cần username, không cần PIN -->
+                <!-- Ô nhập Username -->
                 <div style="margin-bottom:15px">
                     <div class="field-lbl">Username</div>
                     <input type="text" id="player-user" class="field-inp" placeholder="your_username" autocomplete="off">
                 </div>
 
-                <button class="btn-start" id="start-game-btn">▶ START GAME</button>
+                <!-- Ô nhập PIN (bắt buộc với game.js) -->
+                <div style="margin-bottom:15px">
+                    <div class="field-lbl">PIN</div>
+                    <input type="password" id="player-pin" class="field-inp" placeholder="••••••" autocomplete="off">
+                </div>
+
+                <!-- Nút START GAME gọi trực tiếp checkUser() -->
+                <button class="btn-start" id="start-game-btn" onclick="checkUser()">▶ START GAME</button>
             </div>
 
             <div id="game-screen">
@@ -550,190 +557,14 @@
     <audio id="normalMusic" src="OSTS/High_Score_Chase.mp3" loop></audio>
     <audio id="hardcoreMusic" src="OSTS/High_Score_Overdrive_Hardcore.mp3"></audio>
 
-    <!-- Các game script gốc (giữ nguyên, có defer) -->
+    <!-- Các script gốc của bạn (game logic + hardcore) -->
     <script src="static/js/hardcore.js" defer></script>
     <script src="static/js/game.js" defer></script>
 
-    <!-- Script bổ sung để xử lý xác thực bằng token (không dùng PIN) -->
-    <!-- SỬA LỖI: Thêm defer để chạy sau game.js, đảm bảo các hàm game tồn tại -->
-    <script defer>
-        (function() {
-            // Helper toast
-            function showToast(msg, type) {
-                const t = document.getElementById('toast');
-                if (!t) return;
-                t.textContent = msg;
-                t.className = 'show ' + (type || '');
-                clearTimeout(t._timeout);
-                t._timeout = setTimeout(() => { t.className = ''; }, 3000);
-            }
-
-            // Kiểm tra token và username đồng bộ
-            function isAuthenticated() {
-                const token = localStorage.getItem('choco_token');
-                const user = localStorage.getItem('choco_user');
-                return token && user;
-            }
-
-            // Hàm checkUser mới - dùng token thay vì PIN
-            window.checkUser = async function() {
-                const username = document.getElementById('player-user').value.trim();
-                if (username.length < 3) {
-                    showToast('Username must be at least 3 characters', 'error');
-                    return;
-                }
-
-                const token = localStorage.getItem('choco_token');
-                const storedUser = localStorage.getItem('choco_user');
-
-                if (!token || storedUser !== username) {
-                    showToast('Please login first', 'error');
-                    setTimeout(() => { window.location.href = 'index.html'; }, 1500);
-                    return;
-                }
-
-                try {
-                    const res = await fetch('/get_user/' + encodeURIComponent(username), {
-                        headers: { 'Authorization': 'Bearer ' + token }
-                    });
-                    if (!res.ok) throw new Error('Token invalid');
-                    const data = await res.json();
-                    if (data.status === 'error') throw new Error(data.message);
-
-                    // Thành công – lưu tên người chơi hiện tại
-                    window.currentPlayer = username;
-                    showToast(`Welcome, ${username}!`, 'success');
-
-                    // KHỞI ĐỘNG GAME – các hàm từ game.js đã sẵn sàng vì defer chạy sau game.js
-                    if (typeof window.initGame === 'function') {
-                        window.initGame();
-                    } else if (typeof window.startGame === 'function') {
-                        window.startGame();
-                    } else {
-                        // Fallback an toàn: chỉ hiện màn hình game, không gọi hàm nếu không có
-                        document.getElementById('setup-screen').style.display = 'none';
-                        document.getElementById('game-screen').style.display = 'block';
-                        // Nếu game.js có resetGame thì gọi, nếu không thì bỏ qua
-                        if (typeof window.resetGame === 'function') {
-                            window.resetGame();
-                        }
-                    }
-                } catch (e) {
-                    console.error(e);
-                    showToast('Session expired. Please login again.', 'error');
-                    localStorage.removeItem('choco_token');
-                    localStorage.removeItem('choco_user');
-                    setTimeout(() => { window.location.href = 'index.html'; }, 1500);
-                }
-            };
-
-            // Hàm claimReward mới - gửi token thay vì PIN
-            window.claimReward = async function() {
-                const username = localStorage.getItem('choco_user');
-                const token = localStorage.getItem('choco_token');
-                if (!username || !token) {
-                    showToast('Please login first', 'error');
-                    window.location.href = 'index.html';
-                    return;
-                }
-
-                // Lấy số apples và mode từ game (các biến toàn cục do game.js cung cấp)
-                const apples = typeof window.gameScore !== 'undefined' ? window.gameScore :
-                              (typeof window.score !== 'undefined' ? window.score : 0);
-                const mode = (typeof window.hardcoreMode !== 'undefined' && window.hardcoreMode) ? 'hardcore' : 'normal';
-
-                const claimBtn = document.getElementById('btn-claim');
-                if (claimBtn) {
-                    claimBtn.disabled = true;
-                    claimBtn.textContent = 'CLAIMING...';
-                }
-
-                try {
-                    const res = await fetch('/snake/claim', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': 'Bearer ' + token
-                        },
-                        body: JSON.stringify({ apples, mode })
-                    });
-
-                    const data = await res.json();
-                    if (data.status === 'success') {
-                        showToast(`Claimed ${data.reward || 0} CC!`, 'success');
-                        if (typeof window.updateBalance === 'function') window.updateBalance();
-                        document.getElementById('modal').classList.remove('show');
-                        if (typeof window.resetGame === 'function') window.resetGame();
-                    } else {
-                        let errMsg = data.message || 'Claim failed';
-                        if (res.status === 429) errMsg = 'Too many claims. Please wait.';
-                        showToast(errMsg, 'error');
-                    }
-                } catch (e) {
-                    console.error(e);
-                    showToast('Network error', 'error');
-                } finally {
-                    if (claimBtn) {
-                        claimBtn.disabled = false;
-                        claimBtn.textContent = '💰 CLAIM';
-                    }
-                }
-            };
-
-            // Leaderboard – không cần token
-            window.showLb = async function(mode) {
-                try {
-                    const res = await fetch('/leaderboard');
-                    const data = await res.json();
-                    const lbBody = document.getElementById('lb-body');
-                    if (!lbBody) return;
-
-                    const scores = mode === 'normal' ? data.normal : data.hardcore;
-                    if (!scores || scores.length === 0) {
-                        lbBody.innerHTML = '<div class="lb-empty">No scores yet</div>';
-                        return;
-                    }
-
-                    const listHtml = scores.map((s, i) => `
-                        <div class="lb-row">
-                            <span class="lb-user">${i+1}. ${escapeHtml(s.username)}</span>
-                            <span class="lb-score">${s.score} 🍎</span>
-                        </div>
-                    `).join('');
-                    lbBody.innerHTML = listHtml;
-
-                    // Cập nhật active tab style
-                    document.querySelectorAll('.lb-tab').forEach(btn => btn.classList.remove('active-n', 'active-h'));
-                    if (mode === 'normal') document.getElementById('lb-tab-normal').classList.add('active-n');
-                    else document.getElementById('lb-tab-hardcore').classList.add('active-h');
-                } catch (e) {
-                    console.error('Leaderboard error:', e);
-                }
-            };
-
-            function escapeHtml(str) {
-                if (!str) return '';
-                return str.replace(/[&<>]/g, function(m) {
-                    if (m === '&') return '&amp;';
-                    if (m === '<') return '&lt;';
-                    if (m === '>') return '&gt;';
-                    return m;
-                });
-            }
-
-            // Gán sự kiện cho nút START GAME
-            const startBtn = document.getElementById('start-game-btn');
-            if (startBtn) {
-                startBtn.onclick = window.checkUser;
-            }
-
-            // Tự động điền username nếu đã lưu
-            const storedUser = localStorage.getItem('choco_user');
-            if (storedUser) {
-                const userInput = document.getElementById('player-user');
-                if (userInput) userInput.value = storedUser;
-            }
-        })();
-    </script>
+    <!-- 
+        KHÔNG cần script nội tuyến vì game.js đã định nghĩa đầy đủ:
+        checkUser(), startGame(), claimReward(), showLb(), ...
+        và các onclick đều gọi đúng hàm toàn cục.
+    -->
 </body>
 </html>
