@@ -1,27 +1,29 @@
-// snake.js – Full fix: dùng chung DB, có getCooldown, cooldown 15 phút
-// KHÔNG còn xác thực PIN (đã có JWT token ở server)
+// snake.js – Version hoạt động
 const db = require('./db');
+const Database = require('better-sqlite3');
+const path = require('path');
+const sqlite = new Database(path.join(__dirname, 'chocohub.db'));
 
 const REWARD_NORMAL = 0.5;
 const REWARD_HARDCORE = 2.0;
 const COOLDOWN_MS = 15 * 60 * 1000; // 15 phút
 
 function processClaim(username, pin, apples, mode) {
-  // ⚠️ Không còn authenticate (pin không được dùng nữa, giữ tham số để tương thích)
-  // Xác thực đã được thực hiện bởi middleware token ở server.js
-  username = username.trim();
+  username = username.trim().toLowerCase();
+  
+  // Bỏ qua pin (đã có JWT)
   
   // Kiểm tra cooldown
-  const lastClaim = db.getLastSnakeClaim(username);
+  const lastClaim = sqlite.prepare(
+    'SELECT claimed_at FROM snake_claims WHERE username=? ORDER BY claimed_at DESC LIMIT 1'
+  ).get(username);
+  
   if (lastClaim) {
-    // Xử lý chuỗi ngày tháng từ SQLite (dạng 'YYYY-MM-DD HH:MM:SS')
-    let lastTime;
-    if (lastClaim.claimed_at.includes('Z')) {
-      lastTime = new Date(lastClaim.claimed_at).getTime();
-    } else {
-      lastTime = new Date(lastClaim.claimed_at + ' UTC').getTime();
+    let lastTime = new Date(lastClaim.claimed_at);
+    if (!lastClaim.claimed_at.includes('Z') && !lastClaim.claimed_at.includes('+')) {
+      lastTime = new Date(lastClaim.claimed_at + 'Z');
     }
-    const elapsed = Date.now() - lastTime;
+    const elapsed = Date.now() - lastTime.getTime();
     if (elapsed < COOLDOWN_MS) {
       const remaining = Math.ceil((COOLDOWN_MS - elapsed) / 1000 / 60);
       throw new Error(`Cooldown active. Wait ${remaining} minutes.`);
@@ -32,7 +34,9 @@ function processClaim(username, pin, apples, mode) {
   const reward = parseFloat((apples * rate).toFixed(4));
 
   db.updateBalance(username, reward);
-  db.insertSnakeClaim(username, apples, mode, reward);
+  
+  sqlite.prepare('INSERT INTO snake_claims (username, apples, mode, reward) VALUES (?, ?, ?, ?)')
+    .run(username, apples, mode || 'normal', reward);
 
   return {
     status: 'success',
@@ -43,17 +47,19 @@ function processClaim(username, pin, apples, mode) {
 }
 
 function getCooldown(username) {
-  username = username.trim();
-  const lastClaim = db.getLastSnakeClaim(username);
+  username = username.trim().toLowerCase();
+  const lastClaim = sqlite.prepare(
+    'SELECT claimed_at FROM snake_claims WHERE username=? ORDER BY claimed_at DESC LIMIT 1'
+  ).get(username);
+  
   if (!lastClaim) return { cooldown: false };
-
-  let lastTime;
-  if (lastClaim.claimed_at.includes('Z')) {
-    lastTime = new Date(lastClaim.claimed_at).getTime();
-  } else {
-    lastTime = new Date(lastClaim.claimed_at + ' UTC').getTime();
+  
+  let lastTime = new Date(lastClaim.claimed_at);
+  if (!lastClaim.claimed_at.includes('Z') && !lastClaim.claimed_at.includes('+')) {
+    lastTime = new Date(lastClaim.claimed_at + 'Z');
   }
-  const elapsed = Date.now() - lastTime;
+  
+  const elapsed = Date.now() - lastTime.getTime();
   const remaining = COOLDOWN_MS - elapsed;
 
   return {
