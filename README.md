@@ -13,24 +13,32 @@
 
 ---
 
-### What is ChocoHub?
+## 📖 What is ChocoHub?
 
-> Chocohub is a platform featuring a variety of utilities. It originated from a simple "snake faucet" game designed to reward players with DUCO and has since expanded into a growing ecosystem. The project is currently managed by **Ruvyzvat** (Nam348tnh3gp) and **BloodFell** (Chocoetom).
-
----
-
-### 🚀 Key Features
-
-* **Webminer (SHA256 & more soon):** Built for PC and Mobile miners looking for alternatives to standard Duino-Coin earnings. It is designed as a companion project to complement the Duino-Coin ecosystem.
-* **CC Staking:** A system where validators are randomly chosen every few seconds. The winner receives 0.1 CC, allowing users to accumulate rewards quickly without intensive mining.
-* **Faucet Games:** Play games like the **Snake Faucet** to earn CC rewards directly while you play.
-* **Swap System (Coming Soon):** Within 1-2 weeks, we will implement a Swap system for DUCO and WEBCOIN (and **MAYBE** XNO).
+> **ChocoHub** started as a simple "snake faucet" game rewarding players with **DUCO**, and evolved into a full platform of utilities.  
+> It's actively maintained by **Ruvyzvat** (Nam348tnh3gp) and **BloodFell** (Chocoetom).  
+> *Earn, play, stake, mine and swap — all in one place.*
 
 ---
 
-### 💰 What is CC?
+## Key Features
 
-**CC** (Choco Coins) is the native digital currency of the ChocoHub ecosystem. 
+| Feature | Description |
+|:---:|---|
+| ⛏️ **Webminer** <br> *(SHA256)* | A browser-based miner for PC and mobile. An alternative way to earn Duino-Coins without complex setups. 
+| 💰 **CC Staking** | Validators are randomly chosen every few seconds. The winner gets **0.1 CC**. Passive earnings with minimal effort. |
+| 🎮 **Faucet Games** | Play the **Snake Faucet** and other games to receive CC rewards directly while you play. |
+| 🔄 **Swap System** <br> *(Partially added)* | In some days: swap **DUCO**, **WEBCOIN**, and possibly **XNO** directly on the platform. |
 
-* **Exchange Ratio:** 10 CC = 1 DUCO.
-* **Utility:** Used for rewards in games, staking, mining, and soon for swapping into other major micro-currencies.
+---
+
+## 💎 What is CC & CCpol?
+
+**CC (Choco Coins)** is the **main** & **stable** coin on chocohub, you can use for activities and others.
+**ChocoCoinPolygon** is the non-stable coin on chocohub, powers AI, POC (Proof-of-Capacity), Poc Validators (Micro), Real mining (mine XMR, receive CCpol), its price varies based on **sell** and **buy** with matic **duco**, other pairs will come soon, use **UNISWAP** For swapping them
+
+| 🔁 Exchange Rate | 💡 Utility |
+|:---:|:---|
+| **10 CC = 1 DUCO** | Rewards for games, staking, mining, and soon swaps into other major micro-currencies. |
+
+> ⚡ *Start earning CC today — mine, play, stake!*
