@@ -1,19 +1,21 @@
-# dh.py – Diffie-Hellman (RFC 3526 / 7919 groups) + RSA signing for server authentication
+# dh.py – Diffie-Hellman (RFC 5114 / modp2048) + RSA signing for server authentication
+# Đồng bộ với dh.js: sử dụng raw private key (x), raw public key (y),
+# prime/generator base64, padding public key khi cần.
+
 import os
 import base64
 import hashlib
 import hmac
 from cryptography.hazmat.primitives.asymmetric import dh, rsa, padding
-from cryptography.hazmat.primitives.asymmetric.dh import DHPublicNumbers
+from cryptography.hazmat.primitives.asymmetric.dh import DHPublicNumbers, DHPrivateNumbers
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.serialization import (
     Encoding, PublicFormat, PrivateFormat, NoEncryption,
-    load_der_private_key, load_pem_private_key, load_pem_public_key
+    load_pem_private_key, load_pem_public_key
 )
 
-# ─── Nhóm DH chuẩn (prime, generator) ──────────────────
-#      modp2048 (RFC 3526) – tương thích với Node.js crypto.createDiffieHellmanGroup('modp2048')
-_MODP2048_PRIME = int(
+# ─── Nhóm DH chuẩn modp2048 (RFC 5114, giống hệt Node.js) ──────────────────
+_MODP2048_PRIME_HEX = (
     "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1"
     "29024E088A67CC74020BBEA63B139B22514A08798E3404DD"
     "EF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245"
@@ -24,81 +26,98 @@ _MODP2048_PRIME = int(
     "670C354E4ABC9804F1746C08CA18217C32905E462E36CE3B"
     "E39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9"
     "DE2BCBF6955817183995497CEA956AE515D2261898FA0510"
-    "15728E5A8AACAA68FFFFFFFFFFFFFFFF", 16
+    "15728E5A8AACAA68FFFFFFFFFFFFFFFF"
 )
+_MODP2048_PRIME = int(_MODP2048_PRIME_HEX, 16)
 _MODP2048_GENERATOR = 2
+_PRIME_BYTES_LEN = (_MODP2048_PRIME.bit_length() + 7) // 8   # = 256
+
 
 class DHExchange:
-    # ───────────── DH tiêu chuẩn (RFC) ────────────────────
+    # ───────────── DH chuẩn (RFC 5114 modp2048) ────────────────────
     @staticmethod
-    def generate_standard_keypair(prime_int=_MODP2048_PRIME, generator_int=_MODP2048_GENERATOR):
-        """Tạo cặp khóa DH từ nhóm chuẩn (mặc định modp2048).
-        Public key được xuất dạng raw bytes (tương thích Node.js).
-        """
-        param_numbers = dh.DHParameterNumbers(prime_int, generator_int)
+    def generate_standard_keypair(group_name='modp2048'):
+        """Tạo cặp khóa DH, trả về raw private key (x) dạng base64,
+        raw public key (y) dạng base64, prime và generator base64.
+        Tương thích hoàn toàn với dh.js."""
+        # Tạo tham số nhóm
+        param_numbers = dh.DHParameterNumbers(_MODP2048_PRIME, _MODP2048_GENERATOR)
         parameters = param_numbers.parameters()
         private_key = parameters.generate_private_key()
         public_key = private_key.public_key()
 
-        # Lấy raw bytes của public key (số nguyên y, big‑endian)
-        y = public_key.public_numbers().y
-        key_size = (prime_int.bit_length() + 7) // 8
-        raw_public_bytes = y.to_bytes(key_size, 'big')
+        # Lấy raw private key (x) dạng bytes big-endian, đủ độ dài prime
+        x = private_key.private_numbers().x
+        raw_private_bytes = x.to_bytes(_PRIME_BYTES_LEN, 'big')
 
-        # Lấy prime và generator dưới dạng bytes (big‑endian)
-        prime_bytes = prime_int.to_bytes(key_size, 'big')
-        generator_bytes = generator_int.to_bytes(1, 'big')
+        # Lấy raw public key (y) dạng bytes big-endian
+        y = public_key.public_numbers().y
+        raw_public_bytes = y.to_bytes(_PRIME_BYTES_LEN, 'big')
+
+        # Prime và generator dạng bytes (để truyền qua base64)
+        prime_bytes = _MODP2048_PRIME.to_bytes(_PRIME_BYTES_LEN, 'big')
+        generator_bytes = _MODP2048_GENERATOR.to_bytes(1, 'big')
 
         return {
-            'private_key': base64.b64encode(
-                private_key.private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
-            ).decode(),
+            'private_key': base64.b64encode(raw_private_bytes).decode(),
             'public_key': base64.b64encode(raw_public_bytes).decode(),
             'prime': base64.b64encode(prime_bytes).decode(),
             'generator': base64.b64encode(generator_bytes).decode(),
-            'group': 'modp2048'
+            'group': group_name
         }
 
     @staticmethod
     def generate_keypair():
-        """Giữ lại method cũ (dùng nhóm chuẩn modp2048)."""
-        return DHExchange.generate_standard_keypair()
+        """Giữ lại method cũ (gọi generate_standard_keypair)."""
+        return DHExchange.generate_standard_keypair('modp2048')
 
     @staticmethod
     def compute_shared_secret(our_private_key_b64, their_public_key_b64, prime_b64, generator_b64):
-        """Tính shared secret từ private key mình và public key đối tác.
-        their_public_key_b64 là raw bytes (tương thích Node.js).
-        """
-        # Giải mã khóa riêng (PKCS8 DER)
-        private_key = load_der_private_key(base64.b64decode(our_private_key_b64), password=None)
+        """Tính shared secret từ private key raw của mình và public key raw của đối tác.
+        Xử lý tự động đệm public key nếu thiếu độ dài (giống dh.js)."""
+        # Giải mã private key raw (x)
+        raw_private = base64.b64decode(our_private_key_b64)
+        x = int.from_bytes(raw_private, 'big')
 
-        # Khôi phục tham số nhóm từ prime và generator
+        # Khôi phục prime, generator từ base64
         prime_bytes = base64.b64decode(prime_b64)
         generator_bytes = base64.b64decode(generator_b64)
         prime_int = int.from_bytes(prime_bytes, 'big')
         generator_int = int.from_bytes(generator_bytes, 'big')
+        key_size = len(prime_bytes)  # 256
+
+        # Xử lý public key của đối tác: đệm nếu ngắn hơn key_size (giống JS)
+        their_pub_raw = base64.b64decode(their_public_key_b64)
+        if len(their_pub_raw) < key_size:
+            padded = b'\x00' * (key_size - len(their_pub_raw)) + their_pub_raw
+            their_pub_raw = padded
+        y = int.from_bytes(their_pub_raw, 'big')
+
+        # Tạo đối tượng DH từ tham số nhóm
         param_numbers = dh.DHParameterNumbers(prime_int, generator_int)
         parameters = param_numbers.parameters()
 
-        # Tạo public key từ raw bytes (tương thích mọi phiên bản cryptography)
-        their_public_bytes = base64.b64decode(their_public_key_b64)
-        their_y = int.from_bytes(their_public_bytes, 'big')
-        their_public_numbers = DHPublicNumbers(their_y, param_numbers)
-        their_public_key = their_public_numbers.public_key()
+        # Tạo private key từ x
+        private_numbers = DHPrivateNumbers(x, param_numbers)
+        private_key = private_numbers.private_key(parameters)
+
+        # Tạo public key đối tác từ y
+        public_numbers = DHPublicNumbers(y, param_numbers)
+        their_public_key = public_numbers.public_key(parameters)
 
         shared = private_key.exchange(their_public_key)
         return base64.b64encode(shared).decode()
 
     @staticmethod
     def derive_session_key(shared_secret_b64):
-        """Dẫn xuất session key từ shared secret (SHA-256)."""
-        return base64.b64encode(
-            hashlib.sha256(base64.b64decode(shared_secret_b64)).digest()
-        ).decode()
+        """Dẫn xuất session key từ shared secret (SHA‑256) → base64."""
+        secret_bytes = base64.b64decode(shared_secret_b64)
+        digest = hashlib.sha256(secret_bytes).digest()
+        return base64.b64encode(digest).decode()
 
     @staticmethod
     def sign(message, session_key_b64):
-        """Tạo chữ ký HMAC-SHA256 cho thông điệp."""
+        """Tạo chữ ký HMAC‑SHA256 (hex)."""
         key = base64.b64decode(session_key_b64)
         return hmac.new(key, message.encode(), hashlib.sha256).hexdigest()
 
@@ -108,10 +127,10 @@ class DHExchange:
         expected = DHExchange.sign(message, session_key_b64)
         return hmac.compare_digest(expected, signature)
 
-    # ───────────── RSA signing (server authentication) ────
+    # ───────────── RSA signing (server authentication) ────────────
     @staticmethod
     def sign_with_private_key(data, private_key_pem):
-        """Ký dữ liệu bằng RSA private key (PEM)."""
+        """Ký dữ liệu bằng RSA private key (PEM, PKCS1v15, SHA256)."""
         key = load_pem_private_key(private_key_pem.encode(), password=None)
         signature = key.sign(
             data.encode(),
@@ -122,7 +141,7 @@ class DHExchange:
 
     @staticmethod
     def verify_with_public_key(data, signature_b64, public_key_pem):
-        """Xác minh chữ ký bằng RSA public key (PEM)."""
+        """Xác minh chữ ký RSA bằng public key (PEM)."""
         try:
             key = load_pem_public_key(public_key_pem.encode())
             key.verify(
