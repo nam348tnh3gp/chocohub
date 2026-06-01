@@ -1,4 +1,4 @@
-// snake.js – Đã sửa lỗi tên hàm
+// snake.js – Bản fix cuối cùng
 const db = require('./db');
 
 const REWARD_NORMAL = 0.5;
@@ -8,17 +8,31 @@ const COOLDOWN_MS = 15 * 60 * 1000; // 15 phút
 function processClaim(username, pin, apples, mode) {
   username = username.trim().toLowerCase();
   
-  // Kiểm tra cooldown - SỬA: db.getLastSnakeClaim
+  // Kiểm tra cooldown - FIX: xử lý đúng timezone
   const lastClaim = db.getLastSnakeClaim(username);
-  if (lastClaim) {
-    let lastTime = new Date(lastClaim.claimed_at);
-    if (!lastClaim.claimed_at.includes('Z') && !lastClaim.claimed_at.includes('+')) {
-      lastTime = new Date(lastClaim.claimed_at + 'Z');
-    }
-    const elapsed = Date.now() - lastTime.getTime();
-    if (elapsed < COOLDOWN_MS) {
-      const remaining = Math.ceil((COOLDOWN_MS - elapsed) / 1000 / 60);
-      throw new Error(`Cooldown active. Wait ${remaining} minutes.`);
+  if (lastClaim && lastClaim.claimed_at) {
+    // SQLite trả về chuỗi 'YYYY-MM-DD HH:MM:SS' - đây là local time của server
+    // Chuyển đổi đúng bằng cách thay space bằng T và thêm múi giờ local
+    let dateStr = lastClaim.claimed_at.replace(' ', 'T');
+    // Thêm múi giờ local (+07:00 cho Việt Nam, hoặc dùng IANA)
+    const lastTime = new Date(dateStr + '+07:00'); // Hoặc dùng +00:00 nếu server dùng UTC
+    
+    if (isNaN(lastTime.getTime())) {
+      // Fallback: thử parse trực tiếp
+      const lastTime2 = new Date(lastClaim.claimed_at);
+      if (!isNaN(lastTime2.getTime())) {
+        const elapsed = Date.now() - lastTime2.getTime();
+        if (elapsed < COOLDOWN_MS) {
+          const remaining = Math.ceil((COOLDOWN_MS - elapsed) / 1000 / 60);
+          throw new Error(`Cooldown active. Wait ${remaining} minutes.`);
+        }
+      }
+    } else {
+      const elapsed = Date.now() - lastTime.getTime();
+      if (elapsed < COOLDOWN_MS) {
+        const remaining = Math.ceil((COOLDOWN_MS - elapsed) / 1000 / 60);
+        throw new Error(`Cooldown active. Wait ${remaining} minutes.`);
+      }
     }
   }
 
@@ -26,8 +40,6 @@ function processClaim(username, pin, apples, mode) {
   const reward = parseFloat((apples * rate).toFixed(4));
 
   db.updateBalance(username, reward);
-  
-  // SỬA: db.insertSnakeClaim (không phải db.insertSnakeClaim)
   db.insertSnakeClaim(username, apples, mode || 'normal', reward);
 
   return {
@@ -42,11 +54,17 @@ function getCooldown(username) {
   username = username.trim().toLowerCase();
   const lastClaim = db.getLastSnakeClaim(username);
   
-  if (!lastClaim) return { cooldown: false };
+  if (!lastClaim || !lastClaim.claimed_at) return { cooldown: false };
   
-  let lastTime = new Date(lastClaim.claimed_at);
-  if (!lastClaim.claimed_at.includes('Z') && !lastClaim.claimed_at.includes('+')) {
-    lastTime = new Date(lastClaim.claimed_at + 'Z');
+  // Xử lý tương tự
+  let dateStr = lastClaim.claimed_at.replace(' ', 'T');
+  let lastTime = new Date(dateStr + '+07:00');
+  
+  if (isNaN(lastTime.getTime())) {
+    lastTime = new Date(lastClaim.claimed_at);
+    if (isNaN(lastTime.getTime())) {
+      return { cooldown: false };
+    }
   }
   
   const elapsed = Date.now() - lastTime.getTime();
