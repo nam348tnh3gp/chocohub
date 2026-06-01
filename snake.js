@@ -1,8 +1,5 @@
-// snake.js – Version hoạt động
+// snake.js – Đã sửa lỗi tên hàm
 const db = require('./db');
-const Database = require('better-sqlite3');
-const path = require('path');
-const sqlite = new Database(path.join(__dirname, 'chocohub.db'));
 
 const REWARD_NORMAL = 0.5;
 const REWARD_HARDCORE = 2.0;
@@ -11,13 +8,8 @@ const COOLDOWN_MS = 15 * 60 * 1000; // 15 phút
 function processClaim(username, pin, apples, mode) {
   username = username.trim().toLowerCase();
   
-  // Bỏ qua pin (đã có JWT)
-  
-  // Kiểm tra cooldown
-  const lastClaim = sqlite.prepare(
-    'SELECT claimed_at FROM snake_claims WHERE username=? ORDER BY claimed_at DESC LIMIT 1'
-  ).get(username);
-  
+  // Kiểm tra cooldown - SỬA: db.getLastSnakeClaim
+  const lastClaim = db.getLastSnakeClaim(username);
   if (lastClaim) {
     let lastTime = new Date(lastClaim.claimed_at);
     if (!lastClaim.claimed_at.includes('Z') && !lastClaim.claimed_at.includes('+')) {
@@ -35,8 +27,8 @@ function processClaim(username, pin, apples, mode) {
 
   db.updateBalance(username, reward);
   
-  sqlite.prepare('INSERT INTO snake_claims (username, apples, mode, reward) VALUES (?, ?, ?, ?)')
-    .run(username, apples, mode || 'normal', reward);
+  // SỬA: db.insertSnakeClaim (không phải db.insertSnakeClaim)
+  db.insertSnakeClaim(username, apples, mode || 'normal', reward);
 
   return {
     status: 'success',
@@ -48,9 +40,7 @@ function processClaim(username, pin, apples, mode) {
 
 function getCooldown(username) {
   username = username.trim().toLowerCase();
-  const lastClaim = sqlite.prepare(
-    'SELECT claimed_at FROM snake_claims WHERE username=? ORDER BY claimed_at DESC LIMIT 1'
-  ).get(username);
+  const lastClaim = db.getLastSnakeClaim(username);
   
   if (!lastClaim) return { cooldown: false };
   
