@@ -20,29 +20,34 @@ jobs:
 
       - name: Install dependencies in Backup folder
         working-directory: ./Backup
-        run: npm install  # Dùng npm install thay vì npm ci (không dùng cache)
+        run: npm ci
 
       - name: Install pkg globally
         run: npm install -g pkg
 
       - name: Build Windows executable
         working-directory: ./Backup
-        run: pkg backup.js --targets node21-win-x64 --options expose-gc --output chocohub-backup.exe
+        run: pkg backup.js --targets node20-win-x64 --options expose-gc --output chocohub-backup.exe
 
       - name: Prepare release package
         run: |
+          # Tạo thư mục tạm để đóng gói
           mkdir -p release-package
+          # Copy file exe từ thư mục Backup
           cp Backup/chocohub-backup.exe release-package/
+          # Copy file .env (nếu có)
           if [ -f "Backup/.env" ]; then
             cp Backup/.env release-package/
             echo "✅ Copied .env file"
           else
             echo "⚠️ Warning: Backup/.env not found, skipping"
           fi
+          # Copy .env.example nếu có (tùy chọn)
           if [ -f "Backup/.env.example" ]; then
             cp Backup/.env.example release-package/
+            echo "✅ Copied .env.example file"
           fi
-
+          
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
