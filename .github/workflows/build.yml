@@ -26,7 +26,7 @@ jobs:
 
       - name: Build Windows executable
         working-directory: ./Backup
-        run: pkg backup.js --targets node20-win-x64 --options expose-gc --output chocohub-backup.exe
+        run: pkg backup.js --targets node18-win-x64 --options expose-gc --output chocohub-backup.exe
 
       - name: Prepare release package
         run: |
