@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest  # CHUYỂN SANG WINDOWS để build native addon
+    runs-on: windows-latest
 
     steps:
       - name: Checkout code
@@ -20,7 +20,6 @@ jobs:
         working-directory: ./Backup
         run: |
           npm install
-          # Rebuild native addon cho Windows
           npm rebuild better-sqlite3
 
       - name: Install pkg globally
@@ -36,23 +35,35 @@ jobs:
           New-Item -ItemType Directory -Force -Path release-package
           
           # Copy file exe từ Backup folder
-          Copy-Item Backup/chocohub-backup.exe release-package/
+          Copy-Item -Path "Backup/chocohub-backup.exe" -Destination "release-package/" -Force
           
-          # Copy .env nếu có
-          if (Test-Path "Backup/.env") {
-            Copy-Item Backup/.env release-package/
+          # Copy .env (kiểm tra kỹ hơn)
+          $envPath = "Backup/.env"
+          if (Test-Path $envPath) {
+            # Hiển thị thông tin file để debug
+            Get-ChildItem $envPath | Format-List
+            Copy-Item -Path $envPath -Destination "release-package/.env" -Force -Verbose
             Write-Host "✅ Copied .env file"
           } else {
-            Write-Host "⚠️ Backup/.env not found, skipping"
+            Write-Host "⚠️ Backup/.env not found"
+            # Liệt kê các file trong thư mục Backup để debug
+            Get-ChildItem Backup/
           }
           
-          # Copy .env.example nếu có
-          if (Test-Path "Backup/.env.example") {
-            Copy-Item Backup/.env.example release-package/
+          # Copy .env.example
+          $envExamplePath = "Backup/.env.example"
+          if (Test-Path $envExamplePath) {
+            Copy-Item -Path $envExamplePath -Destination "release-package/.env.example" -Force -Verbose
             Write-Host "✅ Copied .env.example file"
+          } else {
+            Write-Host "⚠️ Backup/.env.example not found"
           }
           
-  
+
+
+          # Liệt kê nội dung thư mục release để kiểm tra
+          Write-Host "Contents of release-package:"
+          Get-ChildItem release-package/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
