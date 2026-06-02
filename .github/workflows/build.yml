@@ -15,12 +15,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: 'Backup/package.json'
+          # Bỏ cache hoàn toàn
 
       - name: Install dependencies in Backup folder
         working-directory: ./Backup
-        run: npm ci
+        run: npm install  # Dùng npm install thay vì npm ci
 
       - name: Install pkg globally
         run: npm install -g pkg
@@ -47,7 +46,7 @@ jobs:
             cp Backup/.env.example release-package/
             echo "✅ Copied .env.example file"
           fi
-          
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
