@@ -7,6 +7,9 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "init-db": "node -e \"require('./db')\"",
+    "backup": "node backup.js",
+    "build-backup": "pkg backup.js --targets node18-win-x64 --options expose-gc --output dist/chocohub-backup.exe",
+    "build-backup-all": "pkg backup.js --targets node18-win-x64,node18-linux-x64,node18-macos-x64 --options expose-gc --output dist/chocohub-backup",
     "test": "echo \"No tests yet\" && exit 0"
   },
   "keywords": [
@@ -35,7 +38,21 @@
     "selfsigned": "^2.4.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0"
+    "nodemon": "^3.1.0",
+    "pkg": "^5.8.1"
+  },
+  "pkg": {
+    "assets": [
+      "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+      "*.pem"
+    ],
+    "scripts": [
+      "backup.js",
+      "dh.js"
+    ],
+    "targets": [
+      "node18-win-x64"
+    ]
   },
   "repository": {
     "type": "git",
