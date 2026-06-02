@@ -1,11 +1,11 @@
 name: Build Backup EXE
 
 on:
-  workflow_dispatch:  # Chỉ chạy khi kích hoạt thủ công
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest  # CHUYỂN SANG WINDOWS để build native addon
 
     steps:
       - name: Checkout code
@@ -15,11 +15,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          # Bỏ cache hoàn toàn
 
       - name: Install dependencies in Backup folder
         working-directory: ./Backup
-        run: npm install  # Dùng npm install thay vì npm ci
+        run: |
+          npm install
+          # Rebuild native addon cho Windows
+          npm rebuild better-sqlite3
 
       - name: Install pkg globally
         run: npm install -g pkg
@@ -30,22 +32,27 @@ jobs:
 
       - name: Prepare release package
         run: |
-          # Tạo thư mục tạm để đóng gói
-          mkdir -p release-package
-          # Copy file exe từ thư mục Backup
-          cp Backup/chocohub-backup.exe release-package/
-          # Copy file .env (nếu có)
-          if [ -f "Backup/.env" ]; then
-            cp Backup/.env release-package/
-            echo "✅ Copied .env file"
-          else
-            echo "⚠️ Warning: Backup/.env not found, skipping"
-          fi
-          # Copy .env.example nếu có (tùy chọn)
-          if [ -f "Backup/.env.example" ]; then
-            cp Backup/.env.example release-package/
-            echo "✅ Copied .env.example file"
-          fi
+          # Tạo thư mục release
+          New-Item -ItemType Directory -Force -Path release-package
+          
+          # Copy file exe từ Backup folder
+          Copy-Item Backup/chocohub-backup.exe release-package/
+          
+          # Copy .env nếu có
+          if (Test-Path "Backup/.env") {
+            Copy-Item Backup/.env release-package/
+            Write-Host "✅ Copied .env file"
+          } else {
+            Write-Host "⚠️ Backup/.env not found, skipping"
+          }
+          
+          # Copy .env.example nếu có
+          if (Test-Path "Backup/.env.example") {
+            Copy-Item Backup/.env.example release-package/
+            Write-Host "✅ Copied .env.example file"
+          }
+          
+  
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
