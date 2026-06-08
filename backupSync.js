@@ -1,5 +1,6 @@
 // backupSync.js – Client đồng bộ full-snapshot + TLS 1.3 + DH (có fallback token)
 // 🆕 Fix: Xử lý REQUEST_SNAPSHOT + canonical JSON cho HMAC
+// 🔁 Retry và xóa node (cả static & dynamic) sau MAX_RETRIES lần thất bại
 const net = require('net');
 const https = require('https');
 const http = require('http');
@@ -67,12 +68,11 @@ class BackupClient {
     this.activeServers = new Set();
     this.heartbeatLogCounter = {};
     this.knownHosts = new Set(this.servers.map(s => s.host));
-    this.retryCount = {};
-    this.failedNodes = new Set();
+    this.retryCount = {};        // Lưu số lần retry cho mỗi server (key: "host:port")
+    this.failedNodes = new Set(); // Chỉ dùng để ngăn thêm lại dynamic node đã chết
 
     this.dhSessions = new Map();
     this.clientBaseId = `backup-${os.hostname()}-${process.pid}`;
-    // 🆕 Map lưu public key riêng cho từng server (key: "host:port")
     this.serverPublicKeys = new Map();
   }
 
@@ -146,22 +146,23 @@ class BackupClient {
     }
   }
 
-  // ==================== TCP (giữ nguyên) ====================
+  // ==================== TCP ====================
   connectTcp(server) {
     const serverKey = `${server.host}:${server.port}`;
     const client = new net.Socket();
 
     client.connect(server.port, server.host, () => {
       console.log(`🔗 [TCP] Connected to ${serverKey}`);
+      // Reset retry count khi kết nối thành công
+      this.retryCount[serverKey] = 0;
       this.sendReadyTcp(client, server);
       this.startTcpHeartbeat(client, serverKey);
       this.startSnapshotIntervalTcp(client, server, serverKey);
-      if (server.isDynamic) this.retryCount[serverKey] = 0;
     });
 
     client.on('data', (data) => this.handleTcpData(client, data));
     client.on('close', () => {
-      console.log(`🔌 [TCP] Disconnected ${serverKey}, retry in ${RECONNECT_DELAY/1000}s...`);
+      console.log(`🔌 [TCP] Disconnected ${serverKey}, will retry...`);
       this.cleanupTcp(serverKey);
       this.handleConnectionFailure(server);
     });
@@ -244,7 +245,6 @@ class BackupClient {
           try {
             const json = JSON.parse(data);
             if (json.publicKey) {
-              // 🆕 Lưu vào map riêng cho serverKey
               this.serverPublicKeys.set(serverKey, json.publicKey);
               console.log(`🔑 Server public key obtained for ${server.host}`);
               resolve(true);
@@ -261,7 +261,6 @@ class BackupClient {
 
   // ==================== DH Exchange (có fallback) ====================
   async performSecureDHExchange(server, serverKey, agent) {
-    // 🆕 Lấy public key riêng cho server này, nếu chưa có thì fetch
     let serverPubKey = this.serverPublicKeys.get(serverKey);
     if (!serverPubKey) {
       const fetched = await this.fetchServerPublicKey(server, agent);
@@ -276,7 +275,6 @@ class BackupClient {
     const clientDHKeys = DHExchange.generateStandardKeyPair('modp2048');
     const clientId = `${this.clientBaseId}-${serverKey}`;
 
-    // 🆕 Dùng canonicalStringify để nhất quán
     const payload = canonicalStringify({
       clientId,
       clientPublicKey: clientDHKeys.publicKey,
@@ -312,7 +310,6 @@ class BackupClient {
               return resolve(null);
             }
 
-            // 🆕 Dùng canonicalStringify để tạo serverPubData giống như backup server đã ký
             const serverPubData = canonicalStringify({
               publicKey: data.serverPublicKey,
               prime: data.prime,
@@ -322,7 +319,7 @@ class BackupClient {
             const isValid = DHExchange.verifyWithPublicKey(
               serverPubData,
               data.serverSignature,
-              serverPubKey  // Dùng đúng key của server này
+              serverPubKey
             );
             if (!isValid) {
               console.log(`⚠️ Server signature verification FAILED for ${serverKey}, falling back to token mode`);
@@ -336,7 +333,6 @@ class BackupClient {
               data.generator
             );
             const sessionKey = DHExchange.deriveSessionKey(sharedSecret);
-
             console.log(`🔐 Secure DH session established with ${serverKey} (server authenticated)`);
             resolve({ clientId, sessionKey });
           } catch (e) {
@@ -359,12 +355,9 @@ class BackupClient {
     });
   }
 
-  // 🆕 Hàm gửi request với token (fallback mode) - có canonical JSON
   sendWithToken(method, path, bodyObj, server, agent, isEmpty) {
     bodyObj.token = server.token;
-    if (isEmpty !== undefined) {
-      bodyObj.empty = isEmpty;
-    }
+    if (isEmpty !== undefined) { bodyObj.empty = isEmpty; }
     const payload = canonicalStringify(bodyObj);
     const headers = {
       'Content-Type': 'application/json',
@@ -376,12 +369,9 @@ class BackupClient {
     return { payload, headers };
   }
 
-  // Hàm gửi request với DH (có canonical JSON cho HMAC)
   sendWithDH(method, path, bodyObj, session, isEmpty) {
     bodyObj.token = BACKUP_TOKEN;
-    if (isEmpty !== undefined) {
-      bodyObj.empty = isEmpty;
-    }
+    if (isEmpty !== undefined) { bodyObj.empty = isEmpty; }
     const payload = canonicalStringify(bodyObj);
     const headers = {
       'Content-Type': 'application/json',
@@ -400,7 +390,6 @@ class BackupClient {
     return { payload, headers };
   }
 
-  // 🆕 Gửi snapshot ngay lập tức (dùng cho REQUEST_SNAPSHOT)
   sendSnapshotNow(server, serverKey, agent, session, useDH) {
     const httpModule = server.protocol === 'https' ? https : http;
     const snapshotPayload = { type: 'FULL_SNAPSHOT', token: server.token, state: db.exportFullState() };
@@ -509,13 +498,11 @@ class BackupClient {
           if (res.statusCode === 200 && body.trim()) {
             try {
               const msg = JSON.parse(body);
-              
               if (msg.type === 'REQUEST_SNAPSHOT') {
                 console.log(`📤 Server ${serverKey} requested snapshot, sending...`);
                 this.sendSnapshotNow(server, serverKey, agent, session, useDH);
                 return;
               }
-              
               if (msg.type === 'FULL_SNAPSHOT' && msg.state) {
                 const users = Array.isArray(msg.state.users) ? msg.state.users.length : 0;
                 if (users > 0) {
@@ -524,16 +511,16 @@ class BackupClient {
                   this.restored = true;
                   console.log('✅ Database restored');
                 }
+                // Reset retry count khi kết nối thành công
+                this.retryCount[serverKey] = 0;
                 this.ensureHeartbeatAndSnapshot(server, serverKey, agent, session, useDH);
-                if (server.isDynamic) this.retryCount[serverKey] = 0;
                 return;
               }
-
               if (msg.type === 'READY_ACK') {
                 console.log(`🔗 [${useDH ? 'DH' : 'TOKEN'}] Connected to ${serverKey} (main already has data)`);
                 this.restored = true;
+                this.retryCount[serverKey] = 0;
                 this.ensureHeartbeatAndSnapshot(server, serverKey, agent, session, useDH);
-                if (server.isDynamic) this.retryCount[serverKey] = 0;
                 return;
               }
             } catch (e) {
@@ -542,7 +529,6 @@ class BackupClient {
           } else {
             console.error(`❌ ${serverKey} status ${res.statusCode}, retry...`);
           }
-
           this.handleConnectionFailure(server, tryReady);
         });
       });
@@ -587,20 +573,20 @@ class BackupClient {
     }
   }
 
+  // 🔁 Xử lý thất bại kết nối – áp dụng cho tất cả node (static & dynamic)
   handleConnectionFailure(server, retryFn) {
-    if (!server.isDynamic) {
-      if (retryFn) setTimeout(retryFn, RETRY_INTERVAL);
-      else setTimeout(() => this.connect(server), RECONNECT_DELAY);
-      return;
-    }
-
     const serverKey = `${server.host}:${server.port}`;
     this.retryCount[serverKey] = (this.retryCount[serverKey] || 0) + 1;
 
     if (this.retryCount[serverKey] >= MAX_RETRIES) {
-      console.log(`🗑️ Removing dead dynamic node ${serverKey} after ${MAX_RETRIES} failed retries.`);
-      this.failedNodes.add(server.host);
+      console.log(`🗑️ Removing dead node ${serverKey} after ${MAX_RETRIES} failed retries.`);
+      // Xóa khỏi danh sách servers để không thử lại
       this.servers = this.servers.filter(s => `${s.host}:${s.port}` !== serverKey);
+      // Nếu là dynamic node, đánh dấu để không thêm lại
+      if (server.isDynamic) {
+        this.failedNodes.add(server.host);
+      }
+      // Dọn dẹp tài nguyên liên quan
       if (this.heartbeats[serverKey]) {
         clearInterval(this.heartbeats[serverKey]);
         delete this.heartbeats[serverKey];
@@ -610,6 +596,9 @@ class BackupClient {
         delete this.snapshotTimers[serverKey];
       }
       this.sockets = this.sockets.filter(s => s.serverKey !== serverKey);
+      if (this.dhSessions.has(serverKey)) {
+        this.dhSessions.delete(serverKey);
+      }
       console.log(`🧹 Cleaned up resources for ${serverKey}`);
     } else {
       console.log(`🔄 Retry ${this.retryCount[serverKey]}/${MAX_RETRIES} for ${serverKey} in ${RETRY_INTERVAL/1000}s...`);
@@ -618,7 +607,7 @@ class BackupClient {
     }
   }
 
-  // ==================== Heartbeat & Snapshot - TOKEN MODE (dùng canonical) ====================
+  // ==================== Heartbeat & Snapshot - TOKEN MODE ====================
   startHttpHeartbeatToken(server, serverKey, agent) {
     const httpModule = server.protocol === 'https' ? https : http;
     if (!this.heartbeatLogCounter[serverKey]) this.heartbeatLogCounter[serverKey] = 0;
@@ -709,7 +698,7 @@ class BackupClient {
     sendSnapshot();
   }
 
-  // ==================== Heartbeat & Snapshot - DH MODE (dùng canonical) ====================
+  // ==================== Heartbeat & Snapshot - DH MODE ====================
   startHttpHeartbeatDH(server, serverKey, agent, session) {
     const httpModule = server.protocol === 'https' ? https : http;
     if (!this.heartbeatLogCounter[serverKey]) this.heartbeatLogCounter[serverKey] = 0;
