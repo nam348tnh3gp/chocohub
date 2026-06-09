@@ -1,6 +1,7 @@
 // backupSync.js – Client đồng bộ full-snapshot + TLS 1.3 + DH (có fallback token)
 // 🆕 Fix: Xử lý REQUEST_SNAPSHOT + canonical JSON cho HMAC
 // 🔁 Retry và xóa node (cả static & dynamic) sau MAX_RETRIES lần thất bại
+// 💓 Heartbeat failure cũng được tính vào retry (3 failures liên tiếp)
 const net = require('net');
 const https = require('https');
 const http = require('http');
@@ -19,6 +20,7 @@ const READY_TIMEOUT = 60000;
 const RETRY_INTERVAL = 30000;
 const NODE_SYNC_INTERVAL = 300000;
 const MAX_RETRIES = 5;
+const MAX_HEARTBEAT_FAILURES = 3;  // Số lần heartbeat thất bại liên tiếp trước khi coi node là chết
 
 // ─── Helper: canonical JSON (sắp xếp key alphabet) ─────
 function canonicalStringify(obj) {
@@ -67,9 +69,10 @@ class BackupClient {
     this.restored = false;
     this.activeServers = new Set();
     this.heartbeatLogCounter = {};
+    this.heartbeatFailureCount = {};  // Đếm số lần heartbeat thất bại liên tiếp
     this.knownHosts = new Set(this.servers.map(s => s.host));
-    this.retryCount = {};        // Lưu số lần retry cho mỗi server (key: "host:port")
-    this.failedNodes = new Set(); // Chỉ dùng để ngăn thêm lại dynamic node đã chết
+    this.retryCount = {};
+    this.failedNodes = new Set();
 
     this.dhSessions = new Map();
     this.clientBaseId = `backup-${os.hostname()}-${process.pid}`;
@@ -153,8 +156,8 @@ class BackupClient {
 
     client.connect(server.port, server.host, () => {
       console.log(`🔗 [TCP] Connected to ${serverKey}`);
-      // Reset retry count khi kết nối thành công
       this.retryCount[serverKey] = 0;
+      this.heartbeatFailureCount[serverKey] = 0;
       this.sendReadyTcp(client, server);
       this.startTcpHeartbeat(client, serverKey);
       this.startSnapshotIntervalTcp(client, server, serverKey);
@@ -511,8 +514,8 @@ class BackupClient {
                   this.restored = true;
                   console.log('✅ Database restored');
                 }
-                // Reset retry count khi kết nối thành công
                 this.retryCount[serverKey] = 0;
+                this.heartbeatFailureCount[serverKey] = 0;
                 this.ensureHeartbeatAndSnapshot(server, serverKey, agent, session, useDH);
                 return;
               }
@@ -520,6 +523,7 @@ class BackupClient {
                 console.log(`🔗 [${useDH ? 'DH' : 'TOKEN'}] Connected to ${serverKey} (main already has data)`);
                 this.restored = true;
                 this.retryCount[serverKey] = 0;
+                this.heartbeatFailureCount[serverKey] = 0;
                 this.ensureHeartbeatAndSnapshot(server, serverKey, agent, session, useDH);
                 return;
               }
@@ -580,13 +584,10 @@ class BackupClient {
 
     if (this.retryCount[serverKey] >= MAX_RETRIES) {
       console.log(`🗑️ Removing dead node ${serverKey} after ${MAX_RETRIES} failed retries.`);
-      // Xóa khỏi danh sách servers để không thử lại
       this.servers = this.servers.filter(s => `${s.host}:${s.port}` !== serverKey);
-      // Nếu là dynamic node, đánh dấu để không thêm lại
       if (server.isDynamic) {
         this.failedNodes.add(server.host);
       }
-      // Dọn dẹp tài nguyên liên quan
       if (this.heartbeats[serverKey]) {
         clearInterval(this.heartbeats[serverKey]);
         delete this.heartbeats[serverKey];
@@ -599,6 +600,7 @@ class BackupClient {
       if (this.dhSessions.has(serverKey)) {
         this.dhSessions.delete(serverKey);
       }
+      delete this.heartbeatFailureCount[serverKey];
       console.log(`🧹 Cleaned up resources for ${serverKey}`);
     } else {
       console.log(`🔄 Retry ${this.retryCount[serverKey]}/${MAX_RETRIES} for ${serverKey} in ${RETRY_INTERVAL/1000}s...`);
@@ -611,6 +613,7 @@ class BackupClient {
   startHttpHeartbeatToken(server, serverKey, agent) {
     const httpModule = server.protocol === 'https' ? https : http;
     if (!this.heartbeatLogCounter[serverKey]) this.heartbeatLogCounter[serverKey] = 0;
+    if (this.heartbeatFailureCount[serverKey] === undefined) this.heartbeatFailureCount[serverKey] = 0;
 
     const heartbeat = () => {
       const payload = canonicalStringify({ type: 'PING', token: server.token });
@@ -628,18 +631,39 @@ class BackupClient {
         agent,
         rejectUnauthorized: false
       }, (res) => {
-        res.resume();
         if (res.statusCode === 200) {
+          this.heartbeatFailureCount[serverKey] = 0;
           this.heartbeatLogCounter[serverKey]++;
           if (this.heartbeatLogCounter[serverKey] % 5 === 0) {
             console.log(`💚 Heartbeat OK (${serverKey} - TOKEN)`);
           }
         } else {
-          console.error(`⚠️ [HTTP] Heartbeat failed ${serverKey}: ${res.statusCode}`);
+          this.heartbeatFailureCount[serverKey]++;
+          console.error(`⚠️ [HTTP] Heartbeat failed ${serverKey}: status ${res.statusCode} (${this.heartbeatFailureCount[serverKey]}/${MAX_HEARTBEAT_FAILURES})`);
+          if (this.heartbeatFailureCount[serverKey] >= MAX_HEARTBEAT_FAILURES) {
+            console.error(`❌ Heartbeat failed ${MAX_HEARTBEAT_FAILURES} times, treating node ${serverKey} as dead`);
+            this.handleConnectionFailure(server);
+          }
+        }
+        res.resume();
+      });
+      req.on('error', (err) => {
+        this.heartbeatFailureCount[serverKey]++;
+        console.error(`❌ [HTTP] Heartbeat error ${serverKey}: ${err.message} (${this.heartbeatFailureCount[serverKey]}/${MAX_HEARTBEAT_FAILURES})`);
+        if (this.heartbeatFailureCount[serverKey] >= MAX_HEARTBEAT_FAILURES) {
+          console.error(`❌ Heartbeat failed ${MAX_HEARTBEAT_FAILURES} times, treating node ${serverKey} as dead`);
+          this.handleConnectionFailure(server);
         }
       });
-      req.on('error', (err) => console.error(`❌ [HTTP] Heartbeat error ${serverKey}: ${err.message}`));
-      req.on('timeout', () => req.destroy(new Error('heartbeat timeout')));
+      req.on('timeout', () => {
+        this.heartbeatFailureCount[serverKey]++;
+        console.error(`⏱ [HTTP] Heartbeat timeout ${serverKey} (${this.heartbeatFailureCount[serverKey]}/${MAX_HEARTBEAT_FAILURES})`);
+        if (this.heartbeatFailureCount[serverKey] >= MAX_HEARTBEAT_FAILURES) {
+          console.error(`❌ Heartbeat failed ${MAX_HEARTBEAT_FAILURES} times, treating node ${serverKey} as dead`);
+          this.handleConnectionFailure(server);
+        }
+        req.destroy(new Error('heartbeat timeout'));
+      });
       req.setTimeout(10000);
       req.write(payload);
       req.end();
@@ -702,6 +726,7 @@ class BackupClient {
   startHttpHeartbeatDH(server, serverKey, agent, session) {
     const httpModule = server.protocol === 'https' ? https : http;
     if (!this.heartbeatLogCounter[serverKey]) this.heartbeatLogCounter[serverKey] = 0;
+    if (this.heartbeatFailureCount[serverKey] === undefined) this.heartbeatFailureCount[serverKey] = 0;
 
     const heartbeat = () => {
       const pingPayload = { type: 'PING', token: server.token };
@@ -716,18 +741,39 @@ class BackupClient {
         agent,
         rejectUnauthorized: true
       }, (res) => {
-        res.resume();
         if (res.statusCode === 200) {
+          this.heartbeatFailureCount[serverKey] = 0;
           this.heartbeatLogCounter[serverKey]++;
           if (this.heartbeatLogCounter[serverKey] % 5 === 0) {
             console.log(`💚 Heartbeat OK (${serverKey} - DH)`);
           }
         } else {
-          console.error(`⚠️ [HTTP] Heartbeat failed ${serverKey}: ${res.statusCode}`);
+          this.heartbeatFailureCount[serverKey]++;
+          console.error(`⚠️ [HTTP] Heartbeat failed ${serverKey}: status ${res.statusCode} (${this.heartbeatFailureCount[serverKey]}/${MAX_HEARTBEAT_FAILURES})`);
+          if (this.heartbeatFailureCount[serverKey] >= MAX_HEARTBEAT_FAILURES) {
+            console.error(`❌ Heartbeat failed ${MAX_HEARTBEAT_FAILURES} times, treating node ${serverKey} as dead`);
+            this.handleConnectionFailure(server);
+          }
+        }
+        res.resume();
+      });
+      req.on('error', (err) => {
+        this.heartbeatFailureCount[serverKey]++;
+        console.error(`❌ [HTTP] Heartbeat error ${serverKey}: ${err.message} (${this.heartbeatFailureCount[serverKey]}/${MAX_HEARTBEAT_FAILURES})`);
+        if (this.heartbeatFailureCount[serverKey] >= MAX_HEARTBEAT_FAILURES) {
+          console.error(`❌ Heartbeat failed ${MAX_HEARTBEAT_FAILURES} times, treating node ${serverKey} as dead`);
+          this.handleConnectionFailure(server);
         }
       });
-      req.on('error', (err) => console.error(`❌ [HTTP] Heartbeat error ${serverKey}: ${err.message}`));
-      req.on('timeout', () => req.destroy(new Error('heartbeat timeout')));
+      req.on('timeout', () => {
+        this.heartbeatFailureCount[serverKey]++;
+        console.error(`⏱ [HTTP] Heartbeat timeout ${serverKey} (${this.heartbeatFailureCount[serverKey]}/${MAX_HEARTBEAT_FAILURES})`);
+        if (this.heartbeatFailureCount[serverKey] >= MAX_HEARTBEAT_FAILURES) {
+          console.error(`❌ Heartbeat failed ${MAX_HEARTBEAT_FAILURES} times, treating node ${serverKey} as dead`);
+          this.handleConnectionFailure(server);
+        }
+        req.destroy(new Error('heartbeat timeout'));
+      });
       req.setTimeout(10000);
       req.write(payload);
       req.end();
