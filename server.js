@@ -1,4 +1,4 @@
-// server.js – Hybrid PoW + PoS + Diffie-Hellman + HTTP/2 + TLS 1.3 + Session Token (JWT) + Rate Limit + Trust Proxy + SWAP + BACKUP
+// server.js – Hybrid PoW + PoS + Diffie-Hellman + HTTP/2 + TLS 1.3 + Session Token (JWT) + Rate Limit + Trust Proxy + SWAP
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -25,7 +25,6 @@ function isAdmin(username) {
     return ADMIN_USERS.includes(username);
 }
 
-// Middleware kiểm tra admin
 function verifyAdmin(req, res, next) {
     if (!req.user) {
         return res.status(401).json({ status: 'error', message: 'Not authenticated' });
@@ -140,7 +139,7 @@ const dhSessions = new Map();
 const serverDHKeys = DHExchange.generateStandardKeyPair('modp2048');
 
 // ─── SWAP STORAGE ─────────────────────────────────────
-let swapRequests = [];
+let swapRequests = []; // { id, from_user, amount_cc, swap_type, receiver, rate, status, created_at }
 
 function getDbHash() {
   try {
@@ -381,7 +380,7 @@ app.get('/pos/info', (req, res) => {
 });
 
 // ════════════════════════════════════════════════════
-//  SWAP ENDPOINTS
+//  SWAP ENDPOINTS (THÊM MỚI)
 // ════════════════════════════════════════════════════
 
 // Tạo yêu cầu swap
@@ -403,7 +402,7 @@ app.post('/swap/create', verifyToken, swapLimiter, (req, res) => {
     }
     
     if (swap_type !== 'duco' && swap_type !== 'ccpoc') {
-      return res.status(400).json({ status: 'error', message: 'Invalid swap type' });
+      return res.status(400).json({ status: 'error', message: 'Invalid swap type. Must be "duco" or "ccpoc"' });
     }
     
     const user = db.getUser(from_user);
@@ -415,6 +414,7 @@ app.post('/swap/create', verifyToken, swapLimiter, (req, res) => {
       return res.status(400).json({ status: 'error', message: 'Insufficient CC balance' });
     }
     
+    // Trừ CC ngay lập tức
     db.updateBalance(from_user, -amount);
     db.addTransaction(from_user, 'swap_system', amount, `Swap to ${swap_type.toUpperCase()} for ${receiver}`);
     
@@ -431,11 +431,12 @@ app.post('/swap/create', verifyToken, swapLimiter, (req, res) => {
     
     swapRequests.push(newRequest);
     
+    // Lưu swap requests vào file để persist
     try {
       fs.writeFileSync(path.join(__dirname, 'swap_requests.json'), JSON.stringify(swapRequests, null, 2));
-    } catch(e) { }
+    } catch(e) { /* ignore */ }
     
-    console.log(`🔄 Swap request created: ${newRequest.id} | ${from_user} -> ${amount} CC to ${swap_type}`);
+    console.log(`🔄 Swap request created: ${newRequest.id} | ${from_user} -> ${amount} CC to ${swap_type} for ${receiver}`);
     
     res.json({
       status: 'success',
@@ -450,7 +451,7 @@ app.post('/swap/create', verifyToken, swapLimiter, (req, res) => {
   }
 });
 
-// Lấy danh sách swap pending
+// Lấy danh sách swap pending – user thường chỉ thấy của mình, admin thấy tất cả
 app.get('/swap/pending', verifyToken, (req, res) => {
   try {
     let pending = swapRequests.filter(r => r.status === 'pending');
@@ -469,7 +470,7 @@ app.get('/swap/pending', verifyToken, (req, res) => {
   }
 });
 
-// Đánh dấu swap hoàn thành - CHỈ ADMIN
+// Đánh dấu swap hoàn thành – CHỈ ADMIN
 app.post('/swap/fulfill', verifyToken, verifyAdmin, (req, res) => {
   try {
     const { request_id } = req.body;
@@ -493,7 +494,7 @@ app.post('/swap/fulfill', verifyToken, verifyAdmin, (req, res) => {
     
     try {
       fs.writeFileSync(path.join(__dirname, 'swap_requests.json'), JSON.stringify(swapRequests, null, 2));
-    } catch(e) { }
+    } catch(e) { /* ignore */ }
     
     console.log(`✅ Swap fulfilled by ${req.user.username}: ${request_id}`);
     
@@ -534,7 +535,7 @@ app.get('/swap/history', verifyToken, (req, res) => {
   }
 });
 
-// Admin endpoint: lấy tất cả swap requests
+// Admin endpoints quản lý swap
 app.get('/admin/swaps', verifyToken, verifyAdmin, (req, res) => {
   try {
     res.json({
@@ -547,7 +548,6 @@ app.get('/admin/swaps', verifyToken, verifyAdmin, (req, res) => {
   }
 });
 
-// Admin endpoint: xóa swap request
 app.delete('/admin/swaps/:id', verifyToken, verifyAdmin, (req, res) => {
   try {
     const id = req.params.id;
@@ -558,14 +558,16 @@ app.delete('/admin/swaps/:id', verifyToken, verifyAdmin, (req, res) => {
     swapRequests.splice(index, 1);
     try {
       fs.writeFileSync(path.join(__dirname, 'swap_requests.json'), JSON.stringify(swapRequests, null, 2));
-    } catch(e) { }
+    } catch(e) { /* ignore */ }
     res.json({ status: 'success', message: 'Swap deleted' });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
   }
 });
 
-// Các route yêu cầu token
+// ════════════════════════════════════════════════════
+//  CÁC ROUTE YÊU CẦU TOKEN (GIỮ NGUYÊN)
+// ════════════════════════════════════════════════════
 app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
   const { to_username, amount } = req.body;
   const from_username = req.user.username;
@@ -633,7 +635,9 @@ app.post('/pos/unstake', verifyToken, stakeLimiter, (req, res) => {
   }
 });
 
-// Mining routes (công khai)
+// ════════════════════════════════════════════════════
+//  MINING ROUTES (CÔNG KHAI)
+// ════════════════════════════════════════════════════
 app.get('/active_bounties_list', (req, res) => {
   try {
     const bounties = blockchain.getActiveBounties();
@@ -700,7 +704,7 @@ app.get('/health', (req, res) => {
 });
 
 // ════════════════════════════════════════════════════
-//  BACKUP ENDPOINTS (ĐÃ ĐƯỢC KHÔI PHỤC)
+//  BACKUP ENDPOINTS (GIỮ NGUYÊN)
 // ════════════════════════════════════════════════════
 app.post('/api/backup/register', (req, res) => {
   const { url, token, name, description, owner, platform, clientId } = req.body;
