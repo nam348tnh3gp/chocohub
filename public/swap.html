@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>CHOCO HUB · Swap Center</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0a0807;
+            background-image: radial-gradient(circle at 50% 40%, rgba(255, 120, 0, 0.08) 0%, transparent 70%);
+            font-family: 'Outfit', sans-serif;
+            color: #eee4d8;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+
+        .swap-container {
+            max-width: 580px;
+            width: 100%;
+            background: rgba(20, 20, 35, 0.7);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 149, 0, 0.18);
+            border-radius: 28px;
+            padding: 2rem;
+            box-shadow: 0 20px 48px rgba(0, 0, 0, 0.5);
+        }
+
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: #f58a00;
+            text-decoration: none;
+            margin-bottom: 1.5rem;
+            font-weight: 600;
+            transition: 0.2s;
+        }
+        .back-link:hover {
+            gap: 12px;
+            color: #ffb347;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 800;
+            margin-bottom: 0.25rem;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .sub {
+            color: #8b8296;
+            margin-bottom: 2rem;
+            font-size: 0.85rem;
+        }
+
+        .balance-badge {
+            background: rgba(0,0,0,0.5);
+            border-radius: 99px;
+            padding: 8px 16px;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.9rem;
+            margin-bottom: 2rem;
+            display: inline-block;
+            border: 1px solid rgba(255,149,0,0.3);
+        }
+
+        .swap-card {
+            background: rgba(10,10,20,0.6);
+            border-radius: 20px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid rgba(255,149,0,0.1);
+        }
+
+        .swap-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 1.25rem;
+            font-weight: 700;
+            font-size: 1.2rem;
+        }
+        .swap-title img {
+            width: 32px;
+            height: 32px;
+            object-fit: contain;
+        }
+        .rate-info {
+            font-size: 0.75rem;
+            color: #f58a00;
+            background: rgba(245,138,0,0.1);
+            padding: 6px 12px;
+            border-radius: 99px;
+            display: inline-block;
+            margin-bottom: 1rem;
+        }
+
+        .input-group {
+            margin-bottom: 1rem;
+        }
+        .input-group label {
+            display: block;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #8b8296;
+            margin-bottom: 8px;
+        }
+        .input-group input {
+            width: 100%;
+            padding: 14px 18px;
+            background: rgba(0,0,0,0.4);
+            border: 1px solid rgba(255,149,0,0.2);
+            border-radius: 14px;
+            color: #f58a00;
+            font-family: 'Space Mono', monospace;
+            font-size: 1rem;
+            outline: none;
+        }
+        .input-group input:focus {
+            border-color: rgba(255,149,0,0.6);
+        }
+
+        .estimated {
+            font-size: 0.85rem;
+            text-align: right;
+            color: #aaa;
+            margin-top: 8px;
+        }
+
+        .swap-btn {
+            width: 100%;
+            background: #f58a00;
+            border: none;
+            padding: 14px;
+            border-radius: 14px;
+            font-weight: 800;
+            font-size: 1rem;
+            color: #000;
+            cursor: pointer;
+            transition: 0.2s;
+            margin-top: 12px;
+        }
+        .swap-btn:hover {
+            background: #ffb347;
+            transform: translateY(-2px);
+        }
+        .swap-btn:disabled {
+            opacity: 0.5;
+            transform: none;
+            cursor: not-allowed;
+        }
+
+        .toast-msg {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #111;
+            border: 1px solid #f58a00;
+            padding: 12px 24px;
+            border-radius: 99px;
+            font-weight: 600;
+            opacity: 0;
+            transition: 0.2s;
+            pointer-events: none;
+            z-index: 1000;
+        }
+        .toast-msg.show {
+            opacity: 1;
+        }
+
+        hr {
+            border-color: rgba(255,149,0,0.1);
+            margin: 1rem 0;
+        }
+    </style>
+</head>
+<body>
+
+<div class="swap-container">
+    <a href="index.html" class="back-link">← Back to Dashboard</a>
+    <h1>
+        <span>🔄</span> Swap Center
+    </h1>
+    <div class="sub">Convert CC to DUCO or CC PoC instantly</div>
+
+    <div class="balance-badge" id="wallet-balance">💰 Loading CC...</div>
+
+    <!-- Swap CC → DUCO -->
+    <div class="swap-card">
+        <div class="swap-title">
+            <img src="https://github.com/revoxhere/duino-coin/raw/master/Resources/duco.png" alt="DUCO">
+            <span>CC → DUCO</span>
+        </div>
+        <div class="rate-info">⚡ Rate: 10 CC = 1 DUCO</div>
+        <div class="input-group">
+            <label>Amount (CC)</label>
+            <input type="number" id="dduco-cc-amount" placeholder="0.00" step="any">
+        </div>
+        <div class="input-group">
+            <label>DuinoCoin username (receiver)</label>
+            <input type="text" id="dduco-username" placeholder="e.g. chocomaster">
+        </div>
+        <div class="estimated" id="dduco-estimate">≈ 0 DUCO</div>
+        <button class="swap-btn" id="swap-to-duco">Swap to DUCO</button>
+    </div>
+
+    <!-- Swap CC → CC PoC -->
+    <div class="swap-card">
+        <div class="swap-title">
+            <span>🍫 CC → CC PoC</span>
+        </div>
+        <div class="rate-info">⚡ Rate: 0.75 CC = 1 CC PoC</div>
+        <div class="input-group">
+            <label>Amount (CC)</label>
+            <input type="number" id="poc-cc-amount" placeholder="0.00" step="any">
+        </div>
+        <div class="input-group">
+            <label>CC PoC wallet address</label>
+            <input type="text" id="poc-address" placeholder="0x...">
+        </div>
+        <div class="estimated" id="poc-estimate">≈ 0 CC PoC</div>
+        <button class="swap-btn" id="swap-to-poc">Swap to CC PoC</button>
+    </div>
+
+    <hr>
+    <div style="font-size: 0.7rem; text-align: center; color: #6a6280;">
+        ⚡ Swaps are processed instantly from your CC balance.<br>
+        ⏱️ External transfers (DUCO / CC PoC) will be handled by the server gateway.
+    </div>
+</div>
+
+<div id="toast" class="toast-msg"></div>
+
+<script>
+    let currentUser = null;
+    let currentBalance = 0;
+
+    function showToast(msg, isError = false) {
+        const toast = document.getElementById('toast');
+        toast.textContent = msg;
+        toast.style.borderColor = isError ? '#fa5252' : '#40c057';
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 3500);
+    }
+
+    async function fetchBalance() {
+        const token = localStorage.getItem('choco_token');
+        const user = localStorage.getItem('choco_user');
+        if (!user || !token) return;
+        try {
+            const res = await fetch('/get_user/' + encodeURIComponent(user), {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            const data = await res.json();
+            if (data && typeof data.balance === 'number') {
+                currentBalance = data.balance;
+                document.getElementById('wallet-balance').innerHTML = `💰 Balance: ${currentBalance.toFixed(4)} CC`;
+            }
+        } catch(e) {
+            console.warn(e);
+        }
+    }
+
+    function updateEstimate() {
+        const ccAmount = parseFloat(document.getElementById('dduco-cc-amount').value) || 0;
+        const ducoAmount = ccAmount / 10;
+        document.getElementById('dduco-estimate').innerText = `≈ ${ducoAmount.toFixed(4)} DUCO`;
+
+        const ccAmountPoc = parseFloat(document.getElementById('poc-cc-amount').value) || 0;
+        const pocAmount = ccAmountPoc / 0.75;
+        document.getElementById('poc-estimate').innerText = `≈ ${pocAmount.toFixed(4)} CC PoC`;
+    }
+
+    async function performSwap(type, amount, receiver, rateType) {
+        const token = localStorage.getItem('choco_token');
+        const user = localStorage.getItem('choco_user');
+        if (!user || !token) {
+            showToast('Please log in first', true);
+            setTimeout(() => window.location.href = 'index.html', 1500);
+            return false;
+        }
+        if (!amount || amount <= 0) {
+            showToast('Invalid amount', true);
+            return false;
+        }
+        if (!receiver || receiver.trim() === '') {
+            showToast('Please fill receiver info', true);
+            return false;
+        }
+        if (amount > currentBalance) {
+            showToast(`Insufficient balance. You have ${currentBalance.toFixed(4)} CC`, true);
+            return false;
+        }
+
+        const payload = {
+            from_user: user,
+            amount_cc: amount,
+            swap_type: type,      // "duco" or "ccpoc"
+            receiver: receiver.trim(),
+            rate: type === 'duco' ? 10 : 0.75
+        };
+
+        try {
+            const res = await fetch('/swap/create', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token
+                },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                showToast(`Swap request created! -${amount} CC`, false);
+                await fetchBalance();
+                document.getElementById(type === 'duco' ? 'dduco-cc-amount' : 'poc-cc-amount').value = '';
+                document.getElementById(type === 'duco' ? 'dduco-username' : 'poc-address').value = '';
+                updateEstimate();
+                return true;
+            } else {
+                showToast(data.message || 'Swap failed', true);
+                return false;
+            }
+        } catch (err) {
+            showToast('Server error', true);
+            return false;
+        }
+    }
+
+    document.getElementById('swap-to-duco').addEventListener('click', async () => {
+        const amount = parseFloat(document.getElementById('dduco-cc-amount').value);
+        const receiver = document.getElementById('dduco-username').value;
+        await performSwap('duco', amount, receiver, 10);
+    });
+
+    document.getElementById('swap-to-poc').addEventListener('click', async () => {
+        const amount = parseFloat(document.getElementById('poc-cc-amount').value);
+        const receiver = document.getElementById('poc-address').value;
+        await performSwap('ccpoc', amount, receiver, 0.75);
+    });
+
+    document.getElementById('dduco-cc-amount').addEventListener('input', updateEstimate);
+    document.getElementById('poc-cc-amount').addEventListener('input', updateEstimate);
+
+    (async () => {
+        await fetchBalance();
+        if (!localStorage.getItem('choco_user')) {
+            showToast('Redirecting to login...', true);
+            setTimeout(() => window.location.href = 'index.html', 1500);
+        }
+        setInterval(fetchBalance, 5000);
+    })();
+</script>
+</body>
+</html>
