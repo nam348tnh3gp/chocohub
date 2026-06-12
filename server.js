@@ -1,4 +1,4 @@
-// server.js – Hybrid PoW + PoS + Diffie-Hellman + HTTP/2 + TLS 1.3 + Session Token (JWT) + Rate Limit + Trust Proxy
+// server.js – Hybrid PoW + PoS + Diffie-Hellman + HTTP/2 + TLS 1.3 + Session Token (JWT) + Rate Limit + Trust Proxy + SWAP + BACKUP
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -450,7 +450,7 @@ app.post('/swap/create', verifyToken, swapLimiter, (req, res) => {
   }
 });
 
-// Lấy danh sách swap pending - CHỈ ADMIN mới xem được tất cả
+// Lấy danh sách swap pending
 app.get('/swap/pending', verifyToken, (req, res) => {
   try {
     let pending = swapRequests.filter(r => r.status === 'pending');
@@ -699,7 +699,9 @@ app.get('/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString(), dbHash: getDbHash() });
 });
 
-// Backup
+// ════════════════════════════════════════════════════
+//  BACKUP ENDPOINTS (ĐÃ ĐƯỢC KHÔI PHỤC)
+// ════════════════════════════════════════════════════
 app.post('/api/backup/register', (req, res) => {
   const { url, token, name, description, owner, platform, clientId } = req.body;
   if (!url || !token) return res.status(400).json({ status: 'error', message: 'Missing url or token' });
