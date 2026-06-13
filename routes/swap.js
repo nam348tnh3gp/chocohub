@@ -6,6 +6,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const db = require('../db');
+const bcrypt = require('bcryptjs'); // để tạo holding account
 
 const router = express.Router();
 
@@ -78,18 +79,29 @@ function saveSwapRequests() {
 // Carrega requests existentes ao iniciar o módulo
 loadSwapRequests();
 
-// Helper: refund CC to user when swap is deleted (only if pending)
+// ────────────────────────── HOLDING ACCOUNT SETUP ──────────────────────────
+function ensureHoldingAccount() {
+    const holding = db.getUser('swap_holding');
+    if (!holding) {
+        const hash = bcrypt.hashSync('system', 10);
+        db.prepare('INSERT INTO users (username, pin_hash, balance) VALUES (?, ?, 0)').run('swap_holding', hash);
+        console.log('🏦 Created swap_holding account');
+    }
+}
+ensureHoldingAccount();
+
+// Helper: refund CC from holding to user (only when pending swap is deleted)
 function refundUser(request) {
     if (request.status === 'pending') {
         const amount = request.amount_cc;
+        db.updateBalance('swap_holding', -amount);
         db.updateBalance(request.from_user, amount);
-        // Ghi transaction refund (hỗ trợ cả 3 và 4 tham số)
         if (db.addTransaction.length >= 4) {
-            db.addTransaction('swap_system', request.from_user, amount, `Refund for cancelled swap ${request.id}`);
+            db.addTransaction('swap_holding', request.from_user, amount, `Refund for cancelled swap ${request.id}`);
         } else {
-            db.addTransaction('swap_system', request.from_user, amount);
+            db.addTransaction('swap_holding', request.from_user, amount);
         }
-        console.log(`💰 Refunded ${amount} CC to ${request.from_user} for deleted swap ${request.id}`);
+        console.log(`💰 Refunded ${amount} CC to ${request.from_user} from holding (swap ${request.id})`);
     }
 }
 
@@ -126,12 +138,15 @@ router.post('/create', verifyToken, swapLimiter, (req, res) => {
             return res.status(400).json({ status: 'error', message: 'Insufficient CC balance' });
         }
 
-        // Deduct CC immediately
+        // 1. Trừ CC user
         db.updateBalance(from_user, -amount);
+        // 2. Cộng vào holding
+        db.updateBalance('swap_holding', amount);
+        // 3. Ghi transaction
         if (db.addTransaction.length >= 4) {
-            db.addTransaction(from_user, 'swap_system', amount, `Swap to ${swap_type.toUpperCase()} for ${receiver}`);
+            db.addTransaction(from_user, 'swap_holding', amount, `Swap escrow to ${swap_type.toUpperCase()} for ${receiver}`);
         } else {
-            db.addTransaction(from_user, 'swap_system', amount);
+            db.addTransaction(from_user, 'swap_holding', amount);
         }
 
         const newRequest = {
@@ -152,7 +167,7 @@ router.post('/create', verifyToken, swapLimiter, (req, res) => {
 
         res.json({
             status: 'success',
-            message: `Swap request created. ${amount} CC deducted.`,
+            message: `Swap request created. ${amount} CC moved to holding.`,
             request_id: newRequest.id,
             new_balance: user.balance - amount
         });
@@ -196,13 +211,25 @@ router.post('/fulfill', verifyToken, verifyAdmin, (req, res) => {
             return res.status(400).json({ status: 'error', message: 'Swap already processed' });
         }
 
+        const request = swapRequests[reqIndex];
+        const adminName = req.user.username; // admin thực hiện fulfill
+
+        // Chuyển CC từ holding sang admin
+        db.updateBalance('swap_holding', -request.amount_cc);
+        db.updateBalance(adminName, request.amount_cc);
+        if (db.addTransaction.length >= 4) {
+            db.addTransaction('swap_holding', adminName, request.amount_cc, `Swap fee from ${request.from_user} (${request.id})`);
+        } else {
+            db.addTransaction('swap_holding', adminName, request.amount_cc);
+        }
+
         swapRequests[reqIndex].status = 'completed';
         swapRequests[reqIndex].completed_at = new Date().toISOString();
-        swapRequests[reqIndex].fulfilled_by = req.user.username;
+        swapRequests[reqIndex].fulfilled_by = adminName;
         saveSwapRequests();
 
-        console.log(`✅ Swap fulfilled by ${req.user.username}: ${request_id}`);
-        res.json({ status: 'success', message: 'Swap marked as completed' });
+        console.log(`✅ Swap fulfilled by ${adminName}: ${request_id} | ${request.amount_cc} CC transferred to admin`);
+        res.json({ status: 'success', message: 'Swap completed and CC sent to admin' });
     } catch (e) {
         console.error('Swap fulfill error:', e);
         res.status(500).json({ status: 'error', message: e.message });
@@ -259,11 +286,9 @@ router.delete('/admin/swaps/:id', verifyToken, verifyAdmin, (req, res) => {
         }
 
         const request = swapRequests[index];
-        // Refund if pending
         if (request.status === 'pending') {
             refundUser(request);
         }
-        // Remove request
         swapRequests.splice(index, 1);
         saveSwapRequests();
 
