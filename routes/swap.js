@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
-const db = require('./db');       // seu módulo de banco de dados
+const db = require('../db');
 
 const router = express.Router();
 
