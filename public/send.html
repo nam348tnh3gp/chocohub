@@ -395,7 +395,7 @@
             <label class="field-lbl">Amount (CC)</label>
             <input type="number" id="amount" class="field-inp" placeholder="0.0" min="0.001" step="any">
 
-            <!-- Send Button (no PIN field) -->
+            <!-- Send Button -->
             <button class="btn-send" id="send-btn">SEND CC</button>
         </div>
 
@@ -427,6 +427,24 @@
             t.className = 'show ' + (type || '');
             clearTimeout(t._timeout);
             t._timeout = setTimeout(() => { t.className = ''; }, 3000);
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '—';
+            try {
+                const date = new Date(dateStr);
+                if (isNaN(date.getTime())) return '—';
+                return date.toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+            } catch {
+                return '—';
+            }
         }
 
         async function loadBalance() {
@@ -486,7 +504,8 @@
                     const type = isSender ? 'Sent' : 'Received';
                     const counterpart = isSender ? tx.to_username : tx.from_username;
                     const amount = parseFloat(tx.amount).toFixed(4);
-                    const time = tx.created_at ? new Date(tx.created_at + ' UTC').toLocaleString() : '—';
+                    // SỬA: server đã trả về ISO string, không cần thêm ' UTC'
+                    const time = formatDate(tx.created_at);
 
                     const item = document.createElement('div');
                     item.className = 'history-item';
@@ -547,7 +566,7 @@
                     balanceEl.textContent = currentBalance.toFixed(4) + ' CC';
                     recipientEl.value = '';
                     amountEl.value = '';
-                    loadHistory(); // Refresh history
+                    loadHistory();
                 } else {
                     let errMsg = data.message || 'Transfer failed';
                     if (res.status === 429) errMsg = 'Too many requests. Please wait.';
