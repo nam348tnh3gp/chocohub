@@ -31,7 +31,7 @@ function verifyAdmin(req, res, next) {
         return res.status(401).json({ status: 'error', message: 'Not authenticated' });
     }
     if (!isAdmin(req.user.username)) {
-        return res.status(403).json({ status: 'error', message: 'Admin access required' });
+        return res.status(403). json({ status: 'error', message: 'Admin access required' });
     }
     next();
 }
@@ -416,7 +416,7 @@ app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
 // ─── SNAKE FAUCET DÙNG PIN (ĐÃ SỬA) ─────────────────────
 app.post('/snake/claim', snakeLimiter, (req, res) => {
   const { username, pin, apples, mode } = req.body;
-  
+
   if (!username || !pin) {
     return res.status(401).json({ status: 'error', message: 'Missing username or pin' });
   }
@@ -425,16 +425,18 @@ app.post('/snake/claim', snakeLimiter, (req, res) => {
   }
 
   try {
-    // Xác thực bằng PIN
-    const user = db.getUser(username);
-    if (!user || user.pin !== pin) {
+    // Xác thực bằng db.authenticate (tương tự /auth)
+    const authResult = db.authenticate(username, pin);
+    if (authResult.status !== 'success') {
       return res.status(401).json({ status: 'error', message: 'Invalid username or pin' });
     }
 
+    // Nếu authenticate thành công (có thể tạo user mới nếu chưa tồn tại), tiến hành claim
     const result = snake.processClaim(username, null, apples, mode);
     res.json(result);
   } catch (e) {
-    res.status(400).json({ status: 'error', message: e.message });
+    // Bắt lỗi từ authenticate (ví dụ sai PIN) hoặc từ processClaim
+    res.status(401).json({ status: 'error', message: 'Invalid username or pin' });
   }
 });
 
@@ -617,8 +619,8 @@ app.listen(PORT, () => {
   console.log('╔══════════════════════════════════════╗');
   console.log('║     CHOCO HUB - PoW+PoS + SWAP       ║');
   console.log('╠══════════════════════════════════════╣');
-  console.log('║  HTTP/1.1  : http://localhost:' + PORT + '    ║');
-  console.log('║  HTTP/2 TLS: https://localhost:' + HTTPS_PORT + '  ║');
+  console.log('║  HTTP/1.1  : http://localhost:' + PORT + '║');
+  console.log('║  HTTP/2 TLS: https://localhost:' + HTTPS_PORT+'║');
   console.log('║  API Test  : /api/test               ║');
   console.log('║  DH Exchange: /api/dh/exchange       ║');
   console.log('║  Server PubKey:/api/server/public-key║');
