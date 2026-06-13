@@ -2,387 +2,614 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Choco Hub · Web Miner</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>ChocoHub · Web Miner</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,600;14..32,700;14..32,800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        :root {
-            --bg: #0a0a0c; --card: #14151a; --border: rgba(255,184,108,0.15);
-            --gold: #ffb86c; --text: #e0e0e0; --mid: #8b949e; --dim: #484f58;
-            --green: #50fa7b; --red: #ff5555;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
         body {
-            background: var(--bg); color: var(--text);
-            font-family: 'Outfit', sans-serif;
-            min-height: 100vh; display: flex; flex-direction: column;
-            align-items: center; padding: 20px 16px;
+            background: #0D0B0A;
+            background-image: radial-gradient(circle at 20% 30%, rgba(245, 138, 0, 0.08) 0%, transparent 70%);
+            font-family: 'Inter', sans-serif;
+            color: #F5EDE0;
+            min-height: 100vh;
+            padding: 2rem 1rem;
         }
-        .btn-back {
-            position: fixed; top: 20px; left: 20px;
-            font-family: 'Space Mono', monospace; font-size: 0.7rem;
-            padding: 8px 12px; background: rgba(255,255,255,0.02);
-            border: 1px solid var(--border); border-radius: 8px;
-            text-decoration: none; color: var(--mid); transition: .3s; z-index: 1000;
+
+        /* Layout */
+        .miner-container {
+            max-width: 680px;
+            margin: 0 auto;
         }
-        .btn-back:hover { color: var(--gold); border-color: var(--gold); background: rgba(255,184,108,0.05); }
-        .header { text-align: center; margin: 20px 0; }
-        .header h1 { font-size: 1.8rem; color: var(--gold); }
-        .header p  { color: var(--mid); font-size: 0.85rem; margin-top: 4px; }
-        .container { width: 100%; max-width: 480px; }
-        .stats-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 25px; }
-        .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px; text-align: center; }
-        .stat-val  { font-family: 'Space Mono', monospace; font-size: 1rem; font-weight: 700; color: var(--gold); }
-        .stat-lbl  { font-size: 0.55rem; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
-        .section-title {
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 2rem;
+        }
+        .logo-area {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .logo-area h1 {
+            font-size: 1.8rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #F58A00, #FFB347);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+        .back-link {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(245, 138, 0, 0.25);
+            padding: 8px 20px;
+            border-radius: 40px;
+            text-decoration: none;
+            color: #B0A89A;
+            font-weight: 500;
+            transition: 0.2s;
+        }
+        .back-link:hover {
+            border-color: #F58A00;
+            color: #F58A00;
+        }
+
+        /* Stats cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            margin-bottom: 28px;
+        }
+        .stat-card {
+            background: rgba(18, 16, 15, 0.7);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(245, 138, 0, 0.2);
+            border-radius: 24px;
+            padding: 1rem;
+            text-align: center;
+            transition: 0.2s;
+        }
+        .stat-value {
             font-family: 'Space Mono', monospace;
-            font-size: 0.65rem; text-transform: uppercase; letter-spacing: 2px;
-            color: var(--dim); margin-bottom: 10px;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #F58A00;
+            margin-bottom: 6px;
         }
-        .block-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
-        .block-card {
-            background: var(--card); border: 1px solid var(--border);
-            border-radius: 12px; padding: 16px;
-            display: flex; align-items: center; justify-content: space-between;
-            transition: .3s;
+        .stat-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #8B8296;
         }
-        .block-card.mining { border-color: var(--gold); box-shadow: 0 0 10px rgba(255,184,108,0.1); }
-        .block-info { flex: 1; }
-        .block-id   { font-family: 'Space Mono', monospace; font-size: 0.75rem; color: var(--gold); margin-bottom: 6px; }
-        .badge {
-            font-size: 0.65rem; font-weight: 600; padding: 3px 8px; border-radius: 6px;
-            font-family: 'Space Mono', monospace; margin-right: 4px;
+
+        /* Current job card */
+        .job-card {
+            background: rgba(18, 16, 15, 0.85);
+            backdrop-filter: blur(12px);
+            border-radius: 28px;
+            border: 1px solid rgba(245, 138, 0, 0.3);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            transition: all 0.2s;
         }
-        .badge-diff   { background: rgba(255,184,108,0.1); color: var(--gold); }
-        .badge-reward { background: rgba(100,200,255,0.1); color: #6be5ff; }
-        .badge-mining { background: rgba(255,184,108,0.25); color: #fff; }
-        .progress-bar-bg { height: 4px; background: #222; border-radius: 2px; overflow: hidden; margin-bottom: 14px; }
-        .progress-bar    { height: 100%; background: var(--gold); width: 0%; transition: width .5s; }
-        .control-panel { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
-        .btn-start, .btn-stop {
-            width: 100%; padding: 14px; border-radius: 10px;
-            font-weight: 800; font-size: 0.9rem; cursor: pointer;
-            transition: .3s; margin-bottom: 10px; border: none;
+        .job-card.mining {
+            border-color: #F58A00;
+            box-shadow: 0 0 18px rgba(245,138,0,0.2);
         }
-        .btn-start { background: linear-gradient(135deg, #f58a00 0%, #ffae42 100%); color: #000; box-shadow: 0 4px 15px rgba(245,138,0,0.3); }
-        .btn-start:hover { transform: translateY(-2px); }
-        .btn-start:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-        .btn-stop { background: rgba(255,85,85,0.1); color: #ff5555; border: 1px solid #ff5555; }
-        .btn-stop:disabled { opacity: 0.3; cursor: not-allowed; }
+        .job-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .job-id {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.8rem;
+            background: rgba(245,138,0,0.1);
+            padding: 4px 12px;
+            border-radius: 40px;
+            color: #F58A00;
+        }
+        .reward-badge {
+            background: rgba(80,250,123,0.1);
+            color: #7FE0A0;
+            padding: 4px 12px;
+            border-radius: 40px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .difficulty-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            color: #B0A89A;
+            margin-bottom: 1rem;
+        }
+        .progress-bar-bg {
+            height: 6px;
+            background: #2A2522;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #F58A00, #FFB347);
+            width: 0%;
+            transition: width 0.3s ease;
+            border-radius: 10px;
+        }
+
+        /* Control panel */
+        .control-panel {
+            background: rgba(18, 16, 15, 0.85);
+            backdrop-filter: blur(8px);
+            border-radius: 28px;
+            border: 1px solid rgba(245, 138, 0, 0.2);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .button-group {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 1rem;
+        }
+        .btn {
+            flex: 1;
+            padding: 14px;
+            border-radius: 40px;
+            font-weight: 700;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: 0.2s;
+            border: none;
+            font-family: inherit;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #F58A00, #FFB347);
+            color: #0D0B0A;
+            box-shadow: 0 4px 12px rgba(245,138,0,0.3);
+        }
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            filter: brightness(1.05);
+        }
+        .btn-secondary {
+            background: rgba(255,85,85,0.1);
+            border: 1px solid #FF5555;
+            color: #FF8888;
+        }
+        .btn-secondary:hover:not(:disabled) {
+            background: rgba(255,85,85,0.2);
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Console log */
         .console {
-            margin-top: 16px; background: #050505; border-radius: 8px;
-            padding: 12px; height: 150px; overflow-y: auto;
-            font-family: 'Space Mono', monospace; font-size: 0.7rem;
-            color: #50fa7b; border: 1px solid rgba(80,250,123,0.1);
+            background: #0A0A0A;
+            border-radius: 20px;
+            padding: 1rem;
+            height: 160px;
+            overflow-y: auto;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.7rem;
+            border: 1px solid rgba(245,138,0,0.15);
         }
-        .log-win  { color: var(--green); }
-        .log-err  { color: var(--red); }
-        .log-warn { color: #f1fa8c; }
-        .log-info { color: #6be5ff; }
-        #toast {
-            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(60px);
-            background: var(--card); border: 1px solid var(--border);
-            color: var(--text); padding: 10px 20px; border-radius: 10px;
-            font-size: 0.85rem; opacity: 0; transition: .4s; pointer-events: none; z-index: 999;
+        .log-line {
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.02);
+            color: #7FE0A0;
         }
-        #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-        #toast.win  { border-color: var(--green); color: var(--green); }
-        #toast.err  { border-color: var(--red); color: var(--red); }
+        .log-info { color: #6BE5FF; }
+        .log-warn { color: #F5A623; }
+        .log-err  { color: #FF8888; }
+        .log-win  { color: #7FE0A0; font-weight: 600; }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1E1B1A;
+            border: 1px solid #F58A00;
+            padding: 12px 24px;
+            border-radius: 40px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            backdrop-filter: blur(12px);
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.2s;
+            pointer-events: none;
+        }
+        .toast.show { opacity: 1; }
+        .toast.success { border-color: #40C057; color: #40C057; }
+        .toast.error { border-color: #FA5252; color: #FA5252; }
+
+        @media (max-width: 560px) {
+            .stats-grid { gap: 8px; }
+            .stat-value { font-size: 1.2rem; }
+            .job-header { flex-direction: column; align-items: flex-start; }
+        }
     </style>
 </head>
 <body>
-
-<a href="/" class="btn-back">← BACK</a>
-
-<div class="container">
+<div class="miner-container">
     <div class="header">
-        <h1>💻 Web Miner</h1>
-        <p>SHA-256 · Per-Worker Difficulty</p>
+        <div class="logo-area">
+            <span style="font-size: 28px;">⛏️</span>
+            <h1>Web Miner</h1>
+        </div>
+        <a href="/" class="back-link">← Dashboard</a>
     </div>
 
-    <div class="stats-row">
-        <div class="stat-card"><div class="stat-val" id="stat-hashrate">0 H/s</div><div class="stat-lbl">Speed</div></div>
-        <div class="stat-card"><div class="stat-val" id="stat-hashes">0</div><div class="stat-lbl">Total Hashes</div></div>
-    </div>
-
-    <div class="section-title">Current Job</div>
-    <div id="block-info" style="margin-bottom: 20px;">
-        <div class="block-card" id="job-card">
-            <div class="block-info">
-                <div class="block-id" id="current-block-id">No job assigned</div>
-                <span class="badge badge-diff" id="current-block-diff">-</span>
-                <span class="badge badge-reward" id="current-block-reward">-</span>
-            </div>
+    <!-- Stats -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value" id="hashrateValue">0 H/s</div>
+            <div class="stat-label">Hashrate</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="totalHashesValue">0</div>
+            <div class="stat-label">Total Hashes</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="uptimeValue">0s</div>
+            <div class="stat-label">Session Time</div>
         </div>
     </div>
 
-    <div class="progress-bar-bg"><div class="progress-bar" id="progress-bar"></div></div>
+    <!-- Current job -->
+    <div class="job-card" id="jobCard">
+        <div class="job-header">
+            <span class="job-id" id="jobId">No active job</span>
+            <span class="reward-badge" id="rewardBadge">— CC</span>
+        </div>
+        <div class="difficulty-row">
+            <span>Difficulty</span>
+            <span id="difficultyValue" style="color:#F58A00;">—</span>
+        </div>
+        <div class="progress-bar-bg">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+    </div>
 
+    <!-- Controls -->
     <div class="control-panel">
-        <button id="btn-start" class="btn-start" onclick="toggleMining()">▶ START MINING</button>
-        <button id="btn-stop" class="btn-stop" disabled onclick="stopMining()">■ STOP MINING</button>
-        <div id="console" class="console"></div>
+        <div class="button-group">
+            <button class="btn btn-primary" id="startBtn">▶ Start Mining</button>
+            <button class="btn btn-secondary" id="stopBtn" disabled>⏹ Stop</button>
+        </div>
+        <div class="console" id="console">
+            <div class="log-line log-info">> Ready. Waiting for job...</div>
+        </div>
     </div>
 </div>
 
-<div id="toast"></div>
+<div id="toast" class="toast"></div>
 
 <script>
-const API = window.location.origin;
+    (function() {
+        // ---------- Auth ----------
+        const workerName = localStorage.getItem('choco_user');
+        if (!workerName) {
+            alert('Please log in first.');
+            window.location.href = '/';
+            return;
+        }
 
-// Lấy username từ localStorage với key 'choco_user'
-function getWorkerName() {
-    let username = localStorage.getItem('choco_user');
-    if (!username) {
-        alert('Vui lòng đăng nhập trước khi đào.');
-        window.location.href = '/';
-        return null;
-    }
-    return username;
-}
-const workerName = getWorkerName();
-if (!workerName) {
-    throw new Error('Chưa đăng nhập');
-}
+        // ---------- DOM elements ----------
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const hashrateSpan = document.getElementById('hashrateValue');
+        const totalHashesSpan = document.getElementById('totalHashesValue');
+        const uptimeSpan = document.getElementById('uptimeValue');
+        const jobIdSpan = document.getElementById('jobId');
+        const rewardSpan = document.getElementById('rewardBadge');
+        const difficultySpan = document.getElementById('difficultyValue');
+        const progressFill = document.getElementById('progressFill');
+        const consoleDiv = document.getElementById('console');
 
-// Web Worker cho cpu.js
-const worker = new Worker('/static/js/cpu.js');
+        // ---------- State ----------
+        let miningActive = false;
+        let autoMineEnabled = false;
+        let currentJob = null;
+        let totalHashes = 0;
+        let sessionStart = null;
+        let hashrateInterval = null;
+        let currentHashCount = 0;
+        let lastTimestamp = Date.now();
+        let currentHashrate = 0;
 
-let miningActive = false;
-let autoMineEnabled = false;
-let currentBountyId = null;
-let currentJob = null;
-let totalHashes = 0;
-let startTime = null;
+        // Web Worker (mining core)
+        let worker = null;
 
-// UI helpers
-function fmtHashrate(hps) { if (hps >= 1e6) return (hps/1e6).toFixed(2)+' MH/s'; if (hps>=1e3) return (hps/1e3).toFixed(2)+' kH/s'; return hps.toFixed(1)+' H/s'; }
-function fmtNum(n) { if (n>=1e9) return (n/1e9).toFixed(1)+'B'; if (n>=1e6) return (n/1e6).toFixed(1)+'M'; if (n>=1e3) return (n/1e3).toFixed(1)+'k'; return n.toString(); }
+        // ---------- Helper functions ----------
+        function log(msg, type = 'info') {
+            const line = document.createElement('div');
+            line.className = `log-line log-${type}`;
+            line.textContent = `> ${msg}`;
+            consoleDiv.appendChild(line);
+            line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            while (consoleDiv.children.length > 100) consoleDiv.removeChild(consoleDiv.firstChild);
+        }
 
-function log(msg, cls) {
-    const con = document.getElementById('console');
-    const line = document.createElement('div');
-    line.className = 'log-line ' + (cls || '');
-    line.textContent = '> ' + msg;
-    con.appendChild(line);
-    con.scrollTop = con.scrollHeight;
-    while (con.children.length > 100) con.removeChild(con.firstChild);
-}
+        function showToast(msg, isError = false) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = `toast show ${isError ? 'error' : 'success'}`;
+            setTimeout(() => toast.classList.remove('show'), 3500);
+        }
 
-function toast(msg, type) {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.className = 'show ' + (type || '');
-    setTimeout(() => t.className = '', 3500);
-}
+        function formatHashrate(hps) {
+            if (hps >= 1e6) return (hps / 1e6).toFixed(2) + ' MH/s';
+            if (hps >= 1e3) return (hps / 1e3).toFixed(2) + ' kH/s';
+            return hps.toFixed(1) + ' H/s';
+        }
 
-// Giao tiếp với worker
-worker.onmessage = function(e) {
-    const data = e.data;
-    switch (data.type) {
-        case 'ready':
-            log('Worker ready', 'log-info');
-            break;
-        case 'progress':
-            totalHashes += data.hashes;
-            document.getElementById('stat-hashes').textContent = fmtNum(totalHashes);
-            const elapsed = (Date.now() - startTime) / 1000;
-            if (elapsed > 0) {
-                document.getElementById('stat-hashrate').textContent = fmtHashrate(totalHashes / elapsed);
+        function formatNumber(n) {
+            if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+            if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+            if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+            return n.toString();
+        }
+
+        function updateUI() {
+            totalHashesSpan.textContent = formatNumber(totalHashes);
+            hashrateSpan.textContent = formatHashrate(currentHashrate);
+            if (sessionStart) {
+                const elapsed = Math.floor((Date.now() - sessionStart) / 1000);
+                uptimeSpan.textContent = elapsed + 's';
+            } else {
+                uptimeSpan.textContent = '0s';
             }
-            document.getElementById('progress-bar').style.width = Math.min(90, 10 + (totalHashes / 500000) * 70) + '%';
-            break;
-        case 'found':
-            log('Nonce found: ' + data.nonce, 'log-win');
-            document.getElementById('progress-bar').style.width = '100%';
+        }
+
+        // Hashrate tracker
+        function startHashrateTracker() {
+            if (hashrateInterval) clearInterval(hashrateInterval);
+            currentHashCount = 0;
+            lastTimestamp = Date.now();
+            hashrateInterval = setInterval(() => {
+                const now = Date.now();
+                const delta = (now - lastTimestamp) / 1000;
+                if (delta >= 1) {
+                    currentHashrate = currentHashCount / delta;
+                    currentHashCount = 0;
+                    lastTimestamp = now;
+                    updateUI();
+                }
+            }, 1000);
+        }
+
+        // ---------- Job handling ----------
+        async function fetchNewJob() {
+            try {
+                const res = await fetch('/get_job', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ worker_name: workerName })
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const job = await res.json();
+                if (!job || !job.bounty_id) throw new Error('Invalid job response');
+                return job;
+            } catch (err) {
+                log(`Failed to fetch job: ${err.message}`, 'err');
+                return null;
+            }
+        }
+
+        async function startMiningWithJob(job) {
+            if (!job) return false;
+            currentJob = job;
+
+            // Update UI
+            jobIdSpan.textContent = job.bounty_id.substring(0, 12) + '...';
+            const reward = (job.reward !== undefined && job.reward !== null) ? job.reward.toFixed(4) : '?';
+            rewardSpan.textContent = `${reward} CC`;
+            difficultySpan.textContent = job.difficulty || '?';
+            document.getElementById('jobCard').classList.add('mining');
+            progressFill.style.width = '0%';
+
+            // Send to worker
+            if (!worker) {
+                worker = new Worker('/static/js/cpu.js');
+                worker.onmessage = handleWorkerMessage;
+                worker.onerror = (e) => log(`Worker error: ${e.message}`, 'err');
+            }
+
+            worker.postMessage({
+                type: 'start',
+                last_hash: job.last_hash,
+                username: workerName,
+                target_hex: job.target_hex,
+                bounty_id: job.bounty_id
+            });
+
+            miningActive = true;
+            totalHashes = 0;
+            sessionStart = Date.now();
+            currentHashCount = 0;
+            currentHashrate = 0;
+            startHashrateTracker();
+            updateUI();
+
+            log(`Mining job #${job.bounty_id.substring(0,10)}... | diff: ${job.difficulty} | reward: ${reward} CC`, 'info');
+            return true;
+        }
+
+        function stopMiningProcess(keepJob = false) {
+            if (worker && miningActive) {
+                worker.postMessage({ type: 'stop' });
+            }
             miningActive = false;
-            submitSolution(data.bounty_id, data.nonce, workerName);
-            break;
-        case 'pong':
-            // heartbeat response
-            break;
-    }
-};
-
-worker.onerror = function(e) {
-    log('Worker error: ' + e.message, 'log-err');
-};
-
-// Lấy job mới từ server (per-worker)
-async function fetchNewJob() {
-    try {
-        const res = await fetch(API + '/get_job', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ worker_name: workerName })
-        });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const job = await res.json();
-        return job;
-    } catch (e) {
-        log('Failed to fetch job: ' + e.message, 'log-err');
-        return null;
-    }
-}
-
-// Bắt đầu mining với job mới
-async function startMiningWithJob(job) {
-    if (!job) return false;
-    
-    currentJob = job;
-    currentBountyId = job.bounty_id;
-    
-    // Hiển thị thông tin job (bao gồm reward từ server)
-    document.getElementById('current-block-id').textContent = '#' + job.bounty_id.substring(0, 12) + '...';
-    document.getElementById('current-block-diff').textContent = (job.difficulty || '?').toString();
-    const rewardValue = (job.reward !== undefined && job.reward !== null) ? job.reward.toFixed(4) : '?';
-    document.getElementById('current-block-reward').textContent = rewardValue + ' CC';
-    
-    document.getElementById('job-card').classList.add('mining');
-    
-    // Gửi job cho worker
-    worker.postMessage({
-        type: 'start',
-        last_hash: job.last_hash,
-        username: workerName,
-        target_hex: job.target_hex,
-        bounty_id: job.bounty_id
-    });
-    
-    miningActive = true;
-    totalHashes = 0;
-    startTime = Date.now();
-    
-    document.getElementById('btn-start').textContent = '⏸ PAUSE MINING';
-    document.getElementById('btn-start').disabled = false;
-    document.getElementById('btn-stop').disabled = false;
-    
-    log('Mining #' + job.bounty_id.substring(0,10) + '... (diff: ' + job.difficulty + ', reward: ' + rewardValue + ' CC)', 'log-info');
-    return true;
-}
-
-// Vòng lặp mining chính
-async function startMiningLoop() {
-    if (!autoMineEnabled) return;
-    
-    // Dừng worker hiện tại nếu đang chạy
-    if (miningActive) {
-        worker.postMessage({ type: 'stop' });
-        miningActive = false;
-    }
-    
-    const job = await fetchNewJob();
-    if (!job) {
-        log('Retrying in 5s...', 'log-warn');
-        setTimeout(startMiningLoop, 5000);
-        return;
-    }
-    
-    const started = await startMiningWithJob(job);
-    if (!started) {
-        setTimeout(startMiningLoop, 3000);
-    }
-}
-
-// Toggle nút Start/Pause
-async function toggleMining() {
-    if (miningActive) {
-        // Pause
-        autoMineEnabled = false;
-        worker.postMessage({ type: 'stop' });
-        miningActive = false;
-        document.getElementById('btn-start').textContent = '▶ START MINING';
-        document.getElementById('btn-stop').disabled = true;
-        document.getElementById('progress-bar').style.width = '0%';
-        document.getElementById('stat-hashrate').textContent = '0 H/s';
-        document.getElementById('job-card').classList.remove('mining');
-        log('Mining paused.', 'log-info');
-    } else {
-        // Start
-        autoMineEnabled = true;
-        log('Auto-mining enabled.', 'log-info');
-        await startMiningLoop();
-    }
-}
-
-// Stop hoàn toàn
-function stopMining() {
-    autoMineEnabled = false;
-    if (miningActive) {
-        worker.postMessage({ type: 'stop' });
-        miningActive = false;
-    }
-    document.getElementById('btn-start').textContent = '▶ START MINING';
-    document.getElementById('btn-start').disabled = false;
-    document.getElementById('btn-stop').disabled = true;
-    document.getElementById('progress-bar').style.width = '0%';
-    document.getElementById('stat-hashrate').textContent = '0 H/s';
-    document.getElementById('job-card').classList.remove('mining');
-    log('Miner stopped.', 'log-info');
-}
-
-// Gửi solution lên server
-async function submitSolution(bountyId, nonce, workerName) {
-    log('Submitting nonce ' + nonce + '...', 'log-info');
-    try {
-        const res = await fetch(API + '/submit_solution', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                bounty_id: bountyId,
-                nonce: nonce,
-                worker_name: workerName,
-                device_type: 'web_miner'
-            })
-        });
-        const result = await res.json();
-        
-        if (res.ok && result.status === 'success') {
-            log('BLOCK SOLVED! +' + (result.reward || '?') + ' CC', 'log-win');
-            toast('+' + (result.reward || '?') + ' CC!', 'win');
-            document.getElementById('job-card').classList.remove('mining');
-            document.getElementById('progress-bar').style.width = '100%';
-            
-            // Tự động lấy job mới
-            if (autoMineEnabled) {
-                setTimeout(startMiningLoop, 2000);
+            if (hashrateInterval) clearInterval(hashrateInterval);
+            hashrateInterval = null;
+            if (!keepJob) {
+                currentJob = null;
+                document.getElementById('jobCard').classList.remove('mining');
+                jobIdSpan.textContent = 'No active job';
+                rewardSpan.textContent = '— CC';
+                difficultySpan.textContent = '—';
+                progressFill.style.width = '0%';
             }
-        } else {
-            log((result.reason || 'Rejected'), 'log-err');
-            toast('Rejected', 'err');
-            // Thử lại với job mới
-            if (autoMineEnabled) {
-                setTimeout(startMiningLoop, 3000);
+            updateUI();
+        }
+
+        // Handle worker messages
+        function handleWorkerMessage(e) {
+            const data = e.data;
+            switch (data.type) {
+                case 'ready':
+                    log('Worker ready', 'info');
+                    break;
+                case 'progress':
+                    const newHashes = data.hashes || 0;
+                    totalHashes += newHashes;
+                    currentHashCount += newHashes;
+                    updateUI();
+                    // Progress bar: approximate based on difficulty (just visual)
+                    const targetTotal = currentJob?.difficulty ? parseInt(currentJob.difficulty) : 50000;
+                    const percent = Math.min(95, (totalHashes / targetTotal) * 100);
+                    progressFill.style.width = percent + '%';
+                    break;
+                case 'found':
+                    log(`🎉 Nonce found: ${data.nonce}`, 'win');
+                    progressFill.style.width = '100%';
+                    miningActive = false;
+                    if (worker) worker.postMessage({ type: 'stop' });
+                    submitSolution(data.bounty_id, data.nonce, workerName);
+                    break;
+                case 'pong':
+                    // heartbeat, ignore
+                    break;
+                default:
+                    break;
             }
         }
-    } catch (e) {
-        log('Connection error: ' + e.message, 'log-err');
-        if (autoMineEnabled) {
-            setTimeout(startMiningLoop, 5000);
-        }
-    }
-}
 
-// Khởi động
-window.onload = async () => {
-    log('Worker name: ' + workerName, 'log-info');
-    
-    // Auto-start sau 1 giây
-    setTimeout(async () => {
-        if (!miningActive) {
-            autoMineEnabled = true;
-            log('Auto-starting miner...', 'log-info');
-            await startMiningLoop();
+        // Submit solution
+        async function submitSolution(bountyId, nonce, wName) {
+            log(`Submitting solution for #${bountyId.substring(0,8)}...`, 'info');
+            try {
+                const res = await fetch('/submit_solution', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        bounty_id: bountyId,
+                        nonce: nonce,
+                        worker_name: wName,
+                        device_type: 'web_miner'
+                    })
+                });
+                const result = await res.json();
+                if (res.ok && result.status === 'success') {
+                    const reward = result.reward || '?';
+                    log(`✅ BLOCK SOLVED! +${reward} CC`, 'win');
+                    showToast(`+${reward} CC earned!`, false);
+                    // Auto-fetch next job if auto mode is on
+                    if (autoMineEnabled) {
+                        setTimeout(() => startMiningLoop(), 2000);
+                    } else {
+                        stopMiningProcess(true);
+                        startBtn.textContent = '▶ Start Mining';
+                        stopBtn.disabled = true;
+                    }
+                } else {
+                    log(`❌ Submission rejected: ${result.reason || 'unknown'}`, 'err');
+                    showToast('Solution rejected', true);
+                    if (autoMineEnabled) {
+                        setTimeout(() => startMiningLoop(), 3000);
+                    }
+                }
+            } catch (err) {
+                log(`Submission error: ${err.message}`, 'err');
+                if (autoMineEnabled) {
+                    setTimeout(() => startMiningLoop(), 5000);
+                }
+            }
         }
-    }, 1000);
-    
-    // Ping worker mỗi 30 giây để giữ kết nối
-    setInterval(() => {
-        if (miningActive) {
-            worker.postMessage({ type: 'ping' });
+
+        // Main mining loop
+        async function startMiningLoop() {
+            if (!autoMineEnabled) return;
+            stopMiningProcess(true);
+            const job = await fetchNewJob();
+            if (!job) {
+                log('No job available, retrying in 5s...', 'warn');
+                setTimeout(() => startMiningLoop(), 5000);
+                return;
+            }
+            const ok = await startMiningWithJob(job);
+            if (!ok) {
+                setTimeout(() => startMiningLoop(), 3000);
+            } else {
+                startBtn.textContent = '⏸ Pause';
+                stopBtn.disabled = false;
+            }
         }
-    }, 30000);
-};
+
+        // ---------- UI actions ----------
+        function onStart() {
+            if (miningActive) {
+                // Pause
+                autoMineEnabled = false;
+                stopMiningProcess(true);
+                startBtn.textContent = '▶ Start Mining';
+                stopBtn.disabled = true;
+                log('Mining paused.', 'info');
+            } else {
+                // Start/resume
+                autoMineEnabled = true;
+                startBtn.textContent = '⏸ Pause';
+                stopBtn.disabled = false;
+                log('Starting mining...', 'info');
+                startMiningLoop();
+            }
+        }
+
+        function onStop() {
+            autoMineEnabled = false;
+            stopMiningProcess(false);
+            startBtn.textContent = '▶ Start Mining';
+            stopBtn.disabled = true;
+            log('Miner stopped completely.', 'warn');
+        }
+
+        // ---------- Initialize ----------
+        function init() {
+            startBtn.addEventListener('click', onStart);
+            stopBtn.addEventListener('click', onStop);
+            log(`Logged in as: ${workerName}`, 'info');
+            // Auto-start after 1 second
+            setTimeout(() => {
+                autoMineEnabled = true;
+                startMiningLoop();
+            }, 1000);
+        }
+
+        init();
+    })();
 </script>
 </body>
 </html>

@@ -278,9 +278,7 @@ function verifyDHSignature(req, res, next) {
 
 app.use(verifyDHSignature);
 
-// ─────────────────────────────────────────────────────
-//  SWAP MODULE (importado)
-// ─────────────────────────────────────────────────────
+// Swap Module
 app.use('/swap', SwapRouter);
 
 // AUTH
