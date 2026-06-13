@@ -4,7 +4,6 @@ import requests
 import sqlite3
 import json
 from datetime import datetime
-from getpass import getpass
 
 # ========== FILE CONFIG ==========
 CONFIG_FILE = "swap_config.json"
@@ -45,12 +44,12 @@ def interactive_setup():
     config["ADMIN_USERNAME"] = input(f"Admin username [chocoetom]: ").strip()
     if not config["ADMIN_USERNAME"]:
         config["ADMIN_USERNAME"] = "chocoetom"
-    config["ADMIN_PIN"] = getpass("Admin PIN: ")  # Ẩn khi nhập
+    config["ADMIN_PIN"] = input("Admin PIN: ")  # Không ẩn
     
     # DUCO Faucet
     print("\n--- Thông tin Faucet DUCO (để gửi coin) ---")
     config["DUCO_FAUCET_USERNAME"] = input("DUCO Faucet Username: ").strip()
-    config["DUCO_FAUCET_PASSWORD"] = getpass("DUCO Faucet Password: ")
+    config["DUCO_FAUCET_PASSWORD"] = input("DUCO Faucet Password: ")  # Không ẩn
     
     # Tùy chọn
     print("\n--- Tùy chọn (Enter để dùng mặc định) ---")
