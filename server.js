@@ -413,11 +413,24 @@ app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
   }
 });
 
-app.post('/snake/claim', verifyToken, snakeLimiter, (req, res) => {
-  const { apples, mode } = req.body;
-  const username = req.user.username;
-  if (apples == null) return res.status(400).json({ status: 'error', message: 'Missing fields' });
+// ─── SNAKE FAUCET DÙNG PIN (ĐÃ SỬA) ─────────────────────
+app.post('/snake/claim', snakeLimiter, (req, res) => {
+  const { username, pin, apples, mode } = req.body;
+  
+  if (!username || !pin) {
+    return res.status(401).json({ status: 'error', message: 'Missing username or pin' });
+  }
+  if (apples == null) {
+    return res.status(400).json({ status: 'error', message: 'Missing apples' });
+  }
+
   try {
+    // Xác thực bằng PIN
+    const user = db.getUser(username);
+    if (!user || user.pin !== pin) {
+      return res.status(401).json({ status: 'error', message: 'Invalid username or pin' });
+    }
+
     const result = snake.processClaim(username, null, apples, mode);
     res.json(result);
   } catch (e) {
@@ -608,7 +621,7 @@ app.listen(PORT, () => {
   console.log('║  HTTP/2 TLS: https://localhost:' + HTTPS_PORT + '  ║');
   console.log('║  API Test  : /api/test               ║');
   console.log('║  DH Exchange: /api/dh/exchange       ║');
-  console.log('║  Server PubKey: /api/server/public-key║');
+  console.log('║  Server PubKey:/api/server/public-key║');
   console.log('║  Backup Nodes: /api/backup/nodes     ║');
   console.log('║  SWAP       : /swap/create           ║');
   console.log('║  SWAP Rates : /swap/rates            ║');
