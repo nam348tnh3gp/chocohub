@@ -8,6 +8,17 @@ const path = require('path');
 const db = new Database(path.join(__dirname, 'chocohub.db'));
 db.pragma('journal_mode = WAL');
 
+// Helper: chuyển datetime từ SQLite (YYYY-MM-DD HH:MM:SS) sang ISO string (YYYY-MM-DDTHH:MM:SSZ)
+function toISO(dateStr) {
+    if (!dateStr) return null;
+    // Nếu đã có Z hoặc + thì giữ nguyên
+    if (dateStr.includes('Z') || dateStr.includes('+')) return dateStr;
+    // Nếu đã ở dạng YYYY-MM-DDTHH:MM:SS (không Z) thì thêm Z
+    if (dateStr.includes('T')) return dateStr + 'Z';
+    // Dạng 'YYYY-MM-DD HH:MM:SS' -> replace space với T và thêm Z
+    return dateStr.replace(' ', 'T') + 'Z';
+}
+
 // Khởi tạo bảng
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -108,18 +119,27 @@ function addTransaction(from_username, to_username, amount) {
 }
 
 function getTransactions(username, limit = 20) {
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT from_username, to_username, amount, created_at 
     FROM transactions 
     WHERE from_username = ? OR to_username = ?
     ORDER BY id DESC
     LIMIT ?
   `).all(username.trim(), username.trim(), limit);
+  // Chuyển đổi created_at sang ISO
+  return rows.map(row => ({
+    ...row,
+    created_at: toISO(row.created_at)
+  }));
 }
 
 // ─── Blocks & Miners ─────────────────────────────
 function getRecentBlocks(limit = 10) {
-  return db.prepare('SELECT bounty_id as id, username, reward FROM blocks_mined ORDER BY mined_at DESC LIMIT ?').all(limit);
+  const rows = db.prepare('SELECT bounty_id as id, username, reward, mined_at FROM blocks_mined ORDER BY mined_at DESC LIMIT ?').all(limit);
+  return rows.map(row => ({
+    ...row,
+    mined_at: toISO(row.mined_at)
+  }));
 }
 
 function getActiveMiners(limit = 5) {
@@ -167,7 +187,9 @@ function addStakeReward(username, reward) {
 
 // ─── Snake claim ─────────────────────────────────
 function getLastSnakeClaim(username) {
-  return db.prepare('SELECT claimed_at FROM snake_claims WHERE username=? ORDER BY claimed_at DESC LIMIT 1').get(username.trim());
+  const row = db.prepare('SELECT claimed_at FROM snake_claims WHERE username=? ORDER BY claimed_at DESC LIMIT 1').get(username.trim());
+  if (row && row.claimed_at) row.claimed_at = toISO(row.claimed_at);
+  return row;
 }
 
 function insertSnakeClaim(username, apples, mode, reward) {
@@ -230,11 +252,11 @@ function exportFullState() {
   
   const blocks = db.prepare(
     'SELECT username, bounty_id, reward, mined_at FROM blocks_mined ORDER BY mined_at DESC LIMIT 10'
-  ).all();
+  ).all().map(b => ({ ...b, mined_at: b.mined_at }));
   
   const claims = db.prepare(
     'SELECT username, apples, mode, reward, claimed_at FROM snake_claims ORDER BY claimed_at DESC LIMIT 20'
-  ).all();
+  ).all().map(c => ({ ...c, claimed_at: c.claimed_at }));
   
   const bounties = db.prepare(
     'SELECT id, creator_username, target_device, difficulty, reward, cost, binary_target, last_hash, nonce, solver_username, status, created_at FROM bounties WHERE status = ? ORDER BY created_at DESC LIMIT 10'
