@@ -1,4 +1,4 @@
-// snake.js – Đã sửa lỗi tên hàm
+// snake.js – Đã sửa lỗi ép lowercase
 const db = require('./db');
 
 const REWARD_NORMAL = 0.5;
@@ -6,13 +6,13 @@ const REWARD_HARDCORE = 2.0;
 const COOLDOWN_MS = 15 * 60 * 1000; // 15 phút
 
 function processClaim(username, pin, apples, mode) {
-  username = username.trim().toLowerCase();
-  
+  // KHÔNG ép lowercase – giữ nguyên username từ client
+  // username = username.trim().toLowerCase(); // ĐÃ XÓA
+
   // Kiểm tra cooldown
   const lastClaim = db.getLastSnakeClaim(username);
   if (lastClaim) {
     let lastTime = new Date(lastClaim.claimed_at);
-    // Đảm bảo parse đúng timestamp (thêm Z nếu thiếu)
     if (!lastClaim.claimed_at.includes('Z') && !lastClaim.claimed_at.includes('+')) {
       lastTime = new Date(lastClaim.claimed_at + 'Z');
     }
@@ -26,10 +26,7 @@ function processClaim(username, pin, apples, mode) {
   const rate = mode === 'hardcore' ? REWARD_HARDCORE : REWARD_NORMAL;
   const reward = parseFloat((apples * rate).toFixed(4));
 
-  // Cập nhật số dư
   db.updateBalance(username, reward);
-  
-  // Lưu lịch sử claim
   db.insertSnakeClaim(username, apples, mode || 'normal', reward);
 
   return {
@@ -41,9 +38,8 @@ function processClaim(username, pin, apples, mode) {
 }
 
 function getCooldown(username) {
-  username = username.trim().toLowerCase();
+  // KHÔNG ép lowercase
   const lastClaim = db.getLastSnakeClaim(username);
-  
   if (!lastClaim) return { cooldown: false };
   
   let lastTime = new Date(lastClaim.claimed_at);
