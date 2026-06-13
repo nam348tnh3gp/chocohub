@@ -16,9 +16,10 @@ const snake = require('./snake');
 const backupClient = require('./backupSync');
 const DHExchange = require('./dh');
 
-// ════════════════════════════════════════════════════
-//  ADMIN CONFIG - Chỉ 2 user này có quyền admin
-// ════════════════════════════════════════════════════
+// Module Imports
+const SwapRouter = require('./routes/swap');
+
+// admin users '-'
 const ADMIN_USERS = ['chocoetom', 'Nam2010'];
 
 function isAdmin(username) {
@@ -44,9 +45,7 @@ function canonicalStringify(obj) {
   return '{' + pairs.join(',') + '}';
 }
 
-// ════════════════════════════════════════════════════════════════
 //  RATE LIMITERS
-// ════════════════════════════════════════════════════════════════
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -139,7 +138,7 @@ const dhSessions = new Map();
 const serverDHKeys = DHExchange.generateStandardKeyPair('modp2048');
 
 // ─── SWAP STORAGE ─────────────────────────────────────
-let swapRequests = []; // { id, from_user, amount_cc, swap_type, receiver, rate, status, created_at }
+// (Removido – agora gerenciado pelo módulo SwapRouter)
 
 function getDbHash() {
   try {
@@ -279,6 +278,11 @@ function verifyDHSignature(req, res, next) {
 
 app.use(verifyDHSignature);
 
+// ─────────────────────────────────────────────────────
+//  SWAP MODULE (importado)
+// ─────────────────────────────────────────────────────
+app.use('/swap', SwapRouter);
+
 // AUTH
 app.post('/auth', authLimiter, (req, res) => {
   const { username, pin } = req.body;
@@ -375,192 +379,6 @@ app.get('/pos/info', (req, res) => {
     res.json({ status: 'success', balance, staked, is_validator: username === currentVal, pending_reward: pending, current_validator: currentVal || null });
   } catch (e) {
     console.error('/pos/info error:', e);
-    res.status(500).json({ status: 'error', message: e.message });
-  }
-});
-
-// ════════════════════════════════════════════════════
-//  SWAP ENDPOINTS (THÊM MỚI)
-// ════════════════════════════════════════════════════
-
-// Tạo yêu cầu swap
-app.post('/swap/create', verifyToken, swapLimiter, (req, res) => {
-  try {
-    const { from_user, amount_cc, swap_type, receiver } = req.body;
-    
-    if (req.user.username !== from_user) {
-      return res.status(403).json({ status: 'error', message: 'Unauthorized: username mismatch' });
-    }
-    
-    if (!amount_cc || !swap_type || !receiver) {
-      return res.status(400).json({ status: 'error', message: 'Missing required fields' });
-    }
-    
-    const amount = parseFloat(amount_cc);
-    if (isNaN(amount) || amount <= 0) {
-      return res.status(400).json({ status: 'error', message: 'Invalid amount' });
-    }
-    
-    if (swap_type !== 'duco' && swap_type !== 'ccpoc') {
-      return res.status(400).json({ status: 'error', message: 'Invalid swap type. Must be "duco" or "ccpoc"' });
-    }
-    
-    const user = db.getUser(from_user);
-    if (!user) {
-      return res.status(404).json({ status: 'error', message: 'User not found' });
-    }
-    
-    if (user.balance < amount) {
-      return res.status(400).json({ status: 'error', message: 'Insufficient CC balance' });
-    }
-    
-    // Trừ CC ngay lập tức
-    db.updateBalance(from_user, -amount);
-    db.addTransaction(from_user, 'swap_system', amount, `Swap to ${swap_type.toUpperCase()} for ${receiver}`);
-    
-    const newRequest = {
-      id: Date.now() + '-' + crypto.randomBytes(8).toString('hex'),
-      from_user,
-      amount_cc: amount,
-      swap_type,
-      receiver: receiver.trim(),
-      rate: swap_type === 'duco' ? 10 : 0.75,
-      status: 'pending',
-      created_at: new Date().toISOString()
-    };
-    
-    swapRequests.push(newRequest);
-    
-    // Lưu swap requests vào file để persist
-    try {
-      fs.writeFileSync(path.join(__dirname, 'swap_requests.json'), JSON.stringify(swapRequests, null, 2));
-    } catch(e) { /* ignore */ }
-    
-    console.log(`🔄 Swap request created: ${newRequest.id} | ${from_user} -> ${amount} CC to ${swap_type} for ${receiver}`);
-    
-    res.json({
-      status: 'success',
-      message: `Swap request created. ${amount} CC deducted.`,
-      request_id: newRequest.id,
-      new_balance: user.balance - amount
-    });
-    
-  } catch (e) {
-    console.error('Swap create error:', e);
-    res.status(500).json({ status: 'error', message: e.message });
-  }
-});
-
-// Lấy danh sách swap pending – user thường chỉ thấy của mình, admin thấy tất cả
-app.get('/swap/pending', verifyToken, (req, res) => {
-  try {
-    let pending = swapRequests.filter(r => r.status === 'pending');
-    
-    if (!isAdmin(req.user.username)) {
-      pending = pending.filter(r => r.from_user === req.user.username);
-    }
-    
-    res.json({
-      status: 'success',
-      pending,
-      count: pending.length
-    });
-  } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message });
-  }
-});
-
-// Đánh dấu swap hoàn thành – CHỈ ADMIN
-app.post('/swap/fulfill', verifyToken, verifyAdmin, (req, res) => {
-  try {
-    const { request_id } = req.body;
-    
-    if (!request_id) {
-      return res.status(400).json({ status: 'error', message: 'Missing request_id' });
-    }
-    
-    const reqIndex = swapRequests.findIndex(r => r.id === request_id);
-    if (reqIndex === -1) {
-      return res.status(404).json({ status: 'error', message: 'Swap request not found' });
-    }
-    
-    if (swapRequests[reqIndex].status !== 'pending') {
-      return res.status(400).json({ status: 'error', message: 'Swap already processed' });
-    }
-    
-    swapRequests[reqIndex].status = 'completed';
-    swapRequests[reqIndex].completed_at = new Date().toISOString();
-    swapRequests[reqIndex].fulfilled_by = req.user.username;
-    
-    try {
-      fs.writeFileSync(path.join(__dirname, 'swap_requests.json'), JSON.stringify(swapRequests, null, 2));
-    } catch(e) { /* ignore */ }
-    
-    console.log(`✅ Swap fulfilled by ${req.user.username}: ${request_id}`);
-    
-    res.json({
-      status: 'success',
-      message: 'Swap marked as completed'
-    });
-    
-  } catch (e) {
-    console.error('Swap fulfill error:', e);
-    res.status(500).json({ status: 'error', message: e.message });
-  }
-});
-
-// Lấy tỷ giá swap
-app.get('/swap/rates', (req, res) => {
-  res.json({
-    status: 'success',
-    rates: {
-      cc_to_duco: 10,
-      cc_to_ccpoc: 0.75,
-      note: '1 DUCO = 10 CC, 1 CC PoC = 0.75 CC'
-    }
-  });
-});
-
-// Lấy lịch sử swap của user
-app.get('/swap/history', verifyToken, (req, res) => {
-  try {
-    const userHistory = swapRequests.filter(r => r.from_user === req.user.username);
-    res.json({
-      status: 'success',
-      history: userHistory,
-      total: userHistory.length
-    });
-  } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message });
-  }
-});
-
-// Admin endpoints quản lý swap
-app.get('/admin/swaps', verifyToken, verifyAdmin, (req, res) => {
-  try {
-    res.json({
-      status: 'success',
-      swaps: swapRequests,
-      total: swapRequests.length
-    });
-  } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message });
-  }
-});
-
-app.delete('/admin/swaps/:id', verifyToken, verifyAdmin, (req, res) => {
-  try {
-    const id = req.params.id;
-    const index = swapRequests.findIndex(r => r.id === id);
-    if (index === -1) {
-      return res.status(404).json({ status: 'error', message: 'Swap not found' });
-    }
-    swapRequests.splice(index, 1);
-    try {
-      fs.writeFileSync(path.join(__dirname, 'swap_requests.json'), JSON.stringify(swapRequests, null, 2));
-    } catch(e) { /* ignore */ }
-    res.json({ status: 'success', message: 'Swap deleted' });
-  } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
   }
 });
@@ -763,16 +581,6 @@ app.post('/api/backup/sync', (req, res) => {
     res.status(500).json({ status: 'error', message: e.message });
   }
 });
-
-// Load swap requests from file on startup
-try {
-  const swapFile = path.join(__dirname, 'swap_requests.json');
-  if (fs.existsSync(swapFile)) {
-    const saved = JSON.parse(fs.readFileSync(swapFile, 'utf8'));
-    if (Array.isArray(saved)) swapRequests.push(...saved);
-    console.log(`📦 Loaded ${swapRequests.length} swap requests from file`);
-  }
-} catch(e) { console.warn('Could not load swap requests:', e.message); }
 
 // SPA fallback
 app.get('*', (req, res) => {
