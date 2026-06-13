@@ -1,4 +1,4 @@
-// server.js – Hybrid PoW + PoS + Diffie-Hellman + HTTP/2 + TLS 1.3 + Session Token (JWT) + Rate Limit + Trust Proxy + SWAP
+// server.js – Hybrid PoW + PoS + Diffie-Hellman + HTTP/2 + TLS 1.3 + Session Token (JWT) + Rate Limit + Trust Proxy + SWAP + Admin Web Interface
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -10,6 +10,7 @@ const http2 = require('http2');
 const selfsigned = require('selfsigned');
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
+const session = require('express-session');
 const db = require('./db');
 const blockchain = require('./blockchain');
 const snake = require('./snake');
@@ -19,7 +20,7 @@ const DHExchange = require('./dh');
 // Module Imports
 const SwapRouter = require('./routes/swap');
 
-// admin users '-'
+// admin users
 const ADMIN_USERS = ['chocoetom', 'Nam2010'];
 
 function isAdmin(username) {
@@ -31,7 +32,7 @@ function verifyAdmin(req, res, next) {
         return res.status(401).json({ status: 'error', message: 'Not authenticated' });
     }
     if (!isAdmin(req.user.username)) {
-        return res.status(403). json({ status: 'error', message: 'Admin access required' });
+        return res.status(403).json({ status: 'error', message: 'Admin access required' });
     }
     next();
 }
@@ -137,9 +138,6 @@ if (fs.existsSync(TLS_KEY_PATH) && fs.existsSync(TLS_CERT_PATH)) {
 const dhSessions = new Map();
 const serverDHKeys = DHExchange.generateStandardKeyPair('modp2048');
 
-// ─── SWAP STORAGE ─────────────────────────────────────
-// (Removido – agora gerenciado pelo módulo SwapRouter)
-
 function getDbHash() {
   try {
     const users = db.getAllUsers ? db.getAllUsers() : [];
@@ -177,6 +175,19 @@ const registeredBackupNodes = {};
 const app = express();
 app.set('trust proxy', 1);
 
+// Session middleware (httpOnly cookie, prevents console access)
+const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+app.use(session({
+  secret: sessionSecret,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: false,   // set true nếu dùng HTTPS
+    maxAge: 3600000  // 1 hour
+  }
+}));
+
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -184,7 +195,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ════════════════════════════════════════════════════
-//  MIDDLEWARE: Verify JWT token
+//  MIDDLEWARE: Verify JWT token (cho API client)
 // ════════════════════════════════════════════════════
 function verifyToken(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -202,7 +213,245 @@ function verifyToken(req, res, next) {
 }
 
 // ════════════════════════════════════════════════════
-//  PUBLIC ENDPOINTS
+//  ADMIN WEB INTERFACE (SESSION-BASED)
+// ════════════════════════════════════════════════════
+app.get('/admin', (req, res) => {
+  if (req.session.admin) {
+    return res.redirect('/admin/dashboard');
+  }
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Admin Login - ChocoHub</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { background: linear-gradient(135deg, #0a0a12 0%, #1a1a2a 100%); color: #eee4d8; font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+            .login-box { background: rgba(30,30,42,0.9); backdrop-filter: blur(10px); padding: 2.5rem; border-radius: 32px; box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05); width: 360px; text-align: center; transition: transform 0.3s; }
+            .login-box:hover { transform: translateY(-5px); }
+            h1 { background: linear-gradient(135deg, #f58a00, #ffbf00); -webkit-background-clip: text; background-clip: text; color: transparent; margin-bottom: 1.5rem; font-size: 2rem; letter-spacing: -0.5px; }
+            .input-group { margin-bottom: 1.2rem; text-align: left; }
+            .input-group label { display: block; margin-bottom: 0.4rem; font-size: 0.85rem; color: #aaa; letter-spacing: 0.5px; }
+            input { width: 100%; padding: 12px 16px; background: #2a2a36; border: 1px solid #3a3a46; border-radius: 16px; color: white; font-size: 1rem; transition: all 0.2s; outline: none; }
+            input:focus { border-color: #f58a00; box-shadow: 0 0 0 2px rgba(245,138,0,0.2); }
+            button { background: linear-gradient(135deg, #f58a00, #ff7e00); color: #0a0a12; border: none; padding: 12px 20px; border-radius: 40px; cursor: pointer; font-weight: bold; font-size: 1rem; width: 100%; transition: all 0.2s; margin-top: 0.5rem; }
+            button:hover { transform: scale(1.02); filter: brightness(1.05); }
+            .error { color: #ff6b6b; margin-top: 1rem; font-size: 0.85rem; }
+            .footer { margin-top: 1.5rem; font-size: 0.7rem; color: #555; }
+        </style>
+    </head>
+    <body>
+        <div class="login-box">
+            <h1>🍫 ChocoHub Admin</h1>
+            <form id="loginForm">
+                <div class="input-group">
+                    <label>Username</label>
+                    <input type="text" id="username" placeholder="chocoetom / Nam2010" required autocomplete="off">
+                </div>
+                <div class="input-group">
+                    <label>PIN</label>
+                    <input type="password" id="pin" placeholder="••••••" required autocomplete="off">
+                </div>
+                <button type="submit">🔐 Sign in</button>
+                <div id="errorMsg" class="error"></div>
+            </form>
+            <div class="footer">Secure session • HttpOnly cookie</div>
+        </div>
+        <script>
+            document.getElementById('loginForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const username = document.getElementById('username').value.trim();
+                const pin = document.getElementById('pin').value;
+                try {
+                    const resp = await fetch('/admin/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username, pin })
+                    });
+                    const data = await resp.json();
+                    if (resp.ok && data.status === 'success') {
+                        window.location.href = '/admin/dashboard';
+                    } else {
+                        document.getElementById('errorMsg').innerText = data.message || 'Authentication failed';
+                    }
+                } catch(err) {
+                    document.getElementById('errorMsg').innerText = 'Network error';
+                }
+            });
+        </script>
+    </body>
+    </html>
+  `);
+});
+
+app.post('/admin/login', async (req, res) => {
+  const { username, pin } = req.body;
+  if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing credentials' });
+  try {
+    const authResult = db.authenticate(username, pin);
+    if (authResult.status !== 'success') {
+      return res.status(401).json({ status: 'error', message: 'Invalid credentials' });
+    }
+    if (!isAdmin(username)) {
+      return res.status(403).json({ status: 'error', message: 'Not an admin user' });
+    }
+    // Tạo JWT token cho admin để gọi API swap nội bộ
+    const adminToken = jwt.sign({ username }, process.env.JWT_SECRET || 'secret', { expiresIn: '24h' });
+    req.session.admin = true;
+    req.session.adminUsername = username;
+    req.session.adminToken = adminToken;
+    res.json({ status: 'success', message: 'Login successful' });
+  } catch (e) {
+    res.status(401).json({ status: 'error', message: e.message });
+  }
+});
+
+app.get('/admin/logout', (req, res) => {
+  req.session.destroy();
+  res.redirect('/admin');
+});
+
+// Middleware kiểm tra session admin cho các route admin
+function requireAdminSession(req, res, next) {
+  if (req.session && req.session.admin) return next();
+  res.status(401).json({ status: 'error', message: 'Admin session required' });
+}
+
+// API proxy cho admin (gọi nội bộ đến swap API bằng token)
+app.get('/admin/api/pending', requireAdminSession, async (req, res) => {
+  try {
+    const token = req.session.adminToken;
+    const response = await fetch(`http://localhost:${PORT}/swap/pending`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+app.post('/admin/api/fulfill', requireAdminSession, async (req, res) => {
+  try {
+    const { request_id } = req.body;
+    const token = req.session.adminToken;
+    const response = await fetch(`http://localhost:${PORT}/swap/fulfill`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ request_id })
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// Dashboard admin
+app.get('/admin/dashboard', requireAdminSession, (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Admin Dashboard - ChocoHub</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { background: #0a0a12; color: #eee4d8; font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif; padding: 2rem; }
+            .container { max-width: 1400px; margin: 0 auto; }
+            .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }
+            h1 { background: linear-gradient(135deg, #f58a00, #ffbf00); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: 2rem; }
+            .logout-btn { background: #2a2a36; border: 1px solid #ff4444; color: #ff4444; padding: 0.5rem 1.2rem; border-radius: 40px; text-decoration: none; transition: 0.2s; }
+            .logout-btn:hover { background: #ff4444; color: white; }
+            .card { background: #1e1e2a; border-radius: 24px; padding: 1.5rem; margin-bottom: 2rem; box-shadow: 0 8px 20px rgba(0,0,0,0.3); }
+            .card h2 { margin-bottom: 1rem; color: #f58a00; font-weight: 500; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { padding: 14px 12px; text-align: left; border-bottom: 1px solid #2a2a36; }
+            th { background: #2a2a36; font-weight: 600; color: #ffbf00; }
+            .status-pending { background: #ffaa4433; color: #ffaa44; padding: 4px 10px; border-radius: 40px; font-size: 0.8rem; font-weight: bold; display: inline-block; }
+            .complete-btn { background: #f58a00; color: #0a0a12; border: none; padding: 6px 14px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+            .complete-btn:hover { background: #ff9e20; transform: scale(1.02); }
+            .empty-row td { text-align: center; color: #888; padding: 2rem; }
+            .refresh { float: right; font-size: 0.8rem; color: #888; margin-top: 0.5rem; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🍫 Swap Manager</h1>
+                <a href="/admin/logout" class="logout-btn">🚪 Logout</a>
+            </div>
+            <div class="card">
+                <h2>📋 Pending Swaps</h2>
+                <div style="overflow-x: auto;">
+                    <table id="swapTable">
+                        <thead>
+                            <tr><th>ID</th><th>From</th><th>Amount CC</th><th>Type</th><th>Receiver</th><th>Status</th><th>Action</th></tr>
+                        </thead>
+                        <tbody id="swapBody">
+                            <tr class="empty-row"><td colspan="7">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="refresh">⟳ Auto-refresh every 30s</div>
+            </div>
+        </div>
+        <script>
+            async function loadSwaps() {
+                try {
+                    const resp = await fetch('/admin/api/pending');
+                    const data = await resp.json();
+                    const tbody = document.getElementById('swapBody');
+                    if (data.pending && data.pending.length) {
+                        tbody.innerHTML = '';
+                        for (const swap of data.pending) {
+                            const row = tbody.insertRow();
+                            row.insertCell(0).innerText = swap.id;
+                            row.insertCell(1).innerText = swap.from_user;
+                            row.insertCell(2).innerText = swap.amount_cc;
+                            row.insertCell(3).innerText = swap.swap_type;
+                            row.insertCell(4).innerText = swap.receiver;
+                            row.insertCell(5).innerHTML = '<span class="status-pending">pending</span>';
+                            const btn = document.createElement('button');
+                            btn.innerText = '✅ Complete';
+                            btn.className = 'complete-btn';
+                            btn.onclick = () => completeSwap(swap.id);
+                            const cell = row.insertCell(6);
+                            cell.appendChild(btn);
+                        }
+                    } else {
+                        tbody.innerHTML = '<tr class="empty-row"><td colspan="7">✨ No pending swaps</td></tr>';
+                    }
+                } catch(e) { console.error(e); }
+            }
+            async function completeSwap(id) {
+                if (!confirm('Mark this swap as completed? The client will have already sent the coins.')) return;
+                try {
+                    const resp = await fetch('/admin/api/fulfill', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ request_id: id })
+                    });
+                    const data = await resp.json();
+                    if (data.status === 'success') {
+                        alert('✅ Swap completed and recorded!');
+                        loadSwaps();
+                    } else {
+                        alert('❌ Error: ' + (data.message || 'Unknown error'));
+                    }
+                } catch(e) { alert(e.message); }
+            }
+            loadSwaps();
+            setInterval(loadSwaps, 30000);
+        </script>
+    </body>
+    </html>
+  `);
+});
+
+// ════════════════════════════════════════════════════
+//  PUBLIC ENDPOINTS (giữ nguyên, không ảnh hưởng client)
 // ════════════════════════════════════════════════════
 app.get('/api/server/public-key', (req, res) => {
   res.json({
@@ -258,36 +507,30 @@ app.post('/api/dh/exchange', (req, res) => {
 
 function verifyDHSignature(req, res, next) {
   if (!req.path.startsWith('/api/backup')) return next();
-
   const clientId = req.headers['x-client-id'] || req.body.clientId || req.query.clientId;
   const signature = req.headers['x-signature'];
   if (!clientId || !signature) return next();
-
   const session = dhSessions.get(clientId);
   if (!session) return next();
-
   const timestamp = req.headers['x-timestamp'] || '';
   const bodyStr = req.method === 'POST' ? canonicalStringify(req.body) : '';
   const signPayload = `${req.method}${req.path}${timestamp}${bodyStr}`;
-
   if (!DHExchange.verify(signPayload, signature, session.sessionKey)) {
     return res.status(401).json({ status: 'error', message: 'Invalid HMAC signature' });
   }
   next();
 }
-
 app.use(verifyDHSignature);
 
-// Swap Module
+// Swap Module (cho client tự động)
 app.use('/swap', SwapRouter);
 
-// AUTH
+// AUTH endpoint (cho client lấy token)
 app.post('/auth', authLimiter, (req, res) => {
   const { username, pin } = req.body;
   if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing fields' });
   try {
     const result = db.authenticate(username, pin);
-    // Thêm thông tin is_admin vào response
     if (result.status === 'success' && result.token) {
       const decoded = jwt.verify(result.token, process.env.JWT_SECRET || 'secret');
       result.is_admin = isAdmin(decoded.username);
@@ -382,12 +625,11 @@ app.get('/pos/info', (req, res) => {
 });
 
 // ════════════════════════════════════════════════════
-//  CÁC ROUTE YÊU CẦU TOKEN (GIỮ NGUYÊN)
+//  CÁC ROUTE YÊU CẦU TOKEN (giữ nguyên)
 // ════════════════════════════════════════════════════
 app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
   const { to_username, amount } = req.body;
   const from_username = req.user.username;
-
   if (!to_username || !amount) {
     return res.status(400).json({ status: 'error', message: 'Missing fields' });
   }
@@ -413,29 +655,22 @@ app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
   }
 });
 
-// ─── SNAKE FAUCET DÙNG PIN (ĐÃ SỬA) ─────────────────────
 app.post('/snake/claim', snakeLimiter, (req, res) => {
   const { username, pin, apples, mode } = req.body;
-
   if (!username || !pin) {
     return res.status(401).json({ status: 'error', message: 'Missing username or pin' });
   }
   if (apples == null) {
     return res.status(400).json({ status: 'error', message: 'Missing apples' });
   }
-
   try {
-    // Xác thực bằng db.authenticate (tương tự /auth)
     const authResult = db.authenticate(username, pin);
     if (authResult.status !== 'success') {
       return res.status(401).json({ status: 'error', message: 'Invalid username or pin' });
     }
-
-    // Nếu authenticate thành công (có thể tạo user mới nếu chưa tồn tại), tiến hành claim
     const result = snake.processClaim(username, null, apples, mode);
     res.json(result);
   } catch (e) {
-    // Bắt lỗi từ authenticate (ví dụ sai PIN) hoặc từ processClaim
     res.status(401).json({ status: 'error', message: 'Invalid username or pin' });
   }
 });
@@ -458,7 +693,6 @@ app.post('/pos/unstake', verifyToken, stakeLimiter, (req, res) => {
   try {
     const username = req.user.username;
     const currentStake = db.getStake(username);
-    const totalAmount = (currentStake.amount || 0) + (currentStake.pending_reward || 0);
     db.unstake(username);
     res.json({ status: 'success', message: 'Unstaked successfully. All funds returned.', staked: 0 });
   } catch (e) {
@@ -466,9 +700,7 @@ app.post('/pos/unstake', verifyToken, stakeLimiter, (req, res) => {
   }
 });
 
-// ════════════════════════════════════════════════════
-//  MINING ROUTES (CÔNG KHAI)
-// ════════════════════════════════════════════════════
+// MINING ROUTES (công khai)
 app.get('/active_bounties_list', (req, res) => {
   try {
     const bounties = blockchain.getActiveBounties();
@@ -534,9 +766,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString(), dbHash: getDbHash() });
 });
 
-// ════════════════════════════════════════════════════
-//  BACKUP ENDPOINTS (GIỮ NGUYÊN)
-// ════════════════════════════════════════════════════
+// BACKUP ENDPOINTS (giữ nguyên)
 app.post('/api/backup/register', (req, res) => {
   const { url, token, name, description, owner, platform, clientId } = req.body;
   if (!url || !token) return res.status(400).json({ status: 'error', message: 'Missing url or token' });
@@ -619,15 +849,9 @@ app.listen(PORT, () => {
   console.log('╔══════════════════════════════════════╗');
   console.log('║     CHOCO HUB - PoW+PoS + SWAP       ║');
   console.log('╠══════════════════════════════════════╣');
-  console.log('║  HTTP/1.1  : http://localhost:' + PORT + '║');
-  console.log('║  HTTP/2 TLS: https://localhost:' + HTTPS_PORT+'║');
-  console.log('║  API Test  : /api/test               ║');
-  console.log('║  DH Exchange: /api/dh/exchange       ║');
-  console.log('║  Server PubKey:/api/server/public-key║');
-  console.log('║  Backup Nodes: /api/backup/nodes     ║');
-  console.log('║  SWAP       : /swap/create           ║');
-  console.log('║  SWAP Rates : /swap/rates            ║');
-  console.log('║  Admins     : chocoetom, Nam2010     ║');
+  console.log(`║  HTTP/1.1  : http://localhost:${PORT} ║`);
+  console.log(`║  HTTP/2 TLS: https://localhost:${HTTPS_PORT} ║`);
+  console.log('║  Admin web : http://localhost:' + PORT + '/admin ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
   backupClient.start();
