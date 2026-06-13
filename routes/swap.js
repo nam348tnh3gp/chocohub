@@ -6,7 +6,6 @@ const fs = require('fs');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const db = require('../db');
-const bcrypt = require('bcryptjs'); // để tạo holding account
 
 const router = express.Router();
 
@@ -41,7 +40,6 @@ function verifyAdmin(req, res, next) {
     }
     next();
 }
-// ─────────────────────────────────────────────────────────────────────────────────────────
 
 // Rate Limiter
 const swapLimiter = rateLimit({
@@ -76,16 +74,16 @@ function saveSwapRequests() {
     }
 }
 
-// Carrega requests existentes ao iniciar o módulo
 loadSwapRequests();
 
 // ────────────────────────── HOLDING ACCOUNT SETUP ──────────────────────────
 function ensureHoldingAccount() {
     const holding = db.getUser('swap_holding');
     if (!holding) {
-        const hash = bcrypt.hashSync('system', 10);
-        db.prepare('INSERT INTO users (username, pin_hash, balance) VALUES (?, ?, 0)').run('swap_holding', hash);
-        console.log('🏦 Created swap_holding account');
+        // Tạo holding account với PIN ngẫu nhiên (không ai đăng nhập được)
+        const randomPin = crypto.randomBytes(16).toString('hex');
+        db.authenticate('swap_holding', randomPin); // tự động tạo user
+        console.log('🏦 Created swap_holding account with random pin');
     }
 }
 ensureHoldingAccount();
