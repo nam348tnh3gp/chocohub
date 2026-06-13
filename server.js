@@ -1,4 +1,4 @@
-// server.js – Hybrid PoW + PoS + Diffie-Hellman + HTTP/2 + TLS 1.3 + Session Token (JWT) + Rate Limit + Trust Proxy + SWAP + Admin Web Interface
+// server.js – Hybrid PoW + PoS + Diffie-Hellman + HTTP/2 + TLS 1.3 + Session Token (JWT) + Rate Limit + Trust Proxy + SWAP + Admin Web Interface (Full)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -319,10 +319,11 @@ function requireAdminSession(req, res, next) {
 }
 
 // API proxy cho admin (gọi nội bộ đến swap API bằng token)
-app.get('/admin/api/pending', requireAdminSession, async (req, res) => {
+app.get('/admin/api/all-swaps', requireAdminSession, async (req, res) => {
   try {
     const token = req.session.adminToken;
-    const response = await fetch(`http://localhost:${PORT}/swap/pending`, {
+    // Gọi endpoint /swap/admin/swaps (lấy tất cả swap)
+    const response = await fetch(`http://localhost:${PORT}/swap/admin/swaps`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     const data = await response.json();
@@ -348,7 +349,22 @@ app.post('/admin/api/fulfill', requireAdminSession, async (req, res) => {
   }
 });
 
-// Dashboard admin
+app.delete('/admin/api/delete/:id', requireAdminSession, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const token = req.session.adminToken;
+    const response = await fetch(`http://localhost:${PORT}/swap/admin/swaps/${id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// Dashboard admin với 2 bảng: Pending và Completed
 app.get('/admin/dashboard', requireAdminSession, (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -370,8 +386,11 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             th, td { padding: 14px 12px; text-align: left; border-bottom: 1px solid #2a2a36; }
             th { background: #2a2a36; font-weight: 600; color: #ffbf00; }
             .status-pending { background: #ffaa4433; color: #ffaa44; padding: 4px 10px; border-radius: 40px; font-size: 0.8rem; font-weight: bold; display: inline-block; }
-            .complete-btn { background: #f58a00; color: #0a0a12; border: none; padding: 6px 14px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
-            .complete-btn:hover { background: #ff9e20; transform: scale(1.02); }
+            .status-completed { background: #44ff4433; color: #44ff44; padding: 4px 10px; border-radius: 40px; font-size: 0.8rem; font-weight: bold; display: inline-block; }
+            .btn-complete { background: #f58a00; color: #0a0a12; border: none; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; margin-right: 8px; transition: 0.2s; }
+            .btn-complete:hover { background: #ff9e20; transform: scale(1.02); }
+            .btn-delete { background: #ff4444; color: white; border: none; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+            .btn-delete:hover { background: #ff6666; transform: scale(1.02); }
             .empty-row td { text-align: center; color: #888; padding: 2rem; }
             .refresh { float: right; font-size: 0.8rem; color: #888; margin-top: 0.5rem; }
         </style>
@@ -383,50 +402,101 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                 <a href="/admin/logout" class="logout-btn">🚪 Logout</a>
             </div>
             <div class="card">
-                <h2>📋 Pending Swaps</h2>
+                <h2>⏳ Pending Swaps</h2>
                 <div style="overflow-x: auto;">
-                    <table id="swapTable">
+                    <table id="pendingTable">
                         <thead>
-                            <tr><th>ID</th><th>From</th><th>Amount CC</th><th>Type</th><th>Receiver</th><th>Status</th><th>Action</th></tr>
+                            <tr><th>ID</th><th>From</th><th>Amount (CC)</th><th>Type</th><th>Receiver</th><th>Status</th><th>Actions</th></tr>
                         </thead>
-                        <tbody id="swapBody">
+                        <tbody id="pendingBody">
                             <tr class="empty-row"><td colspan="7">Loading...</td></tr>
                         </tbody>
                     </table>
                 </div>
-                <div class="refresh">⟳ Auto-refresh every 30s</div>
+            </div>
+            <div class="card">
+                <h2>✅ Completed Swaps</h2>
+                <div style="overflow-x: auto;">
+                    <table id="completedTable">
+                        <thead>
+                            <tr><th>ID</th><th>From</th><th>Amount (CC)</th><th>Type</th><th>Receiver</th><th>Status</th><th>Completed At</th></tr>
+                        </thead>
+                        <tbody id="completedBody">
+                            <tr class="empty-row"><td colspan="7">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
         <script>
-            async function loadSwaps() {
+            async function loadAllSwaps() {
                 try {
-                    const resp = await fetch('/admin/api/pending');
+                    const resp = await fetch('/admin/api/all-swaps');
                     const data = await resp.json();
-                    const tbody = document.getElementById('swapBody');
-                    if (data.pending && data.pending.length) {
-                        tbody.innerHTML = '';
-                        for (const swap of data.pending) {
-                            const row = tbody.insertRow();
-                            row.insertCell(0).innerText = swap.id;
-                            row.insertCell(1).innerText = swap.from_user;
-                            row.insertCell(2).innerText = swap.amount_cc;
-                            row.insertCell(3).innerText = swap.swap_type;
-                            row.insertCell(4).innerText = swap.receiver;
-                            row.insertCell(5).innerHTML = '<span class="status-pending">pending</span>';
-                            const btn = document.createElement('button');
-                            btn.innerText = '✅ Complete';
-                            btn.className = 'complete-btn';
-                            btn.onclick = () => completeSwap(swap.id);
-                            const cell = row.insertCell(6);
-                            cell.appendChild(btn);
-                        }
+                    if (data.status === 'success' && Array.isArray(data.swaps)) {
+                        const pending = data.swaps.filter(s => s.status === 'pending');
+                        const completed = data.swaps.filter(s => s.status === 'completed');
+                        renderPending(pending);
+                        renderCompleted(completed);
                     } else {
-                        tbody.innerHTML = '<tr class="empty-row"><td colspan="7">✨ No pending swaps</td></tr>';
+                        console.warn('Unexpected response:', data);
+                        document.getElementById('pendingBody').innerHTML = '<tr class="empty-row"><td colspan="7">Error loading data</td></tr>';
+                        document.getElementById('completedBody').innerHTML = '<tr class="empty-row"><td colspan="7">Error loading data</td></tr>';
                     }
-                } catch(e) { console.error(e); }
+                } catch(e) {
+                    console.error(e);
+                    document.getElementById('pendingBody').innerHTML = '<tr class="empty-row"><td colspan="7">Network error</td></tr>';
+                    document.getElementById('completedBody').innerHTML = '<tr class="empty-row"><td colspan="7">Network error</td></tr>';
+                }
+            }
+            function renderPending(swaps) {
+                const tbody = document.getElementById('pendingBody');
+                if (swaps.length === 0) {
+                    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">✨ No pending swaps</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = '';
+                for (const swap of swaps) {
+                    const row = tbody.insertRow();
+                    row.insertCell(0).innerText = swap.id;
+                    row.insertCell(1).innerText = swap.from_user;
+                    row.insertCell(2).innerText = swap.amount_cc;
+                    row.insertCell(3).innerText = swap.swap_type;
+                    row.insertCell(4).innerText = swap.receiver;
+                    row.insertCell(5).innerHTML = '<span class="status-pending">pending</span>';
+                    const actions = row.insertCell(6);
+                    const completeBtn = document.createElement('button');
+                    completeBtn.innerText = '✅ Complete';
+                    completeBtn.className = 'btn-complete';
+                    completeBtn.onclick = () => completeSwap(swap.id);
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.innerText = '🗑️ Delete';
+                    deleteBtn.className = 'btn-delete';
+                    deleteBtn.onclick = () => deleteSwap(swap.id);
+                    actions.appendChild(completeBtn);
+                    actions.appendChild(deleteBtn);
+                }
+            }
+            function renderCompleted(swaps) {
+                const tbody = document.getElementById('completedBody');
+                if (swaps.length === 0) {
+                    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">📭 No completed swaps yet</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = '';
+                for (const swap of swaps) {
+                    const row = tbody.insertRow();
+                    row.insertCell(0).innerText = swap.id;
+                    row.insertCell(1).innerText = swap.from_user;
+                    row.insertCell(2).innerText = swap.amount_cc;
+                    row.insertCell(3).innerText = swap.swap_type;
+                    row.insertCell(4).innerText = swap.receiver;
+                    row.insertCell(5).innerHTML = '<span class="status-completed">completed</span>';
+                    row.insertCell(6).innerText = swap.completed_at ? new Date(swap.completed_at).toLocaleString() : '-';
+                }
             }
             async function completeSwap(id) {
-                if (!confirm('Mark this swap as completed? The client will have already sent the coins.')) return;
+                if (!confirm('Mark this swap as completed? The client should have already sent the external coins.')) return;
                 try {
                     const resp = await fetch('/admin/api/fulfill', {
                         method: 'POST',
@@ -436,14 +506,27 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     const data = await resp.json();
                     if (data.status === 'success') {
                         alert('✅ Swap completed and recorded!');
-                        loadSwaps();
+                        loadAllSwaps();
                     } else {
                         alert('❌ Error: ' + (data.message || 'Unknown error'));
                     }
                 } catch(e) { alert(e.message); }
             }
-            loadSwaps();
-            setInterval(loadSwaps, 30000);
+            async function deleteSwap(id) {
+                if (!confirm('⚠️ Delete this swap request? The user will be REFUNDED the CC amount. This action cannot be undone.')) return;
+                try {
+                    const resp = await fetch('/admin/api/delete/' + id, { method: 'DELETE' });
+                    const data = await resp.json();
+                    if (data.status === 'success') {
+                        alert('🗑️ Swap deleted and user refunded.');
+                        loadAllSwaps();
+                    } else {
+                        alert('❌ Error: ' + (data.message || 'Unknown error'));
+                    }
+                } catch(e) { alert(e.message); }
+            }
+            loadAllSwaps();
+            setInterval(loadAllSwaps, 30000);
         </script>
     </body>
     </html>
