@@ -5,31 +5,31 @@ import sqlite3
 import json
 from datetime import datetime
 
-# ========== FILE CONFIG ==========
+# ========== CONFIG FILE ==========
 CONFIG_FILE = "swap_config.json"
 
 def load_config():
-    """Đọc config từ file nếu có"""
+    """Load config from file if exists"""
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r') as f:
                 config = json.load(f)
-                print("✅ Đã tải config từ file")
+                print("✅ Loaded config from file")
                 return config
         except:
             pass
     return None
 
 def save_config(config):
-    """Lưu config vào file"""
+    """Save config to file"""
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=2)
-    print("💾 Đã lưu config vào file")
+    print("💾 Saved config to file")
 
 def interactive_setup():
-    """Hỏi người dùng nhập thông tin tương tác"""
+    """Ask user for configuration interactively"""
     print("\n" + "="*50)
-    print("🔧 LẦN ĐẦU CHẠY - NHẬP CẤU HÌNH")
+    print("🔧 FIRST RUN - ENTER CONFIGURATION")
     print("="*50)
     
     config = {}
@@ -40,38 +40,38 @@ def interactive_setup():
         config["RENDER_API_URL"] = "https://chocohub-r011.onrender.com"
     
     # Admin
-    print("\n--- Thông tin Admin (xác thực với ChocoHub) ---")
+    print("\n--- Admin Info (authenticate with ChocoHub) ---")
     config["ADMIN_USERNAME"] = input(f"Admin username [chocoetom]: ").strip()
     if not config["ADMIN_USERNAME"]:
         config["ADMIN_USERNAME"] = "chocoetom"
-    config["ADMIN_PIN"] = input("Admin PIN: ")  # Không ẩn
+    config["ADMIN_PIN"] = input("Admin PIN: ")
     
     # DUCO Faucet
-    print("\n--- Thông tin Faucet DUCO (để gửi coin) ---")
+    print("\n--- DUCO Faucet Info (to send coins) ---")
     config["DUCO_FAUCET_USERNAME"] = input("DUCO Faucet Username: ").strip()
-    config["DUCO_FAUCET_PASSWORD"] = input("DUCO Faucet Password: ")  # Không ẩn
+    config["DUCO_FAUCET_PASSWORD"] = input("DUCO Faucet Password: ")
     
-    # Tùy chọn
-    print("\n--- Tùy chọn (Enter để dùng mặc định) ---")
-    memo = input("Memo cho giao dịch [Swap]: ").strip()
+    # Options
+    print("\n--- Options (Press Enter for defaults) ---")
+    memo = input("Memo for transaction [Swap]: ").strip()
     config["MEMO"] = memo if memo else "Swap"
     
-    interval = input("Thời gian kiểm tra (giây) [30]: ").strip()
+    interval = input("Check interval (seconds) [30]: ").strip()
     config["SLEEP_INTERVAL"] = int(interval) if interval.isdigit() else 30
     
     print("\n" + "="*50)
-    print("✅ Cấu hình hoàn tất!")
+    print("✅ Configuration complete!")
     print("="*50)
     
     return config
 
-# ========== TẢI HOẶC NHẬP CONFIG ==========
+# ========== LOAD OR ENTER CONFIG ==========
 config = load_config()
 if not config:
     config = interactive_setup()
     save_config(config)
 
-# ========== CẤU HÌNH TỪ CONFIG ==========
+# ========== CONFIG FROM FILE ==========
 RENDER_API_URL = config.get("RENDER_API_URL")
 ADMIN_USERNAME = config.get("ADMIN_USERNAME")
 ADMIN_PIN = config.get("ADMIN_PIN")
@@ -87,7 +87,7 @@ token_expiry = 0
 # Cache balance faucet DUCO
 balance_cache = {"balance": None, "last_updated": None, "expiry_seconds": 60}
 
-# Database local để tránh xử lý trùng lặp
+# Local database to avoid duplicate processing
 DB_FILE = "swap_history.db"
 
 def init_db():
@@ -125,7 +125,7 @@ def record_processed(request_id, from_user, amount_cc, swap_type, receiver, txid
     conn.commit()
     conn.close()
 
-# ========== XÁC THỰC LẤY TOKEN ==========
+# ========== GET ADMIN TOKEN ==========
 def get_admin_token():
     global jwt_token, token_expiry
     now = time.time()
@@ -140,18 +140,18 @@ def get_admin_token():
             data = resp.json()
             if data.get("status") == "success" and data.get("token"):
                 jwt_token = data["token"]
-                token_expiry = now + 23 * 3600  # 23 tiếng (token có hạn 24h)
-                print(f"🔑 Đã lấy token cho {ADMIN_USERNAME}")
+                token_expiry = now + 23 * 3600  # 23 hours (token expires in 24h)
+                print(f"🔑 Got token for {ADMIN_USERNAME}")
                 return jwt_token
-        print(f"❌ Xác thực thất bại: {resp.status_code}")
+        print(f"❌ Authentication failed: {resp.status_code}")
         if resp.status_code == 401:
-            print("   → Sai username hoặc PIN. Hãy chạy lại và nhập đúng.")
+            print("   → Wrong username or PIN. Please run again with correct credentials.")
             exit(1)
     except Exception as e:
-        print(f"❌ Lỗi kết nối: {e}")
+        print(f"❌ Connection error: {e}")
     return None
 
-# ========== GỌI API CÓ TOKEN ==========
+# ========== API CALLS WITH TOKEN ==========
 def api_call(endpoint, method="GET", data=None):
     token = get_admin_token()
     if not token:
@@ -169,9 +169,9 @@ def api_call(endpoint, method="GET", data=None):
             return None
         if resp.status_code in (200, 201):
             return resp.json()
-        print(f"⚠️ API {endpoint} lỗi {resp.status_code}: {resp.text[:200]}")
+        print(f"⚠️ API {endpoint} error {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
-        print(f"⚠️ Lỗi kết nối API: {e}")
+        print(f"⚠️ API connection error: {e}")
     return None
 
 def get_pending_swaps():
@@ -184,7 +184,7 @@ def fulfill_swap(request_id):
     data = api_call("/swap/fulfill", "POST", {"request_id": request_id})
     return data and data.get("status") == "success"
 
-# ========== GỬI COIN THẬT ==========
+# ========== SEND REAL COINS ==========
 def update_faucet_balance():
     now = time.time()
     if (balance_cache["balance"] is not None and balance_cache["last_updated"] and
@@ -202,11 +202,11 @@ def update_faucet_balance():
                 print(f"💰 Faucet DUCO balance: {balance:.2f} DUCO")
                 return balance
     except Exception as e:
-        print(f"⚠️ Lỗi lấy balance DUCO: {e}")
+        print(f"⚠️ Error fetching DUCO balance: {e}")
     return balance_cache["balance"] or 0.0
 
 def send_duco(recipient, amount_cc):
-    """Gửi DUCO qua API Duino Coin, trả về (success, txid_or_error)"""
+    """Send DUCO via Duino Coin API, returns (success, txid_or_error)"""
     amount_duco = amount_cc / 10.0
     params = {
         "username": DUCO_FAUCET_USERNAME,
@@ -228,12 +228,12 @@ def send_duco(recipient, amount_cc):
         return False, str(e)
 
 def send_ccpoc(receiver, amount_cc):
-    """Tích hợp API CC PoC nếu có. Ở đây giả lập."""
+    """Integrate with CC PoC API if available. Currently simulated."""
     amount_poc = amount_cc * 0.75
-    print(f"   [Giả lập] Gửi {amount_poc} CC PoC đến {receiver}")
+    print(f"   [Simulated] Sending {amount_poc} CC PoC to {receiver}")
     return True, "simulated_txid"
 
-# ========== XỬ LÝ MỘT SWAP ==========
+# ========== PROCESS ONE SWAP ==========
 def process_swap(req):
     rid = req.get("id")
     from_user = req.get("from_user")
@@ -242,45 +242,45 @@ def process_swap(req):
     receiver = req.get("receiver")
 
     if not all([rid, from_user, amount_cc, swap_type, receiver]):
-        print(f"   ⚠️ Request thiếu thông tin: {req}")
+        print(f"   ⚠️ Request missing info: {req}")
         return False
 
     if is_processed(rid):
-        print(f"   ℹ️ Swap {rid} đã xử lý trước đó (bỏ qua)")
-        return True  # coi như thành công để xóa request
+        print(f"   ℹ️ Swap {rid} already processed (skipping)")
+        return True
 
-    print(f"\n🔹 Swap {rid}: {from_user} -> {amount_cc} CC ({swap_type}) cho {receiver}")
+    print(f"\n🔹 Swap {rid}: {from_user} -> {amount_cc} CC ({swap_type}) to {receiver}")
 
     if swap_type == "duco":
         balance = update_faucet_balance()
         required_duco = amount_cc / 10.0
         if balance < required_duco:
-            print(f"   ⚠️ Không đủ DUCO: cần {required_duco:.2f} DUCO, có {balance:.2f} DUCO")
+            print(f"   ⚠️ Insufficient DUCO: need {required_duco:.2f} DUCO, have {balance:.2f} DUCO")
             return False
         success, info = send_duco(receiver, amount_cc)
         if success:
-            print(f"   ✅ Đã gửi {required_duco:.2f} DUCO, TxID: {info}")
+            print(f"   ✅ Sent {required_duco:.2f} DUCO, TxID: {info}")
             record_processed(rid, from_user, amount_cc, swap_type, receiver, info)
-            update_faucet_balance()  # cập nhật lại balance sau khi gửi
+            update_faucet_balance()
             return True
         else:
-            print(f"   ❌ Gửi DUCO thất bại: {info}")
+            print(f"   ❌ DUCO send failed: {info}")
             return False
 
     elif swap_type == "ccpoc":
         success, info = send_ccpoc(receiver, amount_cc)
         if success:
-            print(f"   ✅ Đã gửi CC PoC (giả lập), ID: {info}")
+            print(f"   ✅ Sent CC PoC (simulated), ID: {info}")
             record_processed(rid, from_user, amount_cc, swap_type, receiver, info)
             return True
         else:
-            print(f"   ❌ Gửi CC PoC thất bại: {info}")
+            print(f"   ❌ CC PoC send failed: {info}")
             return False
     else:
-        print(f"   ❌ Loại swap không hỗ trợ: {swap_type}")
+        print(f"   ❌ Unsupported swap type: {swap_type}")
         return False
 
-# ========== VÒNG LẬP CHÍNH ==========
+# ========== MAIN LOOP ==========
 def main():
     print("\n" + "="*50)
     print("🚀 SWAP CLIENT - ChocoHub")
@@ -295,33 +295,33 @@ def main():
         try:
             swaps = get_pending_swaps()
             if swaps is None:
-                print("⚠️ Không thể lấy danh sách swap, thử lại...")
+                print("⚠️ Cannot fetch swap list, retrying...")
                 time.sleep(SLEEP_INTERVAL)
                 continue
 
             if not swaps:
-                print("✅ Không có swap pending")
+                print("✅ No pending swaps")
             else:
-                print(f"📋 Tìm thấy {len(swaps)} swap pending")
+                print(f"📋 Found {len(swaps)} pending swaps")
                 for req in swaps:
                     success = process_swap(req)
                     if success:
                         if fulfill_swap(req["id"]):
-                            print(f"   ✅ Đã báo server hoàn thành swap {req['id']}")
+                            print(f"   ✅ Notified server: swap {req['id']} completed")
                         else:
-                            print(f"   ⚠️ Không báo được server, sẽ thử lại lần sau")
+                            print(f"   ⚠️ Could not notify server, will retry later")
                     else:
-                        print(f"   ⏳ Giữ lại swap {req['id']} để xử lý sau")
+                        print(f"   ⏳ Keeping swap {req['id']} for later processing")
                     time.sleep(2)
 
-            print(f"\n⏳ Chờ {SLEEP_INTERVAL} giây...")
+            print(f"\n⏳ Waiting {SLEEP_INTERVAL} seconds...")
             time.sleep(SLEEP_INTERVAL)
 
         except KeyboardInterrupt:
-            print("\n🛑 Dừng bởi người dùng")
+            print("\n🛑 Stopped by user")
             break
         except Exception as e:
-            print(f"❌ Lỗi vòng lặp: {e}")
+            print(f"❌ Loop error: {e}")
             time.sleep(30)
 
 if __name__ == "__main__":
