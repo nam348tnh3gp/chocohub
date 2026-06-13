@@ -2,19 +2,84 @@ import os
 import time
 import requests
 import sqlite3
+import json
 from datetime import datetime
-from dotenv import load_dotenv
+from getpass import getpass
 
-load_dotenv()
+# ========== FILE CONFIG ==========
+CONFIG_FILE = "swap_config.json"
 
-# ========== CẤU HÌNH ==========
-RENDER_API_URL = os.getenv("RENDER_API_URL", "https://chocohub-r011.onrender.com")
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "chocoetom")   # hoặc "Nam2010"
-ADMIN_PIN = os.getenv("ADMIN_PIN")                         # PIN của admin
-DUCO_FAUCET_USERNAME = os.getenv("DUCO_FAUCET_USERNAME")   # tài khoản faucet DUCO
-DUCO_FAUCET_PASSWORD = os.getenv("DUCO_FAUCET_PASSWORD")   # password faucet DUCO
-MEMO = os.getenv("MEMO", "Swap")
-SLEEP_INTERVAL = int(os.getenv("SLEEP_INTERVAL", "30"))
+def load_config():
+    """Đọc config từ file nếu có"""
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+                print("✅ Đã tải config từ file")
+                return config
+        except:
+            pass
+    return None
+
+def save_config(config):
+    """Lưu config vào file"""
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=2)
+    print("💾 Đã lưu config vào file")
+
+def interactive_setup():
+    """Hỏi người dùng nhập thông tin tương tác"""
+    print("\n" + "="*50)
+    print("🔧 LẦN ĐẦU CHẠY - NHẬP CẤU HÌNH")
+    print("="*50)
+    
+    config = {}
+    
+    # Server
+    config["RENDER_API_URL"] = input("Server URL [https://chocohub-r011.onrender.com]: ").strip()
+    if not config["RENDER_API_URL"]:
+        config["RENDER_API_URL"] = "https://chocohub-r011.onrender.com"
+    
+    # Admin
+    print("\n--- Thông tin Admin (xác thực với ChocoHub) ---")
+    config["ADMIN_USERNAME"] = input(f"Admin username [chocoetom]: ").strip()
+    if not config["ADMIN_USERNAME"]:
+        config["ADMIN_USERNAME"] = "chocoetom"
+    config["ADMIN_PIN"] = getpass("Admin PIN: ")  # Ẩn khi nhập
+    
+    # DUCO Faucet
+    print("\n--- Thông tin Faucet DUCO (để gửi coin) ---")
+    config["DUCO_FAUCET_USERNAME"] = input("DUCO Faucet Username: ").strip()
+    config["DUCO_FAUCET_PASSWORD"] = getpass("DUCO Faucet Password: ")
+    
+    # Tùy chọn
+    print("\n--- Tùy chọn (Enter để dùng mặc định) ---")
+    memo = input("Memo cho giao dịch [Swap]: ").strip()
+    config["MEMO"] = memo if memo else "Swap"
+    
+    interval = input("Thời gian kiểm tra (giây) [30]: ").strip()
+    config["SLEEP_INTERVAL"] = int(interval) if interval.isdigit() else 30
+    
+    print("\n" + "="*50)
+    print("✅ Cấu hình hoàn tất!")
+    print("="*50)
+    
+    return config
+
+# ========== TẢI HOẶC NHẬP CONFIG ==========
+config = load_config()
+if not config:
+    config = interactive_setup()
+    save_config(config)
+
+# ========== CẤU HÌNH TỪ CONFIG ==========
+RENDER_API_URL = config.get("RENDER_API_URL")
+ADMIN_USERNAME = config.get("ADMIN_USERNAME")
+ADMIN_PIN = config.get("ADMIN_PIN")
+DUCO_FAUCET_USERNAME = config.get("DUCO_FAUCET_USERNAME")
+DUCO_FAUCET_PASSWORD = config.get("DUCO_FAUCET_PASSWORD")
+MEMO = config.get("MEMO", "Swap")
+SLEEP_INTERVAL = config.get("SLEEP_INTERVAL", 30)
 
 # Cache JWT
 jwt_token = None
@@ -39,6 +104,7 @@ def init_db():
                   txid TEXT)""")
     conn.commit()
     conn.close()
+    print("📁 Database initialized")
 
 init_db()
 
@@ -79,6 +145,9 @@ def get_admin_token():
                 print(f"🔑 Đã lấy token cho {ADMIN_USERNAME}")
                 return jwt_token
         print(f"❌ Xác thực thất bại: {resp.status_code}")
+        if resp.status_code == 401:
+            print("   → Sai username hoặc PIN. Hãy chạy lại và nhập đúng.")
+            exit(1)
     except Exception as e:
         print(f"❌ Lỗi kết nối: {e}")
     return None
@@ -212,12 +281,16 @@ def process_swap(req):
         print(f"   ❌ Loại swap không hỗ trợ: {swap_type}")
         return False
 
-# ========== VÒNG LẶP CHÍNH ==========
+# ========== VÒNG LẬP CHÍNH ==========
 def main():
-    print("🚀 Swap Client for ChocoHub (Duino Coin + CC PoC)")
+    print("\n" + "="*50)
+    print("🚀 SWAP CLIENT - ChocoHub")
+    print("="*50)
     print(f"📍 Server: {RENDER_API_URL}")
     print(f"👤 Admin: {ADMIN_USERNAME}")
-    print(f"⏱️  Interval: {SLEEP_INTERVAL}s\n")
+    print(f"💾 Config: {CONFIG_FILE}")
+    print(f"⏱️  Interval: {SLEEP_INTERVAL}s")
+    print("="*50 + "\n")
 
     while True:
         try:
@@ -240,7 +313,7 @@ def main():
                             print(f"   ⚠️ Không báo được server, sẽ thử lại lần sau")
                     else:
                         print(f"   ⏳ Giữ lại swap {req['id']} để xử lý sau")
-                    time.sleep(2)  # nghỉ giữa các request
+                    time.sleep(2)
 
             print(f"\n⏳ Chờ {SLEEP_INTERVAL} giây...")
             time.sleep(SLEEP_INTERVAL)
@@ -253,9 +326,4 @@ def main():
             time.sleep(30)
 
 if __name__ == "__main__":
-    if not ADMIN_PIN:
-        print("❌ Thiếu ADMIN_PIN trong biến môi trường!")
-        exit(1)
-    if not DUCO_FAUCET_USERNAME or not DUCO_FAUCET_PASSWORD:
-        print("⚠️ Thiếu DUCO_FAUCET_USERNAME/PASSWORD – sẽ không gửi được DUCO thật!")
     main()
