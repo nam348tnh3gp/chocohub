@@ -10,7 +10,6 @@ const db = require('../db');
 const router = express.Router();
 
 // Auth 
-
 const ADMIN_USERS = ['chocoetom', 'Nam2010'];
 
 function isAdmin(username) {
@@ -79,9 +78,24 @@ function saveSwapRequests() {
 // Carrega requests existentes ao iniciar o módulo
 loadSwapRequests();
 
+// Helper: refund CC to user when swap is deleted (only if pending)
+function refundUser(request) {
+    if (request.status === 'pending') {
+        const amount = request.amount_cc;
+        db.updateBalance(request.from_user, amount);
+        // Ghi transaction refund (hỗ trợ cả 3 và 4 tham số)
+        if (db.addTransaction.length >= 4) {
+            db.addTransaction('swap_system', request.from_user, amount, `Refund for cancelled swap ${request.id}`);
+        } else {
+            db.addTransaction('swap_system', request.from_user, amount);
+        }
+        console.log(`💰 Refunded ${amount} CC to ${request.from_user} for deleted swap ${request.id}`);
+    }
+}
+
 // ─────────────────────────────────  Swap Routes ─────────────────────────────────────────
 
-// requests
+// Create swap request
 router.post('/create', verifyToken, swapLimiter, (req, res) => {
     try {
         const { from_user, amount_cc, swap_type, receiver } = req.body;
@@ -112,9 +126,13 @@ router.post('/create', verifyToken, swapLimiter, (req, res) => {
             return res.status(400).json({ status: 'error', message: 'Insufficient CC balance' });
         }
 
-        // Deduz CC imediatamente
+        // Deduct CC immediately
         db.updateBalance(from_user, -amount);
-        db.addTransaction(from_user, 'swap_system', amount, `Swap to ${swap_type.toUpperCase()} for ${receiver}`);
+        if (db.addTransaction.length >= 4) {
+            db.addTransaction(from_user, 'swap_system', amount, `Swap to ${swap_type.toUpperCase()} for ${receiver}`);
+        } else {
+            db.addTransaction(from_user, 'swap_system', amount);
+        }
 
         const newRequest = {
             id: Date.now() + '-' + crypto.randomBytes(8).toString('hex'),
@@ -144,7 +162,7 @@ router.post('/create', verifyToken, swapLimiter, (req, res) => {
     }
 });
 
-// List Pending 
+// List pending swaps
 router.get('/pending', verifyToken, (req, res) => {
     try {
         let pending = swapRequests.filter(r => r.status === 'pending');
@@ -161,7 +179,7 @@ router.get('/pending', verifyToken, (req, res) => {
     }
 });
 
-// Full fill
+// Fulfill (complete) a swap - admin only
 router.post('/fulfill', verifyToken, verifyAdmin, (req, res) => {
     try {
         const { request_id } = req.body;
@@ -191,7 +209,7 @@ router.post('/fulfill', verifyToken, verifyAdmin, (req, res) => {
     }
 });
 
-// Swap Rates
+// Get swap rates (public)
 router.get('/rates', (req, res) => {
     res.json({
         status: 'success',
@@ -203,7 +221,7 @@ router.get('/rates', (req, res) => {
     });
 });
 
-// History
+// History for authenticated user
 router.get('/history', verifyToken, (req, res) => {
     try {
         const userHistory = swapRequests.filter(r => r.from_user === req.user.username);
@@ -217,7 +235,8 @@ router.get('/history', verifyToken, (req, res) => {
     }
 });
 
-// ───────────────────────── Adming Routes For Swap ─────────────────────────────────────────
+// ───────────────────────── Admin Routes For Swap ─────────────────────────────────────────
+// Get all swaps (admin only)
 router.get('/admin/swaps', verifyToken, verifyAdmin, (req, res) => {
     try {
         res.json({
@@ -230,6 +249,7 @@ router.get('/admin/swaps', verifyToken, verifyAdmin, (req, res) => {
     }
 });
 
+// Delete a swap by ID (admin only) - refunds if pending
 router.delete('/admin/swaps/:id', verifyToken, verifyAdmin, (req, res) => {
     try {
         const id = req.params.id;
@@ -237,10 +257,19 @@ router.delete('/admin/swaps/:id', verifyToken, verifyAdmin, (req, res) => {
         if (index === -1) {
             return res.status(404).json({ status: 'error', message: 'Swap not found' });
         }
+
+        const request = swapRequests[index];
+        // Refund if pending
+        if (request.status === 'pending') {
+            refundUser(request);
+        }
+        // Remove request
         swapRequests.splice(index, 1);
         saveSwapRequests();
-        res.json({ status: 'success', message: 'Swap deleted' });
+
+        res.json({ status: 'success', message: 'Swap deleted' + (request.status === 'pending' ? ' and user refunded' : '') });
     } catch (e) {
+        console.error('Swap delete error:', e);
         res.status(500).json({ status: 'error', message: e.message });
     }
 });
