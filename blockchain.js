@@ -96,7 +96,7 @@ function startAutoBounty() {
 // ═══════════════════════════════════════════════════
 const POS_BLOCK_INTERVAL = 30000;
 const MIN_STAKE = 10;
-const POS_BLOCK_REWARD = 0.1;
+const POS_BLOCK_REWARD = 0.01;
 let currentValidator = null;
 
 function selectValidator() {
