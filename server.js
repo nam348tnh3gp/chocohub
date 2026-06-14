@@ -183,8 +183,8 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: false,   // set true nếu dùng HTTPS
-    maxAge: 3600000  // 1 hour
+    secure: false,
+    maxAge: 3600000
   }
 }));
 
@@ -296,7 +296,6 @@ app.post('/admin/login', async (req, res) => {
     if (!isAdmin(username)) {
       return res.status(403).json({ status: 'error', message: 'Not an admin user' });
     }
-    // Tạo JWT token cho admin để gọi API swap nội bộ
     const adminToken = jwt.sign({ username }, process.env.JWT_SECRET || 'secret', { expiresIn: '24h' });
     req.session.admin = true;
     req.session.adminUsername = username;
@@ -312,22 +311,71 @@ app.get('/admin/logout', (req, res) => {
   res.redirect('/admin');
 });
 
-// Middleware kiểm tra session admin cho các route admin
 function requireAdminSession(req, res, next) {
   if (req.session && req.session.admin) return next();
   res.status(401).json({ status: 'error', message: 'Admin session required' });
 }
 
-// API proxy cho admin (gọi nội bộ đến swap API bằng token)
+// API proxy cho admin
 app.get('/admin/api/all-swaps', requireAdminSession, async (req, res) => {
   try {
     const token = req.session.adminToken;
-    // Gọi endpoint /swap/admin/swaps (lấy tất cả swap)
     const response = await fetch(`http://localhost:${PORT}/swap/admin/swaps`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     const data = await response.json();
     res.json(data);
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+app.get('/admin/api/all-users', requireAdminSession, async (req, res) => {
+  try {
+    const users = db.getAllUsers();
+    res.json({ status: 'success', users });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+app.get('/admin/api/balance/:username', requireAdminSession, async (req, res) => {
+  try {
+    const user = db.getUser(req.params.username);
+    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+    res.json({ status: 'success', balance: user.balance });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+app.post('/admin/api/update-balance', requireAdminSession, async (req, res) => {
+  try {
+    const { username, amount, action } = req.body;
+    const user = db.getUser(username);
+    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+    
+    if (action === 'add') {
+      db.updateBalance(username, amount);
+    } else if (action === 'set') {
+      const currentBalance = user.balance;
+      const diff = amount - currentBalance;
+      db.updateBalance(username, diff);
+    } else {
+      return res.status(400).json({ status: 'error', message: 'Invalid action' });
+    }
+    
+    const newUser = db.getUser(username);
+    res.json({ status: 'success', message: `Balance updated`, new_balance: newUser.balance });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+app.get('/admin/api/transactions/:username', requireAdminSession, async (req, res) => {
+  try {
+    const transactions = db.getTransactions(req.params.username, 50);
+    res.json({ status: 'success', transactions });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }
@@ -364,7 +412,7 @@ app.delete('/admin/api/delete/:id', requireAdminSession, async (req, res) => {
   }
 });
 
-// Dashboard admin với 2 bảng: Pending và Completed
+// Dashboard admin mở rộng
 app.get('/admin/dashboard', requireAdminSession, (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -380,6 +428,12 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             h1 { background: linear-gradient(135deg, #f58a00, #ffbf00); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: 2rem; }
             .logout-btn { background: #2a2a36; border: 1px solid #ff4444; color: #ff4444; padding: 0.5rem 1.2rem; border-radius: 40px; text-decoration: none; transition: 0.2s; }
             .logout-btn:hover { background: #ff4444; color: white; }
+            .tabs { display: flex; gap: 1rem; margin-bottom: 2rem; border-bottom: 1px solid #2a2a36; }
+            .tab-btn { background: none; border: none; color: #8b8296; padding: 0.75rem 1.5rem; font-size: 1rem; cursor: pointer; transition: 0.2s; }
+            .tab-btn:hover { color: #f58a00; }
+            .tab-btn.active { color: #f58a00; border-bottom: 2px solid #f58a00; }
+            .tab-content { display: none; }
+            .tab-content.active { display: block; }
             .card { background: #1e1e2a; border-radius: 24px; padding: 1.5rem; margin-bottom: 2rem; box-shadow: 0 8px 20px rgba(0,0,0,0.3); }
             .card h2 { margin-bottom: 1rem; color: #f58a00; font-weight: 500; }
             table { width: 100%; border-collapse: collapse; }
@@ -391,64 +445,131 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             .btn-complete:hover { background: #ff9e20; transform: scale(1.02); }
             .btn-delete { background: #ff4444; color: white; border: none; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
             .btn-delete:hover { background: #ff6666; transform: scale(1.02); }
+            .btn-edit { background: #2a2a36; color: #f58a00; border: 1px solid #f58a00; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+            .btn-edit:hover { background: #f58a00; color: #0a0a12; }
             .empty-row td { text-align: center; color: #888; padding: 2rem; }
-            .refresh { float: right; font-size: 0.8rem; color: #888; margin-top: 0.5rem; }
+            .refresh { float: right; font-size: 0.8rem; color: #888; margin-top: 0.5rem; cursor: pointer; }
+            .refresh:hover { color: #f58a00; }
+            .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; }
+            .modal-content { background: #1e1e2a; border-radius: 24px; padding: 2rem; width: 400px; max-width: 90%; }
+            .modal-content h3 { margin-bottom: 1rem; color: #f58a00; }
+            .modal-content input { width: 100%; padding: 12px; margin: 10px 0; background: #2a2a36; border: 1px solid #3a3a46; border-radius: 12px; color: white; }
+            .modal-buttons { display: flex; gap: 1rem; margin-top: 1rem; }
+            .modal-buttons button { flex: 1; padding: 10px; border-radius: 30px; cursor: pointer; }
+            .btn-save { background: #f58a00; color: #0a0a12; border: none; }
+            .btn-cancel { background: #2a2a36; color: #eee4d8; border: 1px solid #ff4444; }
+            .search-box { margin-bottom: 1rem; display: flex; gap: 0.5rem; }
+            .search-box input { flex: 1; padding: 10px; background: #2a2a36; border: 1px solid #3a3a46; border-radius: 12px; color: white; }
+            .search-box button { background: #f58a00; color: #0a0a12; border: none; padding: 10px 20px; border-radius: 30px; cursor: pointer; }
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
-                <h1>🍫 Swap Manager</h1>
+                <h1>🍫 ChocoHub Admin Panel</h1>
                 <a href="/admin/logout" class="logout-btn">🚪 Logout</a>
             </div>
-            <div class="card">
-                <h2>⏳ Pending Swaps</h2>
-                <div style="overflow-x: auto;">
-                    <table id="pendingTable">
-                        <thead>
-                            <tr><th>ID</th><th>From</th><th>Amount (CC)</th><th>Type</th><th>Receiver</th><th>Status</th><th>Actions</th></tr>
-                        </thead>
-                        <tbody id="pendingBody">
-                            <tr class="empty-row"><td colspan="7">Loading...</td></tr>
-                        </tbody>
-                    </table>
+            
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="swaps">🔄 Swaps</button>
+                <button class="tab-btn" data-tab="users">👥 Users</button>
+                <button class="tab-btn" data-tab="stats">📊 Statistics</button>
+            </div>
+            
+            <!-- Swaps Tab -->
+            <div id="swaps-tab" class="tab-content active">
+                <div class="card">
+                    <h2>⏳ Pending Swaps</h2>
+                    <div style="overflow-x: auto;">
+                        <table id="pendingTable">
+                            <thead><tr><th>ID</th><th>From</th><th>Amount</th><th>Type</th><th>Receiver</th><th>Status</th><th>Actions</th></tr></thead>
+                            <tbody id="pendingBody"><tr class="empty-row"><td colspan="7">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card">
+                    <h2>✅ Completed Swaps</h2>
+                    <div style="overflow-x: auto;">
+                        <table id="completedTable">
+                            <thead><tr><th>ID</th><th>From</th><th>Amount</th><th>Type</th><th>Receiver</th><th>Status</th><th>Completed At</th></tr></thead>
+                            <tbody id="completedBody"><tr class="empty-row"><td colspan="7">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
-            <div class="card">
-                <h2>✅ Completed Swaps</h2>
-                <div style="overflow-x: auto;">
-                    <table id="completedTable">
-                        <thead>
-                            <tr><th>ID</th><th>From</th><th>Amount (CC)</th><th>Type</th><th>Receiver</th><th>Status</th><th>Completed At</th></tr>
-                        </thead>
-                        <tbody id="completedBody">
-                            <tr class="empty-row"><td colspan="7">Loading...</td></tr>
-                        </tbody>
-                    </table>
+            
+            <!-- Users Tab -->
+            <div id="users-tab" class="tab-content">
+                <div class="card">
+                    <h2>👥 User Management</h2>
+                    <div class="search-box">
+                        <input type="text" id="userSearch" placeholder="Search username...">
+                        <button onclick="searchUsers()">🔍 Search</button>
+                    </div>
+                    <div style="overflow-x: auto;">
+                        <table id="usersTable">
+                            <thead><tr><th>Username</th><th>Balance (CC)</th><th>Actions</th></tr></thead>
+                            <tbody id="usersBody"><tr class="empty-row"><td colspan="3">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Stats Tab -->
+            <div id="stats-tab" class="tab-content">
+                <div class="card">
+                    <h2>📊 System Statistics</h2>
+                    <div id="statsContent">Loading...</div>
                 </div>
             </div>
         </div>
+        
+        <!-- Edit Balance Modal -->
+        <div id="editModal" class="modal">
+            <div class="modal-content">
+                <h3>✏️ Edit User Balance</h3>
+                <p>Username: <strong id="editUsername"></strong></p>
+                <label>Current Balance: <span id="currentBalance"></span> CC</label>
+                <input type="number" id="editAmount" placeholder="Amount">
+                <div class="modal-buttons">
+                    <button class="btn-save" onclick="saveBalance('add')">➕ Add</button>
+                    <button class="btn-save" onclick="saveBalance('set')">📝 Set</button>
+                    <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+                </div>
+            </div>
+        </div>
+
         <script>
+            let allSwaps = [];
+            let allUsers = [];
+            let currentEditUser = null;
+            
+            // Tab switching
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                    btn.classList.add('active');
+                    document.getElementById(btn.dataset.tab + '-tab').classList.add('active');
+                    if (btn.dataset.tab === 'users') loadUsers();
+                    if (btn.dataset.tab === 'stats') loadStats();
+                });
+            });
+            
             async function loadAllSwaps() {
                 try {
                     const resp = await fetch('/admin/api/all-swaps');
                     const data = await resp.json();
                     if (data.status === 'success' && Array.isArray(data.swaps)) {
-                        const pending = data.swaps.filter(s => s.status === 'pending');
-                        const completed = data.swaps.filter(s => s.status === 'completed');
+                        allSwaps = data.swaps;
+                        const pending = allSwaps.filter(s => s.status === 'pending');
+                        const completed = allSwaps.filter(s => s.status === 'completed');
                         renderPending(pending);
                         renderCompleted(completed);
-                    } else {
-                        console.warn('Unexpected response:', data);
-                        document.getElementById('pendingBody').innerHTML = '<tr class="empty-row"><td colspan="7">Error loading data</td></tr>';
-                        document.getElementById('completedBody').innerHTML = '<tr class="empty-row"><td colspan="7">Error loading data</td></tr>';
                     }
-                } catch(e) {
-                    console.error(e);
-                    document.getElementById('pendingBody').innerHTML = '<tr class="empty-row"><td colspan="7">Network error</td></tr>';
-                    document.getElementById('completedBody').innerHTML = '<tr class="empty-row"><td colspan="7">Network error</td></tr>';
-                }
+                } catch(e) { console.error(e); }
             }
+            
             function renderPending(swaps) {
                 const tbody = document.getElementById('pendingBody');
                 if (swaps.length === 0) {
@@ -477,6 +598,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     actions.appendChild(deleteBtn);
                 }
             }
+            
             function renderCompleted(swaps) {
                 const tbody = document.getElementById('completedBody');
                 if (swaps.length === 0) {
@@ -495,8 +617,108 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     row.insertCell(6).innerText = swap.completed_at ? new Date(swap.completed_at).toLocaleString() : '-';
                 }
             }
+            
+            async function loadUsers() {
+                try {
+                    const resp = await fetch('/admin/api/all-users');
+                    const data = await resp.json();
+                    if (data.status === 'success') {
+                        allUsers = data.users;
+                        renderUsers(allUsers);
+                    }
+                } catch(e) { console.error(e); }
+            }
+            
+            function renderUsers(users) {
+                const tbody = document.getElementById('usersBody');
+                if (users.length === 0) {
+                    tbody.innerHTML = '<tr class="empty-row"><td colspan="3">👻 No users found</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = '';
+                for (const user of users) {
+                    const row = tbody.insertRow();
+                    row.insertCell(0).innerText = user.username;
+                    row.insertCell(1).innerHTML = `<span style="color:#f58a00">${user.balance.toFixed(4)} CC</span>`;
+                    const actions = row.insertCell(2);
+                    const editBtn = document.createElement('button');
+                    editBtn.innerText = '✏️ Edit Balance';
+                    editBtn.className = 'btn-edit';
+                    editBtn.onclick = () => openEditModal(user.username, user.balance);
+                    actions.appendChild(editBtn);
+                }
+            }
+            
+            function searchUsers() {
+                const searchTerm = document.getElementById('userSearch').value.toLowerCase();
+                const filtered = allUsers.filter(u => u.username.toLowerCase().includes(searchTerm));
+                renderUsers(filtered);
+            }
+            
+            async function loadStats() {
+                try {
+                    const resp = await fetch('/admin/api/all-swaps');
+                    const data = await resp.json();
+                    const usersResp = await fetch('/admin/api/all-users');
+                    const usersData = await usersResp.json();
+                    if (data.status === 'success' && usersData.status === 'success') {
+                        const totalSwaps = data.swaps.length;
+                        const pendingSwaps = data.swaps.filter(s => s.status === 'pending').length;
+                        const completedSwaps = data.swaps.filter(s => s.status === 'completed').length;
+                        const totalUsers = usersData.users.length;
+                        const totalBalance = usersData.users.reduce((sum, u) => sum + u.balance, 0);
+                        
+                        document.getElementById('statsContent').innerHTML = \`
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                                <div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>📊 Total Swaps</strong><br>\${totalSwaps}</div>
+                                <div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>⏳ Pending Swaps</strong><br>\${pendingSwaps}</div>
+                                <div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>✅ Completed Swaps</strong><br>\${completedSwaps}</div>
+                                <div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>👥 Total Users</strong><br>\${totalUsers}</div>
+                                <div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>💰 Total CC Supply</strong><br>\${totalBalance.toFixed(4)} CC</div>
+                            </div>
+                        \`;
+                    }
+                } catch(e) { console.error(e); }
+            }
+            
+            function openEditModal(username, currentBalance) {
+                currentEditUser = username;
+                document.getElementById('editUsername').innerText = username;
+                document.getElementById('currentBalance').innerText = currentBalance.toFixed(4);
+                document.getElementById('editAmount').value = '';
+                document.getElementById('editModal').style.display = 'flex';
+            }
+            
+            function closeModal() {
+                document.getElementById('editModal').style.display = 'none';
+                currentEditUser = null;
+            }
+            
+            async function saveBalance(action) {
+                const amount = parseFloat(document.getElementById('editAmount').value);
+                if (isNaN(amount) || amount < 0) {
+                    alert('Please enter a valid amount');
+                    return;
+                }
+                try {
+                    const resp = await fetch('/admin/api/update-balance', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username: currentEditUser, amount, action })
+                    });
+                    const data = await resp.json();
+                    if (data.status === 'success') {
+                        alert(\`Balance updated! New balance: \${data.new_balance.toFixed(4)} CC\`);
+                        closeModal();
+                        loadUsers();
+                    } else {
+                        alert('Error: ' + data.message);
+                    }
+                } catch(e) { alert(e.message); }
+            }
+            
             async function completeSwap(id) {
-                if (!confirm('Mark this swap as completed? The client should have already sent the external coins.')) return;
+                if (!confirm('Mark this swap as completed?')) return;
                 try {
                     const resp = await fetch('/admin/api/fulfill', {
                         method: 'POST',
@@ -505,26 +727,28 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     });
                     const data = await resp.json();
                     if (data.status === 'success') {
-                        alert('✅ Swap completed and recorded!');
+                        alert('✅ Swap completed!');
                         loadAllSwaps();
                     } else {
                         alert('❌ Error: ' + (data.message || 'Unknown error'));
                     }
                 } catch(e) { alert(e.message); }
             }
+            
             async function deleteSwap(id) {
-                if (!confirm('⚠️ Delete this swap request? The user will be REFUNDED the CC amount. This action cannot be undone.')) return;
+                if (!confirm('⚠️ Delete this swap request?')) return;
                 try {
                     const resp = await fetch('/admin/api/delete/' + id, { method: 'DELETE' });
                     const data = await resp.json();
                     if (data.status === 'success') {
-                        alert('🗑️ Swap deleted and user refunded.');
+                        alert('🗑️ Swap deleted.');
                         loadAllSwaps();
                     } else {
                         alert('❌ Error: ' + (data.message || 'Unknown error'));
                     }
                 } catch(e) { alert(e.message); }
             }
+            
             loadAllSwaps();
             setInterval(loadAllSwaps, 30000);
         </script>
@@ -534,7 +758,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
 });
 
 // ════════════════════════════════════════════════════
-//  PUBLIC ENDPOINTS (giữ nguyên, không ảnh hưởng client)
+//  PUBLIC ENDPOINTS (giữ nguyên)
 // ════════════════════════════════════════════════════
 app.get('/api/server/public-key', (req, res) => {
   res.json({
@@ -605,10 +829,10 @@ function verifyDHSignature(req, res, next) {
 }
 app.use(verifyDHSignature);
 
-// Swap Module (cho client tự động)
+// Swap Module
 app.use('/swap', SwapRouter);
 
-// AUTH endpoint (cho client lấy token)
+// AUTH endpoint
 app.post('/auth', authLimiter, (req, res) => {
   const { username, pin } = req.body;
   if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing fields' });
@@ -624,7 +848,7 @@ app.post('/auth', authLimiter, (req, res) => {
   }
 });
 
-// Các route công khai (không cần token)
+// Các route công khai
 app.get('/get_user/:username', (req, res) => {
   try {
     const user = db.getUser(req.params.username);
@@ -707,9 +931,7 @@ app.get('/pos/info', (req, res) => {
   }
 });
 
-// ════════════════════════════════════════════════════
-//  CÁC ROUTE YÊU CẦU TOKEN (giữ nguyên)
-// ════════════════════════════════════════════════════
+// CÁC ROUTE YÊU CẦU TOKEN
 app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
   const { to_username, amount } = req.body;
   const from_username = req.user.username;
@@ -783,7 +1005,7 @@ app.post('/pos/unstake', verifyToken, stakeLimiter, (req, res) => {
   }
 });
 
-// MINING ROUTES (công khai)
+// MINING ROUTES
 app.get('/active_bounties_list', (req, res) => {
   try {
     const bounties = blockchain.getActiveBounties();
@@ -849,7 +1071,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString(), dbHash: getDbHash() });
 });
 
-// BACKUP ENDPOINTS (giữ nguyên)
+// BACKUP ENDPOINTS
 app.post('/api/backup/register', (req, res) => {
   const { url, token, name, description, owner, platform, clientId } = req.body;
   if (!url || !token) return res.status(400).json({ status: 'error', message: 'Missing url or token' });
