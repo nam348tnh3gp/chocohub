@@ -51,7 +51,7 @@ def interactive_setup():
     config["DUCO_FAUCET_USERNAME"] = input("DUCO Faucet Username: ").strip()
     config["DUCO_FAUCET_PASSWORD"] = input("DUCO Faucet Password: ")
     
-    # DUCO Recipient (who receives DUCO when user swaps CC → DUCO)
+    # DUCO Recipient
     print("\n--- DUCO Recipient Info ---")
     config["DUCO_RECIPIENT"] = input("DUCO recipient username [Nam2010]: ").strip()
     if not config["DUCO_RECIPIENT"]:
@@ -94,7 +94,7 @@ token_expiry = 0
 # Cache balance faucet DUCO
 balance_cache = {"balance": None, "last_updated": None, "expiry_seconds": 60}
 
-# Local database to avoid duplicate processing
+# Local database
 DB_FILE = "swap_history.db"
 DUCO_TX_FILE = "duco_processed.json"
 
@@ -133,7 +133,6 @@ def record_processed(request_id, from_user, amount_cc, swap_type, receiver, txid
     conn.commit()
     conn.close()
 
-# ========== TRACK PROCESSED DUCO TRANSACTIONS ==========
 def load_processed_txids():
     if os.path.exists(DUCO_TX_FILE):
         with open(DUCO_TX_FILE, 'r') as f:
@@ -144,7 +143,6 @@ def save_processed_txids(txids):
     with open(DUCO_TX_FILE, 'w') as f:
         json.dump(list(txids), f)
 
-# ========== GET ADMIN TOKEN ==========
 def get_admin_token():
     global jwt_token, token_expiry
     now = time.time()
@@ -170,7 +168,6 @@ def get_admin_token():
         print(f"❌ Connection error: {e}")
     return None
 
-# ========== API CALLS WITH TOKEN ==========
 def api_call(endpoint, method="GET", data=None):
     token = get_admin_token()
     if not token:
@@ -203,7 +200,6 @@ def fulfill_swap(request_id):
     data = api_call("/swap/fulfill", "POST", {"request_id": request_id})
     return data and data.get("status") == "success"
 
-# ========== SEND REAL COINS ==========
 def update_faucet_balance():
     now = time.time()
     if (balance_cache["balance"] is not None and balance_cache["last_updated"] and
@@ -225,7 +221,6 @@ def update_faucet_balance():
     return balance_cache["balance"] or 0.0
 
 def send_duco(recipient, amount_cc):
-    """Send DUCO via Duino Coin API, returns (success, txid_or_error)"""
     amount_duco = amount_cc / 10.0
     params = {
         "username": DUCO_FAUCET_USERNAME,
@@ -247,12 +242,11 @@ def send_duco(recipient, amount_cc):
         return False, str(e)
 
 def send_ccpoc(receiver, amount_cc):
-    """Integrate with CC PoC API if available. Currently simulated."""
     amount_poc = amount_cc * 0.75
     print(f"   [Simulated] Sending {amount_poc} CC PoC to {receiver}")
     return True, "simulated_txid"
 
-# ========== CHECK DUCO TRANSACTIONS (for DUCO → CC) ==========
+# ========== CHECK DUCO TRANSACTIONS (FIXED) ==========
 def check_duco_transactions():
     """Check incoming DUCO transactions to DUCO_RECIPIENT and auto-fulfill pending swaps"""
     processed_txids = load_processed_txids()
@@ -265,41 +259,55 @@ def check_duco_transactions():
             return
         
         data = resp.json()
+        
+        # Kiểm tra cấu trúc dữ liệu theo API Duino-Coin
         if not data.get("success"):
             print(f"⚠️ DUCO API error: {data}")
             return
         
-        transactions = data.get("result", [])
-        if not transactions:
+        # API trả về result là dict với key là sender, value là list transactions
+        result = data.get("result", {})
+        if not result:
+            return
+        
+        # Gom tất cả transactions vào một list
+        all_transactions = []
+        for sender, tx_list in result.items():
+            if isinstance(tx_list, list):
+                for tx in tx_list:
+                    if isinstance(tx, dict):
+                        tx['sender'] = sender
+                        all_transactions.append(tx)
+        
+        if not all_transactions:
             return
         
         pending_swaps = get_pending_swaps()
         if not pending_swaps:
             return
         
-        # Map memo to swap request (both old 'duco' and new 'duco_to_cc')
+        # Map memo to swap request
         pending_by_memo = {}
         for req in pending_swaps:
             if req.get("status") != "pending":
                 continue
             swap_type = req.get("swap_type")
-            # For DUCO → CC, the receiver field stores the ChocoHub username
             if swap_type in ["duco", "duco_to_cc"]:
                 target_username = req.get("receiver")
                 expected_memo = f"SWAP CC for {target_username}"
                 pending_by_memo[expected_memo] = req
         
         any_fulfilled = False
-        for tx in transactions:
+        for tx in all_transactions:
             txid = tx.get("hash")
-            if txid in processed_txids:
+            if not txid or txid in processed_txids:
                 continue
                 
             memo = tx.get("memo", "").strip()
             if memo in pending_by_memo:
                 req = pending_by_memo[memo]
                 amount_duco = float(tx.get("amount", 0))
-                # Get expected DUCO based on swap_type
+                
                 if req.get("swap_type") == "duco_to_cc":
                     expected_duco = req.get("amount_duco", req.get("amount_cc", 0) / 10.0)
                 else:
@@ -307,7 +315,7 @@ def check_duco_transactions():
                 
                 if abs(amount_duco - expected_duco) <= 0.01:
                     print(f"\n🔍 Found matching DUCO transaction!")
-                    print(f"   Sender: {tx.get('sender')}")
+                    print(f"   Sender: {tx.get('sender', 'unknown')}")
                     print(f"   Amount: {amount_duco} DUCO")
                     print(f"   Memo: {memo}")
                     print(f"   Swap ID: {req['id']}")
@@ -331,7 +339,6 @@ def check_duco_transactions():
     except Exception as e:
         print(f"⚠️ Error checking DUCO transactions: {e}")
 
-# ========== PROCESS ONE SWAP (CC → DUCO / CC PoC) ==========
 def process_swap(req):
     rid = req.get("id")
     from_user = req.get("from_user")
@@ -378,7 +385,6 @@ def process_swap(req):
         print(f"   ⚠️ Skipping non-outgoing swap type: {swap_type}")
         return False
 
-# ========== MAIN LOOP ==========
 def main():
     print("\n" + "="*50)
     print("🚀 SWAP CLIENT - ChocoHub (with DUCO auto-detect)")
@@ -403,7 +409,6 @@ def main():
                 print(f"📋 Found {len(swaps)} pending swaps")
                 for req in swaps:
                     swap_type = req.get("swap_type")
-                    # Process outgoing swaps (CC → DUCO, CC → CC PoC)
                     if swap_type in ["duco", "ccpoc"]:
                         success = process_swap(req)
                         if success:
@@ -421,7 +426,6 @@ def main():
             else:
                 print("✅ No pending swaps")
 
-            # Check incoming DUCO transactions for DUCO → CC
             check_duco_transactions()
 
             print(f"\n⏳ Waiting {SLEEP_INTERVAL} seconds...")
