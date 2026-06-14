@@ -293,21 +293,16 @@
 
 <script>
     // Coin rate mapping (1 unit of FROM → TO)
-    // Only allow CC PoC → CC, not reverse
     const rates = {
         cc: { duco: 1/10, ccpoc: 1/0.75, cc: 1 },
         duco: { cc: 10, ccpoc: 10 / 0.75, duco: 1 },
-        ccpoc: { cc: 0.75, duco: null, ccpoc: 1 }  // DUCO not allowed, only CC
+        ccpoc: { cc: 0.75, duco: null, ccpoc: 1 }
     };
 
     const coinNames = {
         cc: 'CC (Choco Coin)',
         duco: 'DUCO (Duino Coin)',
         ccpoc: 'CC PoC'
-    };
-
-    const coinIcons = {
-        duco: '<img src="https://github.com/revoxhere/duino-coin/raw/master/Resources/duco.png" class="coin-icon" alt="DUCO">'
     };
 
     let currentUser = null;
@@ -344,7 +339,6 @@
         const from = document.getElementById('from-coin').value;
         const to = document.getElementById('to-coin').value;
         
-        // Check if swap is allowed (CC PoC → DUCO is not allowed)
         if (from === 'ccpoc' && to !== 'cc') {
             document.getElementById('to-coin').value = 'cc';
             return updateRateDisplay();
@@ -384,8 +378,7 @@
             receiverGroup.style.display = 'block';
             document.getElementById('receiver-label').innerHTML = 'Your username (to receive CC)';
             document.getElementById('receiver-input').placeholder = 'Your ChocoHub username';
-            const amount = document.getElementById('amount-input').value || '0';
-            infoNote.innerHTML = `📤 <strong>Send ${amount} DUCO to Nam2010</strong> with memo: "SWAP CC for ${currentUser || 'YOUR_USERNAME'}"<br>After confirmation, ${(parseFloat(amount) * 10).toFixed(4)} CC will be credited to ${currentUser || 'your account'}.`;
+            updateDucoToCCInfo(); // Cập nhật động thông tin
         } else if (from === 'ccpoc' && to === 'cc') {
             receiverGroup.style.display = 'block';
             document.getElementById('receiver-label').innerHTML = 'Your username (to receive CC)';
@@ -394,6 +387,21 @@
         } else {
             receiverGroup.style.display = 'none';
             infoNote.innerHTML = '💡 Please select a valid swap pair.';
+        }
+    }
+
+    function updateDucoToCCInfo() {
+        const amount = parseFloat(document.getElementById('amount-input').value) || 0;
+        const targetUsername = document.getElementById('receiver-input').value.trim() || currentUser || 'YOUR_USERNAME';
+        const ccAmount = (amount * 10).toFixed(4);
+        const infoNote = document.getElementById('info-note');
+        
+        if (amount > 0 && targetUsername !== 'YOUR_USERNAME') {
+            infoNote.innerHTML = `📤 <strong>Send ${amount} DUCO to Nam2010</strong> with memo: "SWAP CC for ${targetUsername}"<br>After confirmation, ${ccAmount} CC will be credited to <strong>${targetUsername}</strong>.`;
+        } else if (amount > 0) {
+            infoNote.innerHTML = `📤 <strong>Send ${amount} DUCO to Nam2010</strong> with memo: "SWAP CC for ${targetUsername}"<br>After confirmation, ${ccAmount} CC will be credited to your account.`;
+        } else {
+            infoNote.innerHTML = `📤 Enter amount above to see instruction.`;
         }
     }
 
@@ -407,6 +415,11 @@
         if (to === 'duco') estimateEl.innerHTML = `≈ ${result.toFixed(6)} DUCO`;
         else if (to === 'ccpoc') estimateEl.innerHTML = `≈ ${result.toFixed(6)} CC PoC`;
         else estimateEl.innerHTML = `≈ ${result.toFixed(4)} ${coinNames[to]}`;
+        
+        // Update DUCO → CC info dynamically
+        if (from === 'duco' && to === 'cc') {
+            updateDucoToCCInfo();
+        }
     }
 
     async function performSwap() {
@@ -428,7 +441,6 @@
             return;
         }
 
-        // Block CC PoC → DUCO
         if (from === 'ccpoc' && to !== 'cc') {
             showToast('CC PoC can only be swapped to CC (one-way only)', true);
             return;
@@ -473,12 +485,10 @@
                 showToast('Server error', true);
             }
         }
-        // DUCO → CC: manual instruction (only Nam2010)
+        // DUCO → CC: manual instruction
         else if (from === 'duco' && to === 'cc') {
-            const ducoAmount = amount;
-            const ccAmount = (amount * 10).toFixed(4);
             const targetUsername = receiver || user;
-            const instruction = `Send ${ducoAmount} DUCO to Nam2010 with memo: "SWAP CC for ${targetUsername}"`;
+            const instruction = `Send ${amount} DUCO to Nam2010 with memo: "SWAP CC for ${targetUsername}"`;
             showToast(`✓ Instruction copied! ${instruction}`, false);
             navigator.clipboard.writeText(instruction);
         }
@@ -504,7 +514,17 @@
         document.getElementById('amount-input').value = '';
         document.getElementById('receiver-input').value = '';
     });
-    document.getElementById('amount-input').addEventListener('input', updateEstimate);
+    document.getElementById('amount-input').addEventListener('input', () => {
+        updateEstimate();
+        if (document.getElementById('from-coin').value === 'duco' && document.getElementById('to-coin').value === 'cc') {
+            updateDucoToCCInfo();
+        }
+    });
+    document.getElementById('receiver-input').addEventListener('input', () => {
+        if (document.getElementById('from-coin').value === 'duco' && document.getElementById('to-coin').value === 'cc') {
+            updateDucoToCCInfo();
+        }
+    });
     document.getElementById('swap-btn').addEventListener('click', performSwap);
 
     // Initial load
