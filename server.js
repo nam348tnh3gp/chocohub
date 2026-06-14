@@ -639,7 +639,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                 for (const user of users) {
                     const row = tbody.insertRow();
                     row.insertCell(0).innerText = user.username;
-                    row.insertCell(1).innerHTML = `<span style="color:#f58a00">${user.balance.toFixed(4)} CC</span>`;
+                    row.insertCell(1).innerHTML = '<span style="color:#f58a00">' + user.balance.toFixed(4) + ' CC</span>';
                     const actions = row.insertCell(2);
                     const editBtn = document.createElement('button');
                     editBtn.innerText = '✏️ Edit Balance';
@@ -668,15 +668,14 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                         const totalUsers = usersData.users.length;
                         const totalBalance = usersData.users.reduce((sum, u) => sum + u.balance, 0);
                         
-                        document.getElementById('statsContent').innerHTML = \`
-                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
-                                <div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>📊 Total Swaps</strong><br>\${totalSwaps}</div>
-                                <div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>⏳ Pending Swaps</strong><br>\${pendingSwaps}</div>
-                                <div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>✅ Completed Swaps</strong><br>\${completedSwaps}</div>
-                                <div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>👥 Total Users</strong><br>\${totalUsers}</div>
-                                <div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>💰 Total CC Supply</strong><br>\${totalBalance.toFixed(4)} CC</div>
-                            </div>
-                        \`;
+                        document.getElementById('statsContent').innerHTML = 
+                            '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">' +
+                            '<div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>📊 Total Swaps</strong><br>' + totalSwaps + '</div>' +
+                            '<div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>⏳ Pending Swaps</strong><br>' + pendingSwaps + '</div>' +
+                            '<div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>✅ Completed Swaps</strong><br>' + completedSwaps + '</div>' +
+                            '<div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>👥 Total Users</strong><br>' + totalUsers + '</div>' +
+                            '<div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>💰 Total CC Supply</strong><br>' + totalBalance.toFixed(4) + ' CC</div>' +
+                            '</div>';
                     }
                 } catch(e) { console.error(e); }
             }
@@ -708,7 +707,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     });
                     const data = await resp.json();
                     if (data.status === 'success') {
-                        alert(\`Balance updated! New balance: \${data.new_balance.toFixed(4)} CC\`);
+                        alert('Balance updated! New balance: ' + data.new_balance.toFixed(4) + ' CC');
                         closeModal();
                         loadUsers();
                     } else {
@@ -848,7 +847,7 @@ app.post('/auth', authLimiter, (req, res) => {
   }
 });
 
-// Các route công khai
+// Các route công khai (giữ nguyên)
 app.get('/get_user/:username', (req, res) => {
   try {
     const user = db.getUser(req.params.username);
@@ -931,7 +930,7 @@ app.get('/pos/info', (req, res) => {
   }
 });
 
-// CÁC ROUTE YÊU CẦU TOKEN
+// CÁC ROUTE YÊU CẦU TOKEN (giữ nguyên)
 app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
   const { to_username, amount } = req.body;
   const from_username = req.user.username;
@@ -1005,7 +1004,7 @@ app.post('/pos/unstake', verifyToken, stakeLimiter, (req, res) => {
   }
 });
 
-// MINING ROUTES
+// MINING ROUTES (công khai)
 app.get('/active_bounties_list', (req, res) => {
   try {
     const bounties = blockchain.getActiveBounties();
@@ -1071,7 +1070,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString(), dbHash: getDbHash() });
 });
 
-// BACKUP ENDPOINTS
+// BACKUP ENDPOINTS (giữ nguyên)
 app.post('/api/backup/register', (req, res) => {
   const { url, token, name, description, owner, platform, clientId } = req.body;
   if (!url || !token) return res.status(400).json({ status: 'error', message: 'Missing url or token' });
