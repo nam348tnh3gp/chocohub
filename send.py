@@ -83,7 +83,7 @@ ADMIN_USERNAME = config.get("ADMIN_USERNAME")
 ADMIN_PIN = config.get("ADMIN_PIN")
 DUCO_FAUCET_USERNAME = config.get("DUCO_FAUCET_USERNAME")
 DUCO_FAUCET_PASSWORD = config.get("DUCO_FAUCET_PASSWORD")
-DUCO_RECIPIENT = config.get("DUCO_RECIPIENT", "Nam2010")  # Who receives DUCO from swaps
+DUCO_RECIPIENT = config.get("DUCO_RECIPIENT", "Nam2010")
 MEMO = config.get("MEMO", "Swap")
 SLEEP_INTERVAL = config.get("SLEEP_INTERVAL", 30)
 
@@ -257,7 +257,6 @@ def check_duco_transactions():
     """Check incoming DUCO transactions to DUCO_RECIPIENT and auto-fulfill pending swaps"""
     processed_txids = load_processed_txids()
     try:
-        # Get recent transactions for DUCO_RECIPIENT (e.g., Nam2010)
         url = f"https://server.duinocoin.com/transactions?recipient={DUCO_RECIPIENT}&limit=30"
         resp = requests.get(url, timeout=15)
         
@@ -274,16 +273,18 @@ def check_duco_transactions():
         if not transactions:
             return
         
-        # Get pending swaps from server
         pending_swaps = get_pending_swaps()
         if not pending_swaps:
             return
         
-        # Map expected memo to swap request (format: "SWAP CC for username")
+        # Map memo to swap request (both old 'duco' and new 'duco_to_cc')
         pending_by_memo = {}
         for req in pending_swaps:
-            if req.get("swap_type") == "duco" and req.get("status") == "pending":
-                # For DUCO → CC, the receiver field stores the ChocoHub username
+            if req.get("status") != "pending":
+                continue
+            swap_type = req.get("swap_type")
+            # For DUCO → CC, the receiver field stores the ChocoHub username
+            if swap_type in ["duco", "duco_to_cc"]:
                 target_username = req.get("receiver")
                 expected_memo = f"SWAP CC for {target_username}"
                 pending_by_memo[expected_memo] = req
@@ -298,23 +299,25 @@ def check_duco_transactions():
             if memo in pending_by_memo:
                 req = pending_by_memo[memo]
                 amount_duco = float(tx.get("amount", 0))
-                expected_duco = req.get("amount_cc", 0) / 10.0
+                # Get expected DUCO based on swap_type
+                if req.get("swap_type") == "duco_to_cc":
+                    expected_duco = req.get("amount_duco", req.get("amount_cc", 0) / 10.0)
+                else:
+                    expected_duco = req.get("amount_cc", 0) / 10.0
                 
-                # Allow small floating point difference
                 if abs(amount_duco - expected_duco) <= 0.01:
                     print(f"\n🔍 Found matching DUCO transaction!")
                     print(f"   Sender: {tx.get('sender')}")
                     print(f"   Amount: {amount_duco} DUCO")
                     print(f"   Memo: {memo}")
                     print(f"   Swap ID: {req['id']}")
-                    print(f"   Recipient: {DUCO_RECIPIENT}")
+                    print(f"   Type: {req.get('swap_type')}")
                     
-                    # Fulfill the swap
                     if fulfill_swap(req["id"]):
                         print(f"   ✅ Auto-fulfilled DUCO → CC swap for {req['from_user']}")
                         any_fulfilled = True
                         record_processed(req["id"], req["from_user"], req["amount_cc"],
-                                        req["swap_type"], req["receiver"], txid)
+                                        req.get("swap_type", "duco_to_cc"), req["receiver"], txid)
                         processed_txids.add(txid)
                         save_processed_txids(processed_txids)
                     else:
@@ -372,7 +375,7 @@ def process_swap(req):
             print(f"   ❌ CC PoC send failed: {info}")
             return False
     else:
-        print(f"   ❌ Unsupported swap type: {swap_type}")
+        print(f"   ⚠️ Skipping non-outgoing swap type: {swap_type}")
         return False
 
 # ========== MAIN LOOP ==========
@@ -390,7 +393,6 @@ def main():
 
     while True:
         try:
-            # 1. Process CC → DUCO / CC PoC swaps (outgoing)
             swaps = get_pending_swaps()
             if swaps is None:
                 print("⚠️ Cannot fetch swap list, retrying...")
@@ -400,8 +402,9 @@ def main():
             if swaps:
                 print(f"📋 Found {len(swaps)} pending swaps")
                 for req in swaps:
-                    # Only process outgoing swaps (CC → DUCO, CC → CC PoC)
-                    if req.get("swap_type") in ["duco", "ccpoc"]:
+                    swap_type = req.get("swap_type")
+                    # Process outgoing swaps (CC → DUCO, CC → CC PoC)
+                    if swap_type in ["duco", "ccpoc"]:
                         success = process_swap(req)
                         if success:
                             if fulfill_swap(req["id"]):
@@ -411,10 +414,14 @@ def main():
                         else:
                             print(f"   ⏳ Keeping swap {req['id']} for later processing")
                         time.sleep(2)
+                    elif swap_type == "duco_to_cc":
+                        print(f"   ℹ️ DUCO→CC swap {req['id']} waiting for transaction...")
+                    else:
+                        print(f"   ⚠️ Unknown swap type: {swap_type}")
             else:
-                print("✅ No pending outgoing swaps")
+                print("✅ No pending swaps")
 
-            # 2. Check incoming DUCO transactions for DUCO → CC
+            # Check incoming DUCO transactions for DUCO → CC
             check_duco_transactions()
 
             print(f"\n⏳ Waiting {SLEEP_INTERVAL} seconds...")
