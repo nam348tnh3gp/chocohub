@@ -212,6 +212,13 @@
             margin-bottom: 1rem;
         }
 
+        .coin-icon {
+            width: 20px;
+            height: 20px;
+            vertical-align: middle;
+            margin-right: 4px;
+        }
+
         @media (max-width: 480px) {
             .swap-container { padding: 1.5rem; }
             .select-row { flex-direction: column; }
@@ -277,6 +284,7 @@
     <div style="font-size: 0.7rem; text-align: center; color: #6a6280;">
         ⚡ CC swaps are processed instantly.<br>
         🔄 DUCO → CC: Send DUCO to <strong style="color:#f58a00">Nam2010</strong>, then your CC will be credited.<br>
+        🍫 CC PoC → CC: Only one-way conversion supported.<br>
         📦 All swaps are recorded for safety.
     </div>
 </div>
@@ -285,16 +293,21 @@
 
 <script>
     // Coin rate mapping (1 unit of FROM → TO)
+    // Only allow CC PoC → CC, not reverse
     const rates = {
         cc: { duco: 1/10, ccpoc: 1/0.75, cc: 1 },
         duco: { cc: 10, ccpoc: 10 / 0.75, duco: 1 },
-        ccpoc: { cc: 0.75, duco: 0.75 / 10, ccpoc: 1 }
+        ccpoc: { cc: 0.75, duco: null, ccpoc: 1 }  // DUCO not allowed, only CC
     };
 
     const coinNames = {
         cc: 'CC (Choco Coin)',
         duco: 'DUCO (Duino Coin)',
         ccpoc: 'CC PoC'
+    };
+
+    const coinIcons = {
+        duco: '<img src="https://github.com/revoxhere/duino-coin/raw/master/Resources/duco.png" class="coin-icon" alt="DUCO">'
     };
 
     let currentUser = null;
@@ -330,13 +343,20 @@
     function updateRateDisplay() {
         const from = document.getElementById('from-coin').value;
         const to = document.getElementById('to-coin').value;
+        
+        // Check if swap is allowed (CC PoC → DUCO is not allowed)
+        if (from === 'ccpoc' && to !== 'cc') {
+            document.getElementById('to-coin').value = 'cc';
+            return updateRateDisplay();
+        }
+        
         let rateText = '';
         if (from === 'cc' && to === 'duco') rateText = '⚡ Rate: 10 CC = 1 DUCO';
         else if (from === 'cc' && to === 'ccpoc') rateText = '⚡ Rate: 0.75 CC = 1 CC PoC';
         else if (from === 'duco' && to === 'cc') rateText = '⚡ Rate: 1 DUCO = 10 CC';
         else if (from === 'duco' && to === 'ccpoc') rateText = '⚡ Rate: 1 DUCO = 13.33 CC PoC';
         else if (from === 'ccpoc' && to === 'cc') rateText = '⚡ Rate: 1 CC PoC = 0.75 CC';
-        else if (from === 'ccpoc' && to === 'duco') rateText = '⚡ Rate: 1 CC PoC = 0.075 DUCO';
+        else if (from === 'ccpoc' && to === 'duco') rateText = '⚠️ CC PoC → DUCO is not supported';
         else rateText = '⚡ Rate: 1:1';
         document.getElementById('rate-display').innerHTML = rateText;
 
@@ -370,7 +390,7 @@
             receiverGroup.style.display = 'block';
             document.getElementById('receiver-label').innerHTML = 'Your username (to receive CC)';
             document.getElementById('receiver-input').placeholder = 'Your ChocoHub username';
-            infoNote.innerHTML = '💡 Simulated swap. Admin will handle CC PoC → CC manually.';
+            infoNote.innerHTML = '💡 Simulated swap. Admin will handle CC PoC → CC conversion manually.';
         } else {
             receiverGroup.style.display = 'none';
             infoNote.innerHTML = '💡 Please select a valid swap pair.';
@@ -405,6 +425,12 @@
 
         if (!amount || amount <= 0) {
             showToast('Invalid amount', true);
+            return;
+        }
+
+        // Block CC PoC → DUCO
+        if (from === 'ccpoc' && to !== 'cc') {
+            showToast('CC PoC can only be swapped to CC (one-way only)', true);
             return;
         }
 
@@ -452,11 +478,9 @@
             const ducoAmount = amount;
             const ccAmount = (amount * 10).toFixed(4);
             const targetUsername = receiver || user;
-            const instruction = `📤 Send ${ducoAmount} DUCO to Nam2010 with memo: "SWAP CC for ${targetUsername}". After confirmation, ${ccAmount} CC will be credited to ${targetUsername}.`;
-            showToast(instruction, false);
-            // Copy instruction to clipboard
-            navigator.clipboard.writeText(`Send ${ducoAmount} DUCO to Nam2010 with memo: SWAP CC for ${targetUsername}`);
-            showToast('✓ Instruction copied to clipboard!', false);
+            const instruction = `Send ${ducoAmount} DUCO to Nam2010 with memo: "SWAP CC for ${targetUsername}"`;
+            showToast(`✓ Instruction copied! ${instruction}`, false);
+            navigator.clipboard.writeText(instruction);
         }
         // CC PoC → CC: simulated
         else if (from === 'ccpoc' && to === 'cc') {
