@@ -101,7 +101,6 @@
             margin-bottom: 6px;
         }
         
-        /* Custom select styles */
         .custom-select {
             position: relative;
             width: 100%;
@@ -253,6 +252,20 @@
             margin-bottom: 1rem;
         }
 
+        .copy-btn {
+            background: rgba(255,149,0,0.2);
+            border: 1px solid rgba(255,149,0,0.4);
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: 0.2s;
+            margin-left: 8px;
+        }
+        .copy-btn:hover {
+            background: rgba(255,149,0,0.4);
+        }
+
         @media (max-width: 480px) {
             .swap-container { padding: 1.5rem; }
             .select-row { flex-direction: column; }
@@ -270,7 +283,6 @@
 
     <div class="balance-badge" id="wallet-balance">💰 Loading CC...</div>
 
-    <!-- Swap Form -->
     <div class="swap-card">
         <div class="select-row">
             <div class="select-box">
@@ -348,7 +360,6 @@
 <div id="toast" class="toast-msg"></div>
 
 <script>
-    // Coin rate mapping
     const rates = {
         cc: { duco: 1/10, ccpoc: 1/0.75, cc: 1 },
         duco: { cc: 10, ccpoc: 10 / 0.75, duco: 1 },
@@ -366,7 +377,6 @@
     let fromValue = 'cc';
     let toValue = 'duco';
 
-    // Custom select initialization
     function initCustomSelect(selectId, onChange) {
         const container = document.getElementById(selectId);
         const trigger = container.querySelector('.select-trigger');
@@ -388,7 +398,6 @@
             });
         });
 
-        // Close dropdown when clicking outside
         document.addEventListener('click', () => {
             dropdown.classList.remove('show');
         });
@@ -405,8 +414,7 @@
         else rateText = '⚡ Rate: 1:1';
         document.getElementById('rate-display').innerHTML = rateText;
 
-        const amountLabel = document.getElementById('amount-label');
-        amountLabel.innerHTML = `Amount (${coinNames[fromValue]})`;
+        document.getElementById('amount-label').innerHTML = `Amount (${coinNames[fromValue]})`;
 
         const receiverGroup = document.getElementById('receiver-group');
         const infoNote = document.getElementById('info-note');
@@ -447,13 +455,18 @@
         const ccAmount = (amount * 10).toFixed(4);
         const infoNote = document.getElementById('info-note');
         
-        if (amount > 0 && targetUsername !== 'YOUR_USERNAME') {
-            infoNote.innerHTML = `📤 <strong>Send ${amount} DUCO to Nam2010</strong> with memo: "SWAP CC for ${targetUsername}"<br>After confirmation, ${ccAmount} CC will be credited to <strong>${targetUsername}</strong>.`;
-        } else if (amount > 0) {
-            infoNote.innerHTML = `📤 <strong>Send ${amount} DUCO to Nam2010</strong> with memo: "SWAP CC for ${targetUsername}"<br>After confirmation, ${ccAmount} CC will be credited to your account.`;
+        if (amount > 0) {
+            infoNote.innerHTML = `📤 Send ${amount} DUCO to Nam2010 with memo: "SWAP CC for ${targetUsername}"<br>After confirmation, ${ccAmount} CC will be credited to <strong>${targetUsername}</strong>.
+            <span class="copy-btn" onclick="copyMemo('${amount}', '${targetUsername}')">📋 Copy Memo</span>`;
         } else {
             infoNote.innerHTML = `📤 Enter amount above to see instruction.`;
         }
+    }
+
+    function copyMemo(amount, username) {
+        const memo = `Send ${amount} DUCO to Nam2010 with memo: "SWAP CC for ${username}"`;
+        navigator.clipboard.writeText(memo);
+        showToast(`✓ Copied: ${memo}`, false);
     }
 
     function updateEstimate() {
@@ -558,12 +571,41 @@
                 showToast('Server error', true);
             }
         }
-        // DUCO → CC: manual instruction
+        // DUCO → CC: Create request and copy instruction
         else if (fromValue === 'duco' && toValue === 'cc') {
             const targetUsername = receiver || user;
-            const instruction = `Send ${amount} DUCO to Nam2010 with memo: "SWAP CC for ${targetUsername}"`;
-            showToast(`✓ Instruction copied! ${instruction}`, false);
-            navigator.clipboard.writeText(instruction);
+            if (!targetUsername) {
+                showToast('Please enter your ChocoHub username', true);
+                return;
+            }
+            try {
+                const res = await fetch('/swap/create_duco_to_cc', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + token
+                    },
+                    body: JSON.stringify({
+                        from_user: user,
+                        amount_duco: amount,
+                        target_username: targetUsername
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    const memo = `Send ${amount} DUCO to Nam2010 with memo: "SWAP CC for ${targetUsername}"`;
+                    showToast(`✓ Request created!`, false);
+                    navigator.clipboard.writeText(memo);
+                    showToast(`✓ Copied: ${memo}`, false);
+                    document.getElementById('amount-input').value = '';
+                    document.getElementById('receiver-input').value = '';
+                    updateEstimate();
+                } else {
+                    showToast(data.message || 'Failed to create request', true);
+                }
+            } catch (err) {
+                showToast('Server error', true);
+            }
         }
         // CC PoC → CC: simulated
         else if (fromValue === 'ccpoc' && toValue === 'cc') {
@@ -574,12 +616,13 @@
         }
     }
 
-    // Initialize custom selects
+    // Expose copyMemo for inline onclick
+    window.copyMemo = copyMemo;
+
     initCustomSelect('from-select', (value) => {
         fromValue = value;
         if (fromValue === 'ccpoc' && toValue === 'duco') {
             toValue = 'cc';
-            // Update to-select trigger
             const toContainer = document.getElementById('to-select');
             const toOption = toContainer.querySelector('.select-option[data-value="cc"]');
             toContainer.querySelector('.select-trigger').innerHTML = toOption.innerHTML;
@@ -602,14 +645,12 @@
         document.getElementById('receiver-input').value = '';
     });
 
-    // Event listeners
     document.getElementById('amount-input').addEventListener('input', updateEstimate);
     document.getElementById('receiver-input').addEventListener('input', () => {
         if (fromValue === 'duco' && toValue === 'cc') updateDucoToCCInfo();
     });
     document.getElementById('swap-btn').addEventListener('click', performSwap);
 
-    // Initial load
     (async () => {
         await fetchBalance();
         if (!localStorage.getItem('choco_user')) {
