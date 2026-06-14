@@ -1,328 +1,322 @@
-import os
-import time
-import requests
-import sqlite3
-import json
-from datetime import datetime
+// separate module from server, so editing will be easier :3
+const express = require('express');
+const rateLimit = require('express-rate-limit');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
+const db = require('../db');
 
-# ========== CONFIG FILE ==========
-CONFIG_FILE = "swap_config.json"
+const router = express.Router();
 
-def load_config():
-    """Load config from file if exists"""
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, 'r') as f:
-                config = json.load(f)
-                print("✅ Loaded config from file")
-                return config
-        except:
-            pass
-    return None
+// Auth 
+const ADMIN_USERS = ['chocoetom', 'Nam2010'];
 
-def save_config(config):
-    """Save config to file"""
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config, f, indent=2)
-    print("💾 Saved config to file")
+function isAdmin(username) {
+    return ADMIN_USERS.includes(username);
+}
 
-def interactive_setup():
-    """Ask user for configuration interactively"""
-    print("\n" + "="*50)
-    print("🔧 FIRST RUN - ENTER CONFIGURATION")
-    print("="*50)
-    
-    config = {}
-    
-    # Server
-    config["RENDER_API_URL"] = input("Server URL [https://chocohub-r011.onrender.com]: ").strip()
-    if not config["RENDER_API_URL"]:
-        config["RENDER_API_URL"] = "https://chocohub-r011.onrender.com"
-    
-    # Admin
-    print("\n--- Admin Info (authenticate with ChocoHub) ---")
-    config["ADMIN_USERNAME"] = input(f"Admin username [chocoetom]: ").strip()
-    if not config["ADMIN_USERNAME"]:
-        config["ADMIN_USERNAME"] = "chocoetom"
-    config["ADMIN_PIN"] = input("Admin PIN: ")
-    
-    # DUCO Faucet
-    print("\n--- DUCO Faucet Info (to send coins) ---")
-    config["DUCO_FAUCET_USERNAME"] = input("DUCO Faucet Username: ").strip()
-    config["DUCO_FAUCET_PASSWORD"] = input("DUCO Faucet Password: ")
-    
-    # Options
-    print("\n--- Options (Press Enter for defaults) ---")
-    memo = input("Memo for transaction [Swap]: ").strip()
-    config["MEMO"] = memo if memo else "Swap"
-    
-    interval = input("Check interval (seconds) [30]: ").strip()
-    config["SLEEP_INTERVAL"] = int(interval) if interval.isdigit() else 30
-    
-    print("\n" + "="*50)
-    print("✅ Configuration complete!")
-    print("="*50)
-    
-    return config
-
-# ========== LOAD OR ENTER CONFIG ==========
-config = load_config()
-if not config:
-    config = interactive_setup()
-    save_config(config)
-
-# ========== CONFIG FROM FILE ==========
-RENDER_API_URL = config.get("RENDER_API_URL")
-ADMIN_USERNAME = config.get("ADMIN_USERNAME")
-ADMIN_PIN = config.get("ADMIN_PIN")
-DUCO_FAUCET_USERNAME = config.get("DUCO_FAUCET_USERNAME")
-DUCO_FAUCET_PASSWORD = config.get("DUCO_FAUCET_PASSWORD")
-MEMO = config.get("MEMO", "Swap")
-SLEEP_INTERVAL = config.get("SLEEP_INTERVAL", 30)
-
-# Cache JWT
-jwt_token = None
-token_expiry = 0
-
-# Cache balance faucet DUCO
-balance_cache = {"balance": None, "last_updated": None, "expiry_seconds": 60}
-
-# Local database to avoid duplicate processing
-DB_FILE = "swap_history.db"
-
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS swap_history
-                 (request_id TEXT PRIMARY KEY,
-                  from_user TEXT,
-                  amount_cc REAL,
-                  swap_type TEXT,
-                  receiver TEXT,
-                  processed_at TIMESTAMP,
-                  txid TEXT)""")
-    conn.commit()
-    conn.close()
-    print("📁 Database initialized")
-
-init_db()
-
-def is_processed(request_id):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT 1 FROM swap_history WHERE request_id = ?", (request_id,))
-    row = c.fetchone()
-    conn.close()
-    return row is not None
-
-def record_processed(request_id, from_user, amount_cc, swap_type, receiver, txid):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("""INSERT OR REPLACE INTO swap_history
-                 (request_id, from_user, amount_cc, swap_type, receiver, processed_at, txid)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)""",
-              (request_id, from_user, amount_cc, swap_type, receiver, datetime.now().isoformat(), txid))
-    conn.commit()
-    conn.close()
-
-# ========== GET ADMIN TOKEN ==========
-def get_admin_token():
-    global jwt_token, token_expiry
-    now = time.time()
-    if jwt_token and now < token_expiry:
-        return jwt_token
-
-    url = f"{RENDER_API_URL}/auth"
-    payload = {"username": ADMIN_USERNAME, "pin": ADMIN_PIN}
-    try:
-        resp = requests.post(url, json=payload, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("status") == "success" and data.get("token"):
-                jwt_token = data["token"]
-                token_expiry = now + 23 * 3600  # 23 hours (token expires in 24h)
-                print(f"🔑 Got token for {ADMIN_USERNAME}")
-                return jwt_token
-        print(f"❌ Authentication failed: {resp.status_code}")
-        if resp.status_code == 401:
-            print("   → Wrong username or PIN. Please run again with correct credentials.")
-            exit(1)
-    except Exception as e:
-        print(f"❌ Connection error: {e}")
-    return None
-
-# ========== API CALLS WITH TOKEN ==========
-def api_call(endpoint, method="GET", data=None):
-    token = get_admin_token()
-    if not token:
-        return None
-    url = f"{RENDER_API_URL}{endpoint}"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    try:
-        if method == "GET":
-            resp = requests.get(url, headers=headers, timeout=15)
-        elif method == "POST":
-            resp = requests.post(url, json=data, headers=headers, timeout=15)
-        elif method == "DELETE":
-            resp = requests.delete(url, headers=headers, timeout=10)
-        else:
-            return None
-        if resp.status_code in (200, 201):
-            return resp.json()
-        print(f"⚠️ API {endpoint} error {resp.status_code}: {resp.text[:200]}")
-    except Exception as e:
-        print(f"⚠️ API connection error: {e}")
-    return None
-
-def get_pending_swaps():
-    data = api_call("/swap/pending", "GET")
-    if data and data.get("status") == "success":
-        return data.get("pending", [])
-    return []
-
-def fulfill_swap(request_id):
-    data = api_call("/swap/fulfill", "POST", {"request_id": request_id})
-    return data and data.get("status") == "success"
-
-# ========== SEND REAL COINS ==========
-def update_faucet_balance():
-    now = time.time()
-    if (balance_cache["balance"] is not None and balance_cache["last_updated"] and
-        now - balance_cache["last_updated"] < balance_cache["expiry_seconds"]):
-        return balance_cache["balance"]
-    try:
-        url = f"https://server.duinocoin.com/users/{DUCO_FAUCET_USERNAME}"
-        resp = requests.get(url, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("success"):
-                balance = data["result"]["balance"]["balance"]
-                balance_cache["balance"] = balance
-                balance_cache["last_updated"] = now
-                print(f"💰 Faucet DUCO balance: {balance:.2f} DUCO")
-                return balance
-    except Exception as e:
-        print(f"⚠️ Error fetching DUCO balance: {e}")
-    return balance_cache["balance"] or 0.0
-
-def send_duco(recipient, amount_cc):
-    """Send DUCO via Duino Coin API, returns (success, txid_or_error)"""
-    amount_duco = amount_cc / 10.0
-    params = {
-        "username": DUCO_FAUCET_USERNAME,
-        "password": DUCO_FAUCET_PASSWORD,
-        "recipient": recipient,
-        "amount": amount_duco,
-        "memo": MEMO
+function verifyToken(req, res, next) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ status: 'error', message: 'Missing or invalid token' });
     }
-    try:
-        resp = requests.get("https://server.duinocoin.com/transaction/", params=params, timeout=15)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("success"):
-                return True, data.get("txid", "unknown")
-            else:
-                return False, data.get("message", "Unknown error")
-        return False, f"HTTP {resp.status_code}"
-    except Exception as e:
-        return False, str(e)
+    const token = authHeader.split(' ')[1];
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+        req.user = decoded;
+        next();
+    } catch (err) {
+        return res.status(403).json({ status: 'error', message: 'Invalid or expired token' });
+    }
+}
 
-def send_ccpoc(receiver, amount_cc):
-    """Integrate with CC PoC API if available. Currently simulated."""
-    amount_poc = amount_cc * 0.75
-    print(f"   [Simulated] Sending {amount_poc} CC PoC to {receiver}")
-    return True, "simulated_txid"
+function verifyAdmin(req, res, next) {
+    if (!req.user) {
+        return res.status(401).json({ status: 'error', message: 'Not authenticated' });
+    }
+    if (!isAdmin(req.user.username)) {
+        return res.status(403).json({ status: 'error', message: 'Admin access required' });
+    }
+    next();
+}
 
-# ========== PROCESS ONE SWAP ==========
-def process_swap(req):
-    rid = req.get("id")
-    from_user = req.get("from_user")
-    amount_cc = req.get("amount_cc")
-    swap_type = req.get("swap_type")
-    receiver = req.get("receiver")
+// Rate Limiter
+const swapLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 5,
+    message: { status: 'error', message: 'Too many swap requests, please slow down.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 
-    if not all([rid, from_user, amount_cc, swap_type, receiver]):
-        print(f"   ⚠️ Request missing info: {req}")
-        return False
+// Persistência em arquivo JSON
+let swapRequests = [];
+const SWAP_FILE = path.join(__dirname, 'swap_requests.json');
 
-    if is_processed(rid):
-        print(f"   ℹ️ Swap {rid} already processed (skipping)")
-        return True
+function loadSwapRequests() {
+    try {
+        if (fs.existsSync(SWAP_FILE)) {
+            const data = JSON.parse(fs.readFileSync(SWAP_FILE, 'utf8'));
+            if (Array.isArray(data)) swapRequests = data;
+            console.log(`📦 Loaded ${swapRequests.length} swap requests from file`);
+        }
+    } catch (e) {
+        console.warn('Could not load swap requests:', e.message);
+    }
+}
 
-    print(f"\n🔹 Swap {rid}: {from_user} -> {amount_cc} CC ({swap_type}) to {receiver}")
+function saveSwapRequests() {
+    try {
+        fs.writeFileSync(SWAP_FILE, JSON.stringify(swapRequests, null, 2));
+    } catch (e) {
+        console.error('Failed to save swap requests:', e.message);
+    }
+}
 
-    if swap_type == "duco":
-        balance = update_faucet_balance()
-        required_duco = amount_cc / 10.0
-        if balance < required_duco:
-            print(f"   ⚠️ Insufficient DUCO: need {required_duco:.2f} DUCO, have {balance:.2f} DUCO")
-            return False
-        success, info = send_duco(receiver, amount_cc)
-        if success:
-            print(f"   ✅ Sent {required_duco:.2f} DUCO, TxID: {info}")
-            record_processed(rid, from_user, amount_cc, swap_type, receiver, info)
-            update_faucet_balance()
-            return True
-        else:
-            print(f"   ❌ DUCO send failed: {info}")
-            return False
+loadSwapRequests();
 
-    elif swap_type == "ccpoc":
-        success, info = send_ccpoc(receiver, amount_cc)
-        if success:
-            print(f"   ✅ Sent CC PoC (simulated), ID: {info}")
-            record_processed(rid, from_user, amount_cc, swap_type, receiver, info)
-            return True
-        else:
-            print(f"   ❌ CC PoC send failed: {info}")
-            return False
-    else:
-        print(f"   ❌ Unsupported swap type: {swap_type}")
-        return False
+// ────────────────────────── HOLDING ACCOUNT SETUP ──────────────────────────
+function ensureHoldingAccount() {
+    const holding = db.getUser('swap_holding');
+    if (!holding) {
+        const randomPin = crypto.randomBytes(16).toString('hex');
+        db.authenticate('swap_holding', randomPin);
+        console.log('🏦 Created swap_holding account with random pin');
+    }
+}
+ensureHoldingAccount();
 
-# ========== MAIN LOOP ==========
-def main():
-    print("\n" + "="*50)
-    print("🚀 SWAP CLIENT - ChocoHub")
-    print("="*50)
-    print(f"📍 Server: {RENDER_API_URL}")
-    print(f"👤 Admin: {ADMIN_USERNAME}")
-    print(f"💾 Config: {CONFIG_FILE}")
-    print(f"⏱️  Interval: {SLEEP_INTERVAL}s")
-    print("="*50 + "\n")
+// Helper: refund CC from holding to user (only when pending swap is deleted)
+function refundUser(request) {
+    if (request.status === 'pending') {
+        const amount = request.amount_cc;
+        db.updateBalance('swap_holding', -amount);
+        db.updateBalance(request.from_user, amount);
+        if (db.addTransaction.length >= 4) {
+            db.addTransaction('swap_holding', request.from_user, amount, `Refund for cancelled swap ${request.id}`);
+        } else {
+            db.addTransaction('swap_holding', request.from_user, amount);
+        }
+        console.log(`💰 Refunded ${amount} CC to ${request.from_user} from holding (swap ${request.id})`);
+    }
+}
 
-    while True:
-        try:
-            swaps = get_pending_swaps()
-            if swaps is None:
-                print("⚠️ Cannot fetch swap list, retrying...")
-                time.sleep(SLEEP_INTERVAL)
-                continue
+// Helper: Mint CC for user (DUCO → CC or CCPoC → CC)
+function mintCCForUser(username, amount, swapId, swapType) {
+    // Tạo CC từ hệ thống (tăng balance user, không lấy từ đâu cả)
+    db.updateBalance(username, amount);
+    if (db.addTransaction.length >= 4) {
+        db.addTransaction('swap_system', username, amount, `${swapType.toUpperCase()} → CC swap (${swapId})`);
+    } else {
+        db.addTransaction('swap_system', username, amount);
+    }
+    console.log(`✨ Minted ${amount} CC to ${username} from ${swapType} swap (${swapId})`);
+    return true;
+}
 
-            if not swaps:
-                print("✅ No pending swaps")
-            else:
-                print(f"📋 Found {len(swaps)} pending swaps")
-                for req in swaps:
-                    success = process_swap(req)
-                    if success:
-                        if fulfill_swap(req["id"]):
-                            print(f"   ✅ Notified server: swap {req['id']} completed")
-                        else:
-                            print(f"   ⚠️ Could not notify server, will retry later")
-                    else:
-                        print(f"   ⏳ Keeping swap {req['id']} for later processing")
-                    time.sleep(2)
+// ─────────────────────────────────  Swap Routes ─────────────────────────────────────────
 
-            print(f"\n⏳ Waiting {SLEEP_INTERVAL} seconds...")
-            time.sleep(SLEEP_INTERVAL)
+// Create swap request
+router.post('/create', verifyToken, swapLimiter, (req, res) => {
+    try {
+        const { from_user, amount_cc, swap_type, receiver } = req.body;
 
-        except KeyboardInterrupt:
-            print("\n🛑 Stopped by user")
-            break
-        except Exception as e:
-            print(f"❌ Loop error: {e}")
-            time.sleep(30)
+        if (req.user.username !== from_user) {
+            return res.status(403).json({ status: 'error', message: 'Unauthorized: username mismatch' });
+        }
 
-if __name__ == "__main__":
-    main()
+        if (!amount_cc || !swap_type || !receiver) {
+            return res.status(400).json({ status: 'error', message: 'Missing required fields' });
+        }
+
+        const amount = parseFloat(amount_cc);
+        if (isNaN(amount) || amount <= 0) {
+            return res.status(400).json({ status: 'error', message: 'Invalid amount' });
+        }
+
+        if (swap_type !== 'duco' && swap_type !== 'ccpoc') {
+            return res.status(400).json({ status: 'error', message: 'Invalid swap type. Must be "duco" or "ccpoc"' });
+        }
+
+        const user = db.getUser(from_user);
+        if (!user) {
+            return res.status(404).json({ status: 'error', message: 'User not found' });
+        }
+
+        if (user.balance < amount) {
+            return res.status(400).json({ status: 'error', message: 'Insufficient CC balance' });
+        }
+
+        // 1. Trừ CC user
+        db.updateBalance(from_user, -amount);
+        // 2. Cộng vào holding
+        db.updateBalance('swap_holding', amount);
+        // 3. Ghi transaction
+        if (db.addTransaction.length >= 4) {
+            db.addTransaction(from_user, 'swap_holding', amount, `Swap escrow to ${swap_type.toUpperCase()} for ${receiver}`);
+        } else {
+            db.addTransaction(from_user, 'swap_holding', amount);
+        }
+
+        const newRequest = {
+            id: Date.now() + '-' + crypto.randomBytes(8).toString('hex'),
+            from_user,
+            amount_cc: amount,
+            swap_type,
+            receiver: receiver.trim(),
+            rate: swap_type === 'duco' ? 10 : 0.75,
+            status: 'pending',
+            created_at: new Date().toISOString()
+        };
+
+        swapRequests.push(newRequest);
+        saveSwapRequests();
+
+        console.log(`🔄 Swap request created: ${newRequest.id} | ${from_user} -> ${amount} CC to ${swap_type} for ${receiver}`);
+
+        res.json({
+            status: 'success',
+            message: `Swap request created. ${amount} CC moved to holding.`,
+            request_id: newRequest.id,
+            new_balance: user.balance - amount
+        });
+    } catch (e) {
+        console.error('Swap create error:', e);
+        res.status(500).json({ status: 'error', message: e.message });
+    }
+});
+
+// List pending swaps
+router.get('/pending', verifyToken, (req, res) => {
+    try {
+        let pending = swapRequests.filter(r => r.status === 'pending');
+        if (!isAdmin(req.user.username)) {
+            pending = pending.filter(r => r.from_user === req.user.username);
+        }
+        res.json({
+            status: 'success',
+            pending,
+            count: pending.length
+        });
+    } catch (e) {
+        res.status(500).json({ status: 'error', message: e.message });
+    }
+});
+
+// Fulfill (complete) a swap - admin only
+router.post('/fulfill', verifyToken, verifyAdmin, (req, res) => {
+    try {
+        const { request_id } = req.body;
+        if (!request_id) {
+            return res.status(400).json({ status: 'error', message: 'Missing request_id' });
+        }
+
+        const reqIndex = swapRequests.findIndex(r => r.id === request_id);
+        if (reqIndex === -1) {
+            return res.status(404).json({ status: 'error', message: 'Swap request not found' });
+        }
+
+        if (swapRequests[reqIndex].status !== 'pending') {
+            return res.status(400).json({ status: 'error', message: 'Swap already processed' });
+        }
+
+        const request = swapRequests[reqIndex];
+        const adminName = req.user.username;
+
+        // ⭐ PHÂN BIỆT LOẠI SWAP
+        if (request.swap_type === 'duco' || request.swap_type === 'ccpoc') {
+            // CASE 1: CC → DUCO / CC → CC PoC
+            // Chuyển CC từ holding sang admin (phí swap)
+            db.updateBalance('swap_holding', -request.amount_cc);
+            db.updateBalance(adminName, request.amount_cc);
+            if (db.addTransaction.length >= 4) {
+                db.addTransaction('swap_holding', adminName, request.amount_cc, `Swap fee from ${request.from_user} (${request.id})`);
+            } else {
+                db.addTransaction('swap_holding', adminName, request.amount_cc);
+            }
+            console.log(`✅ Swap fee: ${request.amount_cc} CC from holding → ${adminName} (${request.swap_type})`);
+        } else {
+            // CASE 2: DUCO → CC hoặc CC PoC → CC (user nhận CC, KHÔNG lấy từ admin)
+            // ⭐ Mint CC từ hệ thống cho user
+            const userReceiveAmount = request.amount_cc; // Số CC user nhận
+            mintCCForUser(request.from_user, userReceiveAmount, request.id, request.swap_type);
+            console.log(`✅ Swap credit: ${userReceiveAmount} CC minted to ${request.from_user} from ${request.swap_type} → CC`);
+        }
+
+        swapRequests[reqIndex].status = 'completed';
+        swapRequests[reqIndex].completed_at = new Date().toISOString();
+        swapRequests[reqIndex].fulfilled_by = adminName;
+        saveSwapRequests();
+
+        res.json({ status: 'success', message: 'Swap completed' });
+    } catch (e) {
+        console.error('Swap fulfill error:', e);
+        res.status(500).json({ status: 'error', message: e.message });
+    }
+});
+
+// Get swap rates (public)
+router.get('/rates', (req, res) => {
+    res.json({
+        status: 'success',
+        rates: {
+            cc_to_duco: 10,
+            cc_to_ccpoc: 0.75,
+            note: '1 DUCO = 10 CC, 1 CC PoC = 0.75 CC'
+        }
+    });
+});
+
+// History for authenticated user
+router.get('/history', verifyToken, (req, res) => {
+    try {
+        const userHistory = swapRequests.filter(r => r.from_user === req.user.username);
+        res.json({
+            status: 'success',
+            history: userHistory,
+            total: userHistory.length
+        });
+    } catch (e) {
+        res.status(500).json({ status: 'error', message: e.message });
+    }
+});
+
+// ───────────────────────── Admin Routes For Swap ─────────────────────────────────────────
+// Get all swaps (admin only)
+router.get('/admin/swaps', verifyToken, verifyAdmin, (req, res) => {
+    try {
+        res.json({
+            status: 'success',
+            swaps: swapRequests,
+            total: swapRequests.length
+        });
+    } catch (e) {
+        res.status(500).json({ status: 'error', message: e.message });
+    }
+});
+
+// Delete a swap by ID (admin only) - refunds if pending
+router.delete('/admin/swaps/:id', verifyToken, verifyAdmin, (req, res) => {
+    try {
+        const id = req.params.id;
+        const index = swapRequests.findIndex(r => r.id === id);
+        if (index === -1) {
+            return res.status(404).json({ status: 'error', message: 'Swap not found' });
+        }
+
+        const request = swapRequests[index];
+        if (request.status === 'pending') {
+            refundUser(request);
+        }
+        swapRequests.splice(index, 1);
+        saveSwapRequests();
+
+        res.json({ status: 'success', message: 'Swap deleted' + (request.status === 'pending' ? ' and user refunded' : '') });
+    } catch (e) {
+        console.error('Swap delete error:', e);
+        res.status(500).json({ status: 'error', message: e.message });
+    }
+});
+
+module.exports = router;
