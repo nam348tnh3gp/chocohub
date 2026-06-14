@@ -260,7 +260,7 @@ def send_ccpoc(receiver, amount_cc):
     print(f"   [Simulated] Sending {amount_poc} CC PoC to {receiver}")
     return True, "simulated_txid"
 
-# ========== CHECK DUCO TRANSACTIONS (FIXED - ĐÚNG CẤU TRÚC API) ==========
+# ========== CHECK DUCO TRANSACTIONS (DÙNG ENDPOINT CHUẨN) ==========
 def check_duco_transactions():
     """Check incoming DUCO transactions to DUCO_RECIPIENT and auto-fulfill pending swaps"""
     processed_txids = load_processed_txids()
@@ -268,7 +268,9 @@ def check_duco_transactions():
     current_time = time.time()
     
     try:
-        url = f"https://server.duinocoin.com/transactions?recipient={DUCO_RECIPIENT}&limit=100"
+        # Sử dụng endpoint chuẩn: /user_transactions/Username?limit=50
+        url = f"https://server.duinocoin.com/user_transactions/{DUCO_RECIPIENT}?limit=100"
+        print(f"🔍 Checking DUCO API: {url}")
         resp = requests.get(url, timeout=15)
         
         if resp.status_code != 200:
@@ -281,37 +283,19 @@ def check_duco_transactions():
             print(f"⚠️ DUCO API error: {data}")
             return
         
-        # API trả về result là một LIST các transaction (theo tài liệu chính thức)
-        result = data.get("result", [])
+        # Endpoint /user_transactions trả về result là LIST các transaction
+        transactions = data.get("result", [])
         
-        # Nếu result là dict (cấu trúc cũ), chuyển đổi sang list
-        if isinstance(result, dict):
-            all_transactions = []
-            for sender, tx_list in result.items():
-                if isinstance(tx_list, list):
-                    for tx in tx_list:
-                        if isinstance(tx, dict):
-                            tx['sender'] = sender
-                            all_transactions.append(tx)
-        elif isinstance(result, list):
-            all_transactions = result
-        else:
-            print(f"⚠️ Unknown result format: {type(result)}")
+        if not isinstance(transactions, list):
+            print(f"⚠️ Unexpected result type: {type(transactions)}")
             return
         
-        if not all_transactions:
-            return
+        # Lọc các giao dịch mà recipient là DUCO_RECIPIENT (giao dịch nhận)
+        incoming_txs = [tx for tx in transactions if tx.get("recipient") == DUCO_RECIPIENT]
         
-        # Lọc giao dịch mới dựa trên datetime
-        new_transactions = []
-        for tx in all_transactions:
-            txid = tx.get("hash")
-            if not txid or txid in processed_txids:
-                continue
-            # Chỉ xử lý giao dịch mới (có thể dùng datetime)
-            new_transactions.append(tx)
+        print(f"📊 Found {len(transactions)} total transactions, {len(incoming_txs)} incoming")
         
-        if not new_transactions:
+        if not incoming_txs:
             return
         
         pending_swaps = get_pending_swaps()
@@ -329,11 +313,16 @@ def check_duco_transactions():
                 target_username = req.get("receiver")
                 expected_memo = f"SWAP CC for {target_username}"
                 pending_by_memo[expected_memo] = req
+                print(f"   Expecting memo: '{expected_memo}' for swap {req['id']}")
         
         any_fulfilled = False
-        for tx in new_transactions:
+        for tx in incoming_txs:
             txid = tx.get("hash")
-            memo = tx.get("memo", "").strip()
+            if not txid or txid in processed_txids:
+                continue
+                
+            memo = tx.get("memo", "").strip().strip('"')
+            print(f"   Checking memo: '{memo}'")
             
             if memo in pending_by_memo:
                 req = pending_by_memo[memo]
@@ -362,7 +351,11 @@ def check_duco_transactions():
                     else:
                         print(f"   ❌ Failed to fulfill swap {req['id']}")
                 else:
-                    print(f"   ⚠️ Amount mismatch for memo {memo}: expected {expected_duco} DUCO, got {amount_duco}")
+                    print(f"   ⚠️ Amount mismatch: expected {expected_duco}, got {amount_duco}")
+            else:
+                # Debug: in ra memo không khớp
+                if "SWAP" in memo:
+                    print(f"   Memo '{memo}' not in pending list")
         
         if any_fulfilled:
             print("💰 Processed DUCO → CC swaps via transaction check")
@@ -372,6 +365,8 @@ def check_duco_transactions():
             
     except Exception as e:
         print(f"⚠️ Error checking DUCO transactions: {e}")
+        import traceback
+        traceback.print_exc()
 
 def process_swap(req):
     rid = req.get("id")
