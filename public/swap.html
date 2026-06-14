@@ -25,7 +25,7 @@
         }
 
         .swap-container {
-            max-width: 550px;
+            max-width: 520px;
             width: 100%;
             background: rgba(20, 20, 35, 0.7);
             backdrop-filter: blur(14px);
@@ -33,7 +33,6 @@
             border-radius: 32px;
             padding: 2rem;
             box-shadow: 0 20px 48px rgba(0, 0, 0, 0.5);
-            transition: all 0.3s ease;
         }
 
         .back-link {
@@ -58,98 +57,71 @@
             display: flex;
             align-items: center;
             gap: 12px;
-            background: linear-gradient(135deg, #f58a00, #ffbf00);
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
         }
         .sub {
             color: #8b8296;
-            margin-bottom: 1.8rem;
+            margin-bottom: 2rem;
             font-size: 0.85rem;
         }
 
-        .balance-card {
-            background: rgba(245, 138, 0, 0.08);
-            border: 1px solid rgba(255, 149, 0, 0.2);
-            border-radius: 20px;
-            padding: 1rem 1.5rem;
-            margin-bottom: 2rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+        .balance-badge {
+            background: rgba(0,0,0,0.5);
+            border-radius: 99px;
+            padding: 10px 18px;
             font-family: 'Space Mono', monospace;
-        }
-        .balance-label {
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: #8b8296;
-        }
-        .balance-value {
-            font-size: 1.2rem;
-            font-weight: 700;
-            color: #f58a00;
+            font-size: 0.9rem;
+            margin-bottom: 2rem;
+            display: inline-block;
+            border: 1px solid rgba(255,149,0,0.3);
         }
 
-        .swap-box {
-            background: rgba(10, 10, 20, 0.5);
+        .swap-card {
+            background: rgba(10,10,20,0.6);
             border-radius: 24px;
             padding: 1.5rem;
             margin-bottom: 1.5rem;
-            border: 1px solid rgba(255, 149, 0, 0.1);
+            border: 1px solid rgba(255,149,0,0.1);
         }
 
-        .swap-arrows {
+        /* Swap direction selector */
+        .swap-direction {
             display: flex;
             align-items: center;
-            justify-content: center;
-            gap: 16px;
+            justify-content: space-between;
+            gap: 12px;
             margin-bottom: 1.5rem;
-        }
-        .coin-select {
-            flex: 1;
-            background: rgba(0, 0, 0, 0.4);
-            border: 1px solid rgba(255, 149, 0, 0.3);
+            background: rgba(0,0,0,0.3);
+            padding: 8px 12px;
             border-radius: 60px;
-            padding: 12px 20px;
-            color: #f58a00;
+        }
+        .direction-option {
+            flex: 1;
+            text-align: center;
+            padding: 10px;
+            border-radius: 40px;
+            cursor: pointer;
             font-weight: 600;
-            font-size: 1rem;
-            cursor: pointer;
-            outline: none;
-            font-family: 'Outfit', sans-serif;
+            transition: all 0.2s;
+            color: #8b8296;
         }
-        .coin-select option {
-            background: #1a1a2a;
-            color: #eee4d8;
+        .direction-option.active {
+            background: #f58a00;
+            color: #0a0a12;
+            box-shadow: 0 0 12px rgba(245,138,0,0.4);
         }
-        .swap-icon {
-            font-size: 1.8rem;
-            cursor: pointer;
-            transition: 0.2s;
-            background: rgba(255, 149, 0, 0.1);
-            width: 48px;
-            height: 48px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 50%;
-        }
-        .swap-icon:hover {
-            background: rgba(255, 149, 0, 0.3);
-            transform: rotate(180deg);
+        .swap-arrow {
+            font-size: 1.2rem;
+            color: #f58a00;
         }
 
-        .rate-badge {
-            text-align: center;
-            background: rgba(245, 138, 0, 0.1);
-            padding: 8px 16px;
-            border-radius: 60px;
-            font-size: 0.8rem;
+        .rate-info {
+            font-size: 0.75rem;
             color: #f58a00;
-            margin-bottom: 1.2rem;
-            font-family: 'Space Mono', monospace;
+            background: rgba(245,138,0,0.1);
+            padding: 6px 12px;
+            border-radius: 99px;
+            display: inline-block;
+            margin-bottom: 1rem;
         }
 
         .input-group {
@@ -163,20 +135,19 @@
             color: #8b8296;
             margin-bottom: 8px;
         }
-        .input-group input {
+        .input-group input, .input-group select {
             width: 100%;
             padding: 14px 18px;
-            background: rgba(0, 0, 0, 0.4);
-            border: 1px solid rgba(255, 149, 0, 0.2);
-            border-radius: 16px;
+            background: rgba(0,0,0,0.4);
+            border: 1px solid rgba(255,149,0,0.2);
+            border-radius: 14px;
             color: #f58a00;
             font-family: 'Space Mono', monospace;
             font-size: 1rem;
             outline: none;
-            transition: 0.2s;
         }
-        .input-group input:focus {
-            border-color: rgba(255, 149, 0, 0.6);
+        .input-group input:focus, .input-group select:focus {
+            border-color: rgba(255,149,0,0.6);
         }
 
         .estimated {
@@ -184,25 +155,33 @@
             text-align: right;
             color: #aaa;
             margin-top: 8px;
-            font-family: 'Space Mono', monospace;
+        }
+
+        .info-box {
+            background: rgba(245,138,0,0.08);
+            border: 1px solid rgba(245,138,0,0.2);
+            border-radius: 16px;
+            padding: 12px 16px;
+            margin: 1rem 0;
+            font-size: 0.8rem;
         }
 
         .swap-btn {
             width: 100%;
-            background: linear-gradient(135deg, #f58a00, #ff7e00);
+            background: #f58a00;
             border: none;
             padding: 14px;
-            border-radius: 60px;
+            border-radius: 14px;
             font-weight: 800;
             font-size: 1rem;
             color: #000;
             cursor: pointer;
             transition: 0.2s;
-            margin-top: 8px;
+            margin-top: 12px;
         }
         .swap-btn:hover {
+            background: #ffb347;
             transform: translateY(-2px);
-            filter: brightness(1.05);
         }
         .swap-btn:disabled {
             opacity: 0.5;
@@ -230,13 +209,8 @@
         }
 
         hr {
-            border-color: rgba(255, 149, 0, 0.1);
+            border-color: rgba(255,149,0,0.1);
             margin: 1rem 0;
-        }
-        .footer-note {
-            font-size: 0.7rem;
-            text-align: center;
-            color: #6a6280;
         }
     </style>
 </head>
@@ -245,76 +219,74 @@
 <div class="swap-container">
     <a href="index.html" class="back-link">← Back to Dashboard</a>
     <h1>🔄 Swap Center</h1>
-    <div class="sub">Convert between CC, DUCO and CC PoC</div>
+    <div class="sub">Convert between CC and DUCO</div>
 
-    <div class="balance-card">
-        <span class="balance-label">Your CC Balance</span>
-        <span class="balance-value" id="wallet-balance">—</span>
-    </div>
+    <div class="balance-badge" id="wallet-balance">💰 Loading CC...</div>
 
-    <div class="swap-box">
-        <div class="swap-arrows">
-            <select id="from-coin" class="coin-select">
-                <option value="cc">🍫 CC (Choco Coin)</option>
-                <option value="duco">⚡ DUCO</option>
-                <option value="ccpoc">🍬 CC PoC</option>
-            </select>
-            <div class="swap-icon" id="swap-icon">⇆</div>
-            <select id="to-coin" class="coin-select">
-                <option value="duco">⚡ DUCO</option>
-                <option value="ccpoc">🍬 CC PoC</option>
-                <option value="cc">🍫 CC (Choco Coin)</option>
-            </select>
+    <div class="swap-card">
+        <!-- Swap direction selector -->
+        <div class="swap-direction">
+            <div class="direction-option" data-dir="cc-to-duco">CC → DUCO</div>
+            <div class="swap-arrow">⇄</div>
+            <div class="direction-option" data-dir="duco-to-cc">DUCO → CC</div>
         </div>
 
-        <div class="rate-badge" id="rate-display">⚡ 10 CC = 1 DUCO</div>
+        <!-- Rate info -->
+        <div class="rate-info" id="rate-info">⚡ Rate: 10 CC = 1 DUCO</div>
 
+        <!-- Amount you send -->
         <div class="input-group">
-            <label>Amount to send</label>
+            <label id="send-label">You send (CC)</label>
             <input type="number" id="send-amount" placeholder="0.00" step="any">
         </div>
-        <div class="estimated" id="receive-estimate">≈ 0.00</div>
 
-        <div class="input-group">
-            <label id="receiver-label">DUCO Username (receiver)</label>
-            <input type="text" id="receiver-addr" placeholder="Enter receiver address or username">
+        <!-- You receive (estimated) -->
+        <div class="estimated" id="receive-estimate">≈ 0 DUCO</div>
+
+        <!-- Receiver info (for CC→DUCO) -->
+        <div class="input-group" id="receiver-group">
+            <label>DUCO username (receiver)</label>
+            <input type="text" id="receiver" placeholder="e.g. chocomaster">
         </div>
 
+        <!-- Info box for DUCO→CC -->
+        <div class="info-box" id="duco-info" style="display: none;">
+            💡 <strong>How to swap DUCO → CC:</strong><br>
+            Send DUCO to <strong id="admin-name">chocoetom</strong> with memo = your username,<br>
+            then click "I have sent" below.
+        </div>
+
+        <!-- Special button for DUCO→CC -->
         <button class="swap-btn" id="swap-btn">Swap Now</button>
     </div>
 
     <hr>
-    <div class="footer-note">
-        ⚡ Swaps are processed instantly. CC is deducted immediately.<br>
-        External coins will be sent by the system gateway.
+    <div style="font-size: 0.7rem; text-align: center; color: #6a6280;">
+        ⚡ For CC → DUCO: CC deducted instantly, DUCO sent by admin.<br>
+        📝 For DUCO → CC: You send DUCO to admin, then receive CC after confirmation.
     </div>
 </div>
 
 <div id="toast" class="toast-msg"></div>
 
 <script>
-    // Rate definitions
-    const RATES = {
-        'cc_to_duco': 10,      // 10 CC = 1 DUCO
-        'cc_to_ccpoc': 0.75,   // 0.75 CC = 1 CC PoC
-        'duco_to_cc': 0.1,     // 1 DUCO = 10 CC (ngược lại)
-        'ccpoc_to_cc': 1.33333 // 1 CC PoC = 0.75 CC (ngược lại 1/0.75)
-    };
-
     let currentUser = null;
     let currentBalance = 0;
+    let currentDirection = 'cc-to-duco'; // 'cc-to-duco' or 'duco-to-cc'
+    const ADMIN_NAMES = ['chocoetom', 'Nam2010'];
 
     function showToast(msg, isError = false) {
         const toast = document.getElementById('toast');
         toast.textContent = msg;
         toast.style.borderColor = isError ? '#fa5252' : '#40c057';
         toast.classList.add('show');
-        setTimeout(() => toast.classList.remove('show'), 3500);
+        setTimeout(() => toast.classList.remove('show'), 4000);
     }
 
     async function fetchBalance() {
         const token = localStorage.getItem('choco_token');
         const user = localStorage.getItem('choco_user');
+        currentUser = user;
         if (!user || !token) return;
         try {
             const res = await fetch('/get_user/' + encodeURIComponent(user), {
@@ -323,161 +295,169 @@
             const data = await res.json();
             if (data && typeof data.balance === 'number') {
                 currentBalance = data.balance;
-                document.getElementById('wallet-balance').innerHTML = `${currentBalance.toFixed(4)} CC`;
+                document.getElementById('wallet-balance').innerHTML = `💰 Balance: ${currentBalance.toFixed(4)} CC`;
             }
         } catch(e) {
             console.warn(e);
         }
     }
 
-    function getRateDisplay(from, to) {
-        if (from === 'cc' && to === 'duco') return '⚡ 10 CC = 1 DUCO';
-        if (from === 'cc' && to === 'ccpoc') return '⚡ 0.75 CC = 1 CC PoC';
-        if (from === 'duco' && to === 'cc') return '⚡ 1 DUCO = 10 CC';
-        if (from === 'ccpoc' && to === 'cc') return '⚡ 1 CC PoC = 0.75 CC';
-        if (from === 'duco' && to === 'ccpoc') return '⚠️ Direct swap not supported → need CC intermediate';
-        if (from === 'ccpoc' && to === 'duco') return '⚠️ Direct swap not supported → need CC intermediate';
-        return '⚡ Rate unavailable';
-    }
+    function updateUIForDirection() {
+        const sendAmount = parseFloat(document.getElementById('send-amount').value) || 0;
+        const rate = 10; // 10 CC = 1 DUCO
+        const rateInfo = document.getElementById('rate-info');
+        const sendLabel = document.getElementById('send-label');
+        const receiveEstimate = document.getElementById('receive-estimate');
+        const receiverGroup = document.getElementById('receiver-group');
+        const ducoInfo = document.getElementById('duco-info');
+        const swapBtn = document.getElementById('swap-btn');
 
-    function getRate(from, to) {
-        const key = `${from}_to_${to}`;
-        return RATES[key] || null;
+        if (currentDirection === 'cc-to-duco') {
+            rateInfo.innerHTML = '⚡ Rate: 10 CC = 1 DUCO';
+            sendLabel.innerHTML = 'You send (CC)';
+            const receiveDuco = sendAmount / rate;
+            receiveEstimate.innerHTML = `≈ ${receiveDuco.toFixed(4)} DUCO (you receive)`;
+            receiverGroup.style.display = 'block';
+            ducoInfo.style.display = 'none';
+            swapBtn.innerHTML = 'Swap CC → DUCO';
+            swapBtn.disabled = false;
+        } else {
+            rateInfo.innerHTML = '⚡ Rate: 1 DUCO = 10 CC';
+            sendLabel.innerHTML = 'You send (DUCO)';
+            const receiveCc = sendAmount * rate;
+            receiveEstimate.innerHTML = `≈ ${receiveCc.toFixed(4)} CC (you receive)`;
+            receiverGroup.style.display = 'none';
+            ducoInfo.style.display = 'block';
+            swapBtn.innerHTML = '✓ I have sent DUCO';
+        }
     }
 
     function updateEstimate() {
-        const fromCoin = document.getElementById('from-coin').value;
-        const toCoin = document.getElementById('to-coin').value;
         const sendAmount = parseFloat(document.getElementById('send-amount').value) || 0;
-
-        let receiveAmount = 0;
-        let rate = getRate(fromCoin, toCoin);
-
-        if (rate !== null) {
-            if (fromCoin === 'cc') {
-                receiveAmount = sendAmount / rate;
-            } else {
-                receiveAmount = sendAmount * rate;
-            }
-        } else {
-            receiveAmount = 0;
-        }
-
-        let receiveUnit = '';
-        if (toCoin === 'cc') receiveUnit = 'CC';
-        else if (toCoin === 'duco') receiveUnit = 'DUCO';
-        else receiveUnit = 'CC PoC';
-
-        document.getElementById('receive-estimate').innerHTML = `≈ ${receiveAmount.toFixed(6)} ${receiveUnit}`;
-        document.getElementById('rate-display').innerHTML = getRateDisplay(fromCoin, toCoin);
+        const rate = 10;
+        const receiveEstimate = document.getElementById('receive-estimate');
         
-        // Update receiver label
-        const receiverLabel = document.getElementById('receiver-label');
-        if (toCoin === 'duco') receiverLabel.innerHTML = 'DUCO Username (receiver)';
-        else if (toCoin === 'ccpoc') receiverLabel.innerHTML = 'CC PoC Wallet Address';
-        else receiverLabel.innerHTML = 'Receiver CC Username';
+        if (currentDirection === 'cc-to-duco') {
+            const receiveDuco = sendAmount / rate;
+            receiveEstimate.innerHTML = `≈ ${receiveDuco.toFixed(4)} DUCO (you receive)`;
+        } else {
+            const receiveCc = sendAmount * rate;
+            receiveEstimate.innerHTML = `≈ ${receiveCc.toFixed(4)} CC (you receive)`;
+        }
     }
 
-    async function performSwap() {
+    async function performSwapCCtoDUCO(amount, receiver) {
         const token = localStorage.getItem('choco_token');
         const user = localStorage.getItem('choco_user');
         if (!user || !token) {
             showToast('Please log in first', true);
             setTimeout(() => window.location.href = 'index.html', 1500);
-            return;
+            return false;
+        }
+        if (!amount || amount <= 0) {
+            showToast('Invalid amount', true);
+            return false;
+        }
+        if (!receiver || receiver.trim() === '') {
+            showToast('Please enter DUCO username', true);
+            return false;
+        }
+        if (amount > currentBalance) {
+            showToast(`Insufficient balance. You have ${currentBalance.toFixed(4)} CC`, true);
+            return false;
         }
 
-        const fromCoin = document.getElementById('from-coin').value;
-        const toCoin = document.getElementById('to-coin').value;
-        const sendAmount = parseFloat(document.getElementById('send-amount').value);
-        const receiver = document.getElementById('receiver-addr').value.trim();
+        const payload = {
+            from_user: user,
+            amount_cc: amount,
+            swap_type: 'duco',
+            receiver: receiver.trim()
+        };
 
-        if (!sendAmount || sendAmount <= 0) {
-            showToast('Please enter a valid amount', true);
-            return;
-        }
-        if (!receiver) {
-            showToast('Please enter receiver info', true);
-            return;
-        }
-
-        // Case 1: CC → external (DUCO / CC PoC)
-        if (fromCoin === 'cc' && (toCoin === 'duco' || toCoin === 'ccpoc')) {
-            if (sendAmount > currentBalance) {
-                showToast(`Insufficient balance. You have ${currentBalance.toFixed(4)} CC`, true);
-                return;
+        try {
+            const res = await fetch('/swap/create', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token
+                },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                showToast(`✓ Swap created! -${amount} CC. DUCO will be sent to ${receiver}`, false);
+                await fetchBalance();
+                document.getElementById('send-amount').value = '';
+                document.getElementById('receiver').value = '';
+                updateEstimate();
+                return true;
+            } else {
+                showToast(data.message || 'Swap failed', true);
+                return false;
             }
-            const swapType = toCoin === 'duco' ? 'duco' : 'ccpoc';
-            const payload = {
-                from_user: user,
-                amount_cc: sendAmount,
-                swap_type: swapType,
-                receiver: receiver
-            };
-            try {
-                const res = await fetch('/swap/create', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    showToast(`Swap request created! -${sendAmount} CC`, false);
-                    await fetchBalance();
-                    document.getElementById('send-amount').value = '';
-                    document.getElementById('receiver-addr').value = '';
-                    updateEstimate();
-                } else {
-                    showToast(data.message || 'Swap failed', true);
-                }
-            } catch (err) {
-                showToast('Server error', true);
-            }
-        }
-        // Case 2: External (DUCO / CC PoC) → CC (receive CC, need to send external coin)
-        else if ((fromCoin === 'duco' || fromCoin === 'ccpoc') && toCoin === 'cc') {
-            showToast('⚠️ This swap type requires you to send external coins first. The system will provide instructions.', true);
-            // Optional: implement reverse swap logic here
-        }
-        else {
-            showToast('Direct swap not supported. Only CC → DUCO/CC PoC is available.', true);
+        } catch (err) {
+            showToast('Server error', true);
+            return false;
         }
     }
 
-    // Event listeners
-    document.getElementById('from-coin').addEventListener('change', () => {
-        const fromVal = document.getElementById('from-coin').value;
-        const toSelect = document.getElementById('to-coin');
-        if (fromVal === 'cc') {
-            toSelect.innerHTML = '<option value="duco">⚡ DUCO</option><option value="ccpoc">🍬 CC PoC</option>';
-        } else if (fromVal === 'duco') {
-            toSelect.innerHTML = '<option value="cc">🍫 CC (Choco Coin)</option>';
-        } else if (fromVal === 'ccpoc') {
-            toSelect.innerHTML = '<option value="cc">🍫 CC (Choco Coin)</option>';
+    function showDucoToCcInstructions() {
+        const amount = parseFloat(document.getElementById('send-amount').value) || 0;
+        if (amount <= 0) {
+            showToast('Please enter DUCO amount first', true);
+            return;
         }
-        updateEstimate();
-    });
-    document.getElementById('to-coin').addEventListener('change', updateEstimate);
-    document.getElementById('send-amount').addEventListener('input', updateEstimate);
-    document.getElementById('swap-icon').addEventListener('click', () => {
-        const fromVal = document.getElementById('from-coin').value;
-        const toVal = document.getElementById('to-coin').value;
-        document.getElementById('from-coin').value = toVal;
-        document.getElementById('to-coin').value = fromVal;
-        document.getElementById('from-coin').dispatchEvent(new Event('change'));
-        updateEstimate();
-    });
-    document.getElementById('swap-btn').addEventListener('click', performSwap);
+        const receiveCc = amount * 10;
+        const adminName = ADMIN_NAMES[0]; // chocoetom
+        const user = localStorage.getItem('choco_user') || 'your_username';
+        
+        showToast(`📤 Send ${amount} DUCO to "${adminName}" with memo: ${user}. You will receive ${receiveCc} CC after confirmation.`, false);
+        
+        // Optional: auto fill memo in clipboard
+        navigator.clipboard.writeText(user).then(() => {
+            console.log('Username copied to clipboard');
+        }).catch(() => {});
+    }
 
-    // Initial load
+    document.getElementById('swap-btn').addEventListener('click', async () => {
+        if (currentDirection === 'cc-to-duco') {
+            const amount = parseFloat(document.getElementById('send-amount').value);
+            const receiver = document.getElementById('receiver').value;
+            await performSwapCCtoDUCO(amount, receiver);
+        } else {
+            // DUCO → CC: show instructions
+            showDucoToCcInstructions();
+        }
+    });
+
+    // Direction selector
+    document.querySelectorAll('.direction-option').forEach(opt => {
+        opt.addEventListener('click', () => {
+            document.querySelectorAll('.direction-option').forEach(o => o.classList.remove('active'));
+            opt.classList.add('active');
+            currentDirection = opt.getAttribute('data-dir');
+            updateUIForDirection();
+            updateEstimate();
+        });
+    });
+
+    document.getElementById('send-amount').addEventListener('input', updateEstimate);
+
+    // Auto set admin name in info box
+    function updateAdminName() {
+        const adminSpan = document.getElementById('admin-name');
+        if (adminSpan) adminSpan.textContent = ADMIN_NAMES[0];
+    }
+
     (async () => {
         await fetchBalance();
+        updateAdminName();
+        updateUIForDirection();
         if (!localStorage.getItem('choco_user')) {
             showToast('Redirecting to login...', true);
             setTimeout(() => window.location.href = 'index.html', 1500);
         }
         setInterval(fetchBalance, 5000);
-        updateEstimate();
     })();
 </script>
 </body>
