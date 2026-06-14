@@ -80,9 +80,8 @@ loadSwapRequests();
 function ensureHoldingAccount() {
     const holding = db.getUser('swap_holding');
     if (!holding) {
-        // Tạo holding account với PIN ngẫu nhiên (không ai đăng nhập được)
         const randomPin = crypto.randomBytes(16).toString('hex');
-        db.authenticate('swap_holding', randomPin); // tự động tạo user
+        db.authenticate('swap_holding', randomPin);
         console.log('🏦 Created swap_holding account with random pin');
     }
 }
@@ -103,9 +102,21 @@ function refundUser(request) {
     }
 }
 
+// Helper: Mint CC from system (for DUCO → CC or CCPoC → CC)
+function mintCCForUser(username, amount, swapId, swapType) {
+    db.updateBalance(username, amount);
+    if (db.addTransaction.length >= 4) {
+        db.addTransaction('swap_system', username, amount, `${swapType.toUpperCase()} → CC swap (${swapId})`);
+    } else {
+        db.addTransaction('swap_system', username, amount);
+    }
+    console.log(`✨ Minted ${amount} CC to ${username} from ${swapType} swap (${swapId})`);
+    return true;
+}
+
 // ─────────────────────────────────  Swap Routes ─────────────────────────────────────────
 
-// Create swap request
+// 1. CC → DUCO / CC → CC PoC
 router.post('/create', verifyToken, swapLimiter, (req, res) => {
     try {
         const { from_user, amount_cc, swap_type, receiver } = req.body;
@@ -136,11 +147,9 @@ router.post('/create', verifyToken, swapLimiter, (req, res) => {
             return res.status(400).json({ status: 'error', message: 'Insufficient CC balance' });
         }
 
-        // 1. Trừ CC user
+        // Trừ CC user -> holding
         db.updateBalance(from_user, -amount);
-        // 2. Cộng vào holding
         db.updateBalance('swap_holding', amount);
-        // 3. Ghi transaction
         if (db.addTransaction.length >= 4) {
             db.addTransaction(from_user, 'swap_holding', amount, `Swap escrow to ${swap_type.toUpperCase()} for ${receiver}`);
         } else {
@@ -171,6 +180,57 @@ router.post('/create', verifyToken, swapLimiter, (req, res) => {
         });
     } catch (e) {
         console.error('Swap create error:', e);
+        res.status(500).json({ status: 'error', message: e.message });
+    }
+});
+
+// 2. DUCO → CC (tạo request, KHÔNG trừ CC user)
+router.post('/create_duco_to_cc', verifyToken, swapLimiter, (req, res) => {
+    try {
+        const { from_user, amount_duco, target_username } = req.body;
+
+        if (req.user.username !== from_user) {
+            return res.status(403).json({ status: 'error', message: 'Unauthorized: username mismatch' });
+        }
+
+        if (!amount_duco || !target_username) {
+            return res.status(400).json({ status: 'error', message: 'Missing required fields' });
+        }
+
+        const amount = parseFloat(amount_duco);
+        if (isNaN(amount) || amount <= 0) {
+            return res.status(400).json({ status: 'error', message: 'Invalid amount' });
+        }
+
+        const user = db.getUser(from_user);
+        if (!user) {
+            return res.status(404).json({ status: 'error', message: 'User not found' });
+        }
+
+        // KHÔNG trừ CC user
+        const newRequest = {
+            id: Date.now() + '-' + crypto.randomBytes(8).toString('hex'),
+            from_user,
+            amount_cc: amount * 10,  // Số CC sẽ nhận
+            amount_duco: amount,
+            swap_type: 'duco_to_cc',
+            receiver: target_username.trim(),
+            status: 'pending',
+            created_at: new Date().toISOString()
+        };
+
+        swapRequests.push(newRequest);
+        saveSwapRequests();
+
+        console.log(`🔄 DUCO→CC request created: ${newRequest.id} | ${from_user} -> ${amount} DUCO to CC for ${target_username}`);
+
+        res.json({
+            status: 'success',
+            message: `DUCO→CC request created. Send ${amount} DUCO to Nam2010 with memo: "SWAP CC for ${target_username}"`,
+            request_id: newRequest.id
+        });
+    } catch (e) {
+        console.error('DUCO→CC create error:', e);
         res.status(500).json({ status: 'error', message: e.message });
     }
 });
@@ -210,15 +270,24 @@ router.post('/fulfill', verifyToken, verifyAdmin, (req, res) => {
         }
 
         const request = swapRequests[reqIndex];
-        const adminName = req.user.username; // admin thực hiện fulfill
+        const adminName = req.user.username;
 
-        // Chuyển CC từ holding sang admin
-        db.updateBalance('swap_holding', -request.amount_cc);
-        db.updateBalance(adminName, request.amount_cc);
-        if (db.addTransaction.length >= 4) {
-            db.addTransaction('swap_holding', adminName, request.amount_cc, `Swap fee from ${request.from_user} (${request.id})`);
+        if (request.swap_type === 'duco' || request.swap_type === 'ccpoc') {
+            // CC → DUCO / CC → CC PoC: chuyển CC từ holding sang admin
+            db.updateBalance('swap_holding', -request.amount_cc);
+            db.updateBalance(adminName, request.amount_cc);
+            if (db.addTransaction.length >= 4) {
+                db.addTransaction('swap_holding', adminName, request.amount_cc, `Swap fee from ${request.from_user} (${request.id})`);
+            } else {
+                db.addTransaction('swap_holding', adminName, request.amount_cc);
+            }
+            console.log(`✅ Swap fee: ${request.amount_cc} CC from holding → ${adminName} (${request.swap_type})`);
+        } else if (request.swap_type === 'duco_to_cc') {
+            // DUCO → CC: mint CC mới cho user
+            mintCCForUser(request.receiver, request.amount_cc, request.id, 'DUCO');
+            console.log(`✅ Minted ${request.amount_cc} CC to ${request.receiver} from DUCO→CC swap`);
         } else {
-            db.addTransaction('swap_holding', adminName, request.amount_cc);
+            return res.status(400).json({ status: 'error', message: 'Unknown swap type' });
         }
 
         swapRequests[reqIndex].status = 'completed';
@@ -226,8 +295,7 @@ router.post('/fulfill', verifyToken, verifyAdmin, (req, res) => {
         swapRequests[reqIndex].fulfilled_by = adminName;
         saveSwapRequests();
 
-        console.log(`✅ Swap fulfilled by ${adminName}: ${request_id} | ${request.amount_cc} CC transferred to admin`);
-        res.json({ status: 'success', message: 'Swap completed and CC sent to admin' });
+        res.json({ status: 'success', message: 'Swap completed' });
     } catch (e) {
         console.error('Swap fulfill error:', e);
         res.status(500).json({ status: 'error', message: e.message });
@@ -284,13 +352,16 @@ router.delete('/admin/swaps/:id', verifyToken, verifyAdmin, (req, res) => {
         }
 
         const request = swapRequests[index];
-        if (request.status === 'pending') {
+        if (request.status === 'pending' && (request.swap_type === 'duco' || request.swap_type === 'ccpoc')) {
             refundUser(request);
+        } else if (request.status === 'pending' && request.swap_type === 'duco_to_cc') {
+            // DUCO → CC: không refund vì user chưa bị trừ CC
+            console.log(`🗑️ Deleted DUCO→CC request ${id} (no refund needed)`);
         }
         swapRequests.splice(index, 1);
         saveSwapRequests();
 
-        res.json({ status: 'success', message: 'Swap deleted' + (request.status === 'pending' ? ' and user refunded' : '') });
+        res.json({ status: 'success', message: 'Swap deleted' });
     } catch (e) {
         console.error('Swap delete error:', e);
         res.status(500).json({ status: 'error', message: e.message });
