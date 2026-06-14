@@ -456,15 +456,15 @@
         const infoNote = document.getElementById('info-note');
         
         if (amount > 0) {
-            infoNote.innerHTML = `📤 Send ${amount} DUCO to Nam2010 with memo: "SWAP CC for ${targetUsername}"<br>After confirmation, ${ccAmount} CC will be credited to <strong>${targetUsername}</strong>.
-            <span class="copy-btn" onclick="copyMemo('${amount}', '${targetUsername}')">📋 Copy Memo</span>`;
+            infoNote.innerHTML = `📤 Send ${amount} DUCO to Nam2010 with memo: "<strong>SWAP CC for ${targetUsername}</strong>"<br>After confirmation, ${ccAmount} CC will be credited to <strong>${targetUsername}</strong>.
+            <span class="copy-btn" onclick="copyMemo('${targetUsername}')">📋 Copy Memo</span>`;
         } else {
             infoNote.innerHTML = `📤 Enter amount above to see instruction.`;
         }
     }
 
-    function copyMemo(amount, username) {
-        const memo = `Send ${amount} DUCO to Nam2010 with memo: "SWAP CC for ${username}"`;
+    function copyMemo(username) {
+        const memo = `SWAP CC for ${username}`;
         navigator.clipboard.writeText(memo);
         showToast(`✓ Copied: ${memo}`, false);
     }
@@ -593,7 +593,7 @@
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
-                    const memo = `Send ${amount} DUCO to Nam2010 with memo: "SWAP CC for ${targetUsername}"`;
+                    const memo = `SWAP CC for ${targetUsername}`;
                     showToast(`✓ Request created!`, false);
                     navigator.clipboard.writeText(memo);
                     showToast(`✓ Copied: ${memo}`, false);
@@ -616,7 +616,6 @@
         }
     }
 
-    // Expose copyMemo for inline onclick
     window.copyMemo = copyMemo;
 
     initCustomSelect('from-select', (value) => {
