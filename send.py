@@ -97,6 +97,7 @@ balance_cache = {"balance": None, "last_updated": None, "expiry_seconds": 60}
 # Local database
 DB_FILE = "swap_history.db"
 DUCO_TX_FILE = "duco_processed.json"
+LAST_CHECK_FILE = "last_check.json"
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -142,6 +143,19 @@ def load_processed_txids():
 def save_processed_txids(txids):
     with open(DUCO_TX_FILE, 'w') as f:
         json.dump(list(txids), f)
+
+def load_last_check():
+    if os.path.exists(LAST_CHECK_FILE):
+        try:
+            with open(LAST_CHECK_FILE, 'r') as f:
+                return json.load(f).get("last_timestamp", 0)
+        except:
+            pass
+    return 0
+
+def save_last_check(timestamp):
+    with open(LAST_CHECK_FILE, 'w') as f:
+        json.dump({"last_timestamp": timestamp}, f)
 
 def get_admin_token():
     global jwt_token, token_expiry
@@ -246,12 +260,15 @@ def send_ccpoc(receiver, amount_cc):
     print(f"   [Simulated] Sending {amount_poc} CC PoC to {receiver}")
     return True, "simulated_txid"
 
-# ========== CHECK DUCO TRANSACTIONS (FIXED) ==========
+# ========== CHECK DUCO TRANSACTIONS (FIXED - ĐÚNG CẤU TRÚC API) ==========
 def check_duco_transactions():
     """Check incoming DUCO transactions to DUCO_RECIPIENT and auto-fulfill pending swaps"""
     processed_txids = load_processed_txids()
+    last_check = load_last_check()
+    current_time = time.time()
+    
     try:
-        url = f"https://server.duinocoin.com/transactions?recipient={DUCO_RECIPIENT}&limit=30"
+        url = f"https://server.duinocoin.com/transactions?recipient={DUCO_RECIPIENT}&limit=100"
         resp = requests.get(url, timeout=15)
         
         if resp.status_code != 200:
@@ -260,30 +277,46 @@ def check_duco_transactions():
         
         data = resp.json()
         
-        # Kiểm tra cấu trúc dữ liệu theo API Duino-Coin
         if not data.get("success"):
             print(f"⚠️ DUCO API error: {data}")
             return
         
-        # API trả về result là dict với key là sender, value là list transactions
-        result = data.get("result", {})
-        if not result:
-            return
+        # API trả về result là một LIST các transaction (theo tài liệu chính thức)
+        result = data.get("result", [])
         
-        # Gom tất cả transactions vào một list
-        all_transactions = []
-        for sender, tx_list in result.items():
-            if isinstance(tx_list, list):
-                for tx in tx_list:
-                    if isinstance(tx, dict):
-                        tx['sender'] = sender
-                        all_transactions.append(tx)
+        # Nếu result là dict (cấu trúc cũ), chuyển đổi sang list
+        if isinstance(result, dict):
+            all_transactions = []
+            for sender, tx_list in result.items():
+                if isinstance(tx_list, list):
+                    for tx in tx_list:
+                        if isinstance(tx, dict):
+                            tx['sender'] = sender
+                            all_transactions.append(tx)
+        elif isinstance(result, list):
+            all_transactions = result
+        else:
+            print(f"⚠️ Unknown result format: {type(result)}")
+            return
         
         if not all_transactions:
             return
         
+        # Lọc giao dịch mới dựa trên datetime
+        new_transactions = []
+        for tx in all_transactions:
+            txid = tx.get("hash")
+            if not txid or txid in processed_txids:
+                continue
+            # Chỉ xử lý giao dịch mới (có thể dùng datetime)
+            new_transactions.append(tx)
+        
+        if not new_transactions:
+            return
+        
         pending_swaps = get_pending_swaps()
         if not pending_swaps:
+            save_last_check(current_time)
             return
         
         # Map memo to swap request
@@ -298,12 +331,10 @@ def check_duco_transactions():
                 pending_by_memo[expected_memo] = req
         
         any_fulfilled = False
-        for tx in all_transactions:
+        for tx in new_transactions:
             txid = tx.get("hash")
-            if not txid or txid in processed_txids:
-                continue
-                
             memo = tx.get("memo", "").strip()
+            
             if memo in pending_by_memo:
                 req = pending_by_memo[memo]
                 amount_duco = float(tx.get("amount", 0))
@@ -318,8 +349,8 @@ def check_duco_transactions():
                     print(f"   Sender: {tx.get('sender', 'unknown')}")
                     print(f"   Amount: {amount_duco} DUCO")
                     print(f"   Memo: {memo}")
+                    print(f"   Datetime: {tx.get('datetime', 'unknown')}")
                     print(f"   Swap ID: {req['id']}")
-                    print(f"   Type: {req.get('swap_type')}")
                     
                     if fulfill_swap(req["id"]):
                         print(f"   ✅ Auto-fulfilled DUCO → CC swap for {req['from_user']}")
@@ -335,6 +366,9 @@ def check_duco_transactions():
         
         if any_fulfilled:
             print("💰 Processed DUCO → CC swaps via transaction check")
+        
+        # Cập nhật thời gian check cuối
+        save_last_check(current_time)
             
     except Exception as e:
         print(f"⚠️ Error checking DUCO transactions: {e}")
