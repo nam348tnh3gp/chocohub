@@ -30,7 +30,7 @@
             background: rgba(20, 20, 35, 0.7);
             backdrop-filter: blur(14px);
             border: 1px solid rgba(255, 149, 0, 0.18);
-            border-radius: 32px;
+            border-radius: 28px;
             padding: 2rem;
             box-shadow: 0 20px 48px rgba(0, 0, 0, 0.5);
         }
@@ -67,7 +67,7 @@
         .balance-badge {
             background: rgba(0,0,0,0.5);
             border-radius: 99px;
-            padding: 10px 18px;
+            padding: 8px 16px;
             font-family: 'Space Mono', monospace;
             font-size: 0.9rem;
             margin-bottom: 2rem;
@@ -77,51 +77,44 @@
 
         .swap-card {
             background: rgba(10,10,20,0.6);
-            border-radius: 24px;
+            border-radius: 20px;
             padding: 1.5rem;
             margin-bottom: 1.5rem;
             border: 1px solid rgba(255,149,0,0.1);
         }
 
-        /* Swap direction selector */
-        .swap-direction {
+        .select-row {
             display: flex;
-            align-items: center;
-            justify-content: space-between;
             gap: 12px;
             margin-bottom: 1.5rem;
-            background: rgba(0,0,0,0.3);
-            padding: 8px 12px;
-            border-radius: 60px;
+            flex-wrap: wrap;
         }
-        .direction-option {
+        .select-box {
             flex: 1;
-            text-align: center;
-            padding: 10px;
-            border-radius: 40px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: all 0.2s;
+        }
+        .select-box label {
+            display: block;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
             color: #8b8296;
+            margin-bottom: 6px;
         }
-        .direction-option.active {
-            background: #f58a00;
-            color: #0a0a12;
-            box-shadow: 0 0 12px rgba(245,138,0,0.4);
-        }
-        .swap-arrow {
-            font-size: 1.2rem;
+        .coin-select {
+            width: 100%;
+            background: rgba(0,0,0,0.4);
+            border: 1px solid rgba(255,149,0,0.2);
+            border-radius: 14px;
+            padding: 12px 14px;
             color: #f58a00;
+            font-family: 'Space Mono', monospace;
+            font-size: 1rem;
+            cursor: pointer;
+            outline: none;
         }
-
-        .rate-info {
-            font-size: 0.75rem;
-            color: #f58a00;
-            background: rgba(245,138,0,0.1);
-            padding: 6px 12px;
-            border-radius: 99px;
-            display: inline-block;
-            margin-bottom: 1rem;
+        .coin-select option {
+            background: #1a1a2a;
+            color: #eee4d8;
         }
 
         .input-group {
@@ -135,7 +128,7 @@
             color: #8b8296;
             margin-bottom: 8px;
         }
-        .input-group input, .input-group select {
+        .input-group input {
             width: 100%;
             padding: 14px 18px;
             background: rgba(0,0,0,0.4);
@@ -146,24 +139,18 @@
             font-size: 1rem;
             outline: none;
         }
-        .input-group input:focus, .input-group select:focus {
+        .input-group input:focus {
             border-color: rgba(255,149,0,0.6);
         }
 
-        .estimated {
-            font-size: 0.85rem;
-            text-align: right;
-            color: #aaa;
-            margin-top: 8px;
-        }
-
-        .info-box {
+        .info-note {
             background: rgba(245,138,0,0.08);
-            border: 1px solid rgba(245,138,0,0.2);
-            border-radius: 16px;
-            padding: 12px 16px;
-            margin: 1rem 0;
-            font-size: 0.8rem;
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            color: #ffb347;
+            margin: 12px 0;
+            text-align: center;
         }
 
         .swap-btn {
@@ -203,6 +190,8 @@
             transition: 0.2s;
             pointer-events: none;
             z-index: 1000;
+            text-align: center;
+            max-width: 90vw;
         }
         .toast-msg.show {
             opacity: 1;
@@ -212,68 +201,104 @@
             border-color: rgba(255,149,0,0.1);
             margin: 1rem 0;
         }
+
+        .rate-badge {
+            font-size: 0.75rem;
+            color: #f58a00;
+            background: rgba(245,138,0,0.1);
+            padding: 6px 12px;
+            border-radius: 99px;
+            display: inline-block;
+            margin-bottom: 1rem;
+        }
+
+        @media (max-width: 480px) {
+            .swap-container { padding: 1.5rem; }
+            .select-row { flex-direction: column; }
+        }
     </style>
 </head>
 <body>
 
 <div class="swap-container">
     <a href="index.html" class="back-link">← Back to Dashboard</a>
-    <h1>🔄 Swap Center</h1>
-    <div class="sub">Convert between CC and DUCO</div>
+    <h1>
+        <span>🔄</span> Swap Center
+    </h1>
+    <div class="sub">Convert between CC, DUCO and CC PoC</div>
 
     <div class="balance-badge" id="wallet-balance">💰 Loading CC...</div>
 
+    <!-- Swap Form -->
     <div class="swap-card">
-        <!-- Swap direction selector -->
-        <div class="swap-direction">
-            <div class="direction-option" data-dir="cc-to-duco">CC → DUCO</div>
-            <div class="swap-arrow">⇄</div>
-            <div class="direction-option" data-dir="duco-to-cc">DUCO → CC</div>
+        <div class="select-row">
+            <div class="select-box">
+                <label>From (You pay)</label>
+                <select id="from-coin" class="coin-select">
+                    <option value="cc">🍫 CC (Choco Coin)</option>
+                    <option value="duco">🪙 DUCO (Duino Coin)</option>
+                    <option value="ccpoc">🍫 CC PoC</option>
+                </select>
+            </div>
+            <div class="select-box">
+                <label>To (You receive)</label>
+                <select id="to-coin" class="coin-select">
+                    <option value="duco">🪙 DUCO (Duino Coin)</option>
+                    <option value="cc">🍫 CC (Choco Coin)</option>
+                    <option value="ccpoc">🍫 CC PoC</option>
+                </select>
+            </div>
         </div>
 
-        <!-- Rate info -->
-        <div class="rate-info" id="rate-info">⚡ Rate: 10 CC = 1 DUCO</div>
+        <div class="rate-badge" id="rate-display">⚡ Rate: 10 CC = 1 DUCO</div>
 
-        <!-- Amount you send -->
         <div class="input-group">
-            <label id="send-label">You send (CC)</label>
-            <input type="number" id="send-amount" placeholder="0.00" step="any">
+            <label id="amount-label">Amount (CC)</label>
+            <input type="number" id="amount-input" placeholder="0.00" step="any">
         </div>
 
-        <!-- You receive (estimated) -->
-        <div class="estimated" id="receive-estimate">≈ 0 DUCO</div>
-
-        <!-- Receiver info (for CC→DUCO) -->
-        <div class="input-group" id="receiver-group">
-            <label>DUCO username (receiver)</label>
-            <input type="text" id="receiver" placeholder="e.g. chocomaster">
+        <div class="input-group" id="receiver-group" style="display: none;">
+            <label id="receiver-label">Receiver</label>
+            <input type="text" id="receiver-input" placeholder="Enter username or address">
         </div>
 
-        <!-- Info box for DUCO→CC -->
-        <div class="info-box" id="duco-info" style="display: none;">
-            💡 <strong>How to swap DUCO → CC:</strong><br>
-            Send DUCO to <strong id="admin-name">chocoetom</strong> with memo = your username,<br>
-            then click "I have sent" below.
+        <div class="info-note" id="info-note">
+            💡 You will pay from your CC balance
         </div>
 
-        <!-- Special button for DUCO→CC -->
-        <button class="swap-btn" id="swap-btn">Swap Now</button>
+        <div class="estimated" id="estimate-display" style="text-align: right; font-size: 0.85rem; color: #aaa; margin-top: 8px;">
+            ≈ 0.00
+        </div>
+
+        <button class="swap-btn" id="swap-btn">Swap</button>
     </div>
 
     <hr>
     <div style="font-size: 0.7rem; text-align: center; color: #6a6280;">
-        ⚡ For CC → DUCO: CC deducted instantly, DUCO sent by admin.<br>
-        📝 For DUCO → CC: You send DUCO to admin, then receive CC after confirmation.
+        ⚡ CC swaps are processed instantly.<br>
+        🔄 DUCO → CC: Send DUCO to <strong style="color:#f58a00">Nam2010</strong>, then your CC will be credited.<br>
+        📦 All swaps are recorded for safety.
     </div>
 </div>
 
 <div id="toast" class="toast-msg"></div>
 
 <script>
+    // Coin rate mapping (1 unit of FROM → TO)
+    const rates = {
+        cc: { duco: 1/10, ccpoc: 1/0.75, cc: 1 },
+        duco: { cc: 10, ccpoc: 10 / 0.75, duco: 1 },
+        ccpoc: { cc: 0.75, duco: 0.75 / 10, ccpoc: 1 }
+    };
+
+    const coinNames = {
+        cc: 'CC (Choco Coin)',
+        duco: 'DUCO (Duino Coin)',
+        ccpoc: 'CC PoC'
+    };
+
     let currentUser = null;
     let currentBalance = 0;
-    let currentDirection = 'cc-to-duco'; // 'cc-to-duco' or 'duco-to-cc'
-    const ADMIN_NAMES = ['chocoetom', 'Nam2010'];
 
     function showToast(msg, isError = false) {
         const toast = document.getElementById('toast');
@@ -302,161 +327,170 @@
         }
     }
 
-    function updateUIForDirection() {
-        const sendAmount = parseFloat(document.getElementById('send-amount').value) || 0;
-        const rate = 10; // 10 CC = 1 DUCO
-        const rateInfo = document.getElementById('rate-info');
-        const sendLabel = document.getElementById('send-label');
-        const receiveEstimate = document.getElementById('receive-estimate');
-        const receiverGroup = document.getElementById('receiver-group');
-        const ducoInfo = document.getElementById('duco-info');
-        const swapBtn = document.getElementById('swap-btn');
+    function updateRateDisplay() {
+        const from = document.getElementById('from-coin').value;
+        const to = document.getElementById('to-coin').value;
+        let rateText = '';
+        if (from === 'cc' && to === 'duco') rateText = '⚡ Rate: 10 CC = 1 DUCO';
+        else if (from === 'cc' && to === 'ccpoc') rateText = '⚡ Rate: 0.75 CC = 1 CC PoC';
+        else if (from === 'duco' && to === 'cc') rateText = '⚡ Rate: 1 DUCO = 10 CC';
+        else if (from === 'duco' && to === 'ccpoc') rateText = '⚡ Rate: 1 DUCO = 13.33 CC PoC';
+        else if (from === 'ccpoc' && to === 'cc') rateText = '⚡ Rate: 1 CC PoC = 0.75 CC';
+        else if (from === 'ccpoc' && to === 'duco') rateText = '⚡ Rate: 1 CC PoC = 0.075 DUCO';
+        else rateText = '⚡ Rate: 1:1';
+        document.getElementById('rate-display').innerHTML = rateText;
 
-        if (currentDirection === 'cc-to-duco') {
-            rateInfo.innerHTML = '⚡ Rate: 10 CC = 1 DUCO';
-            sendLabel.innerHTML = 'You send (CC)';
-            const receiveDuco = sendAmount / rate;
-            receiveEstimate.innerHTML = `≈ ${receiveDuco.toFixed(4)} DUCO (you receive)`;
+        const amountLabel = document.getElementById('amount-label');
+        amountLabel.innerHTML = `Amount (${coinNames[from]})`;
+
+        const receiverGroup = document.getElementById('receiver-group');
+        const infoNote = document.getElementById('info-note');
+
+        if (from === 'cc') {
             receiverGroup.style.display = 'block';
-            ducoInfo.style.display = 'none';
-            swapBtn.innerHTML = 'Swap CC → DUCO';
-            swapBtn.disabled = false;
+            if (to === 'duco') {
+                document.getElementById('receiver-label').innerHTML = 'DUCO Username (receiver)';
+                document.getElementById('receiver-input').placeholder = 'e.g. chocomaster';
+                infoNote.innerHTML = '💡 You pay from CC balance. Server will send DUCO to receiver.';
+            } else if (to === 'ccpoc') {
+                document.getElementById('receiver-label').innerHTML = 'CC PoC Wallet Address';
+                document.getElementById('receiver-input').placeholder = '0x... or wallet address';
+                infoNote.innerHTML = '💡 You pay from CC balance. Server will send CC PoC to receiver.';
+            } else {
+                receiverGroup.style.display = 'none';
+                infoNote.innerHTML = '💡 You pay from CC balance and receive CC directly.';
+            }
+        } else if (from === 'duco' && to === 'cc') {
+            receiverGroup.style.display = 'block';
+            document.getElementById('receiver-label').innerHTML = 'Your username (to receive CC)';
+            document.getElementById('receiver-input').placeholder = 'Your ChocoHub username';
+            const amount = document.getElementById('amount-input').value || '0';
+            infoNote.innerHTML = `📤 <strong>Send ${amount} DUCO to Nam2010</strong> with memo: "SWAP CC for ${currentUser || 'YOUR_USERNAME'}"<br>After confirmation, ${(parseFloat(amount) * 10).toFixed(4)} CC will be credited to ${currentUser || 'your account'}.`;
+        } else if (from === 'ccpoc' && to === 'cc') {
+            receiverGroup.style.display = 'block';
+            document.getElementById('receiver-label').innerHTML = 'Your username (to receive CC)';
+            document.getElementById('receiver-input').placeholder = 'Your ChocoHub username';
+            infoNote.innerHTML = '💡 Simulated swap. Admin will handle CC PoC → CC manually.';
         } else {
-            rateInfo.innerHTML = '⚡ Rate: 1 DUCO = 10 CC';
-            sendLabel.innerHTML = 'You send (DUCO)';
-            const receiveCc = sendAmount * rate;
-            receiveEstimate.innerHTML = `≈ ${receiveCc.toFixed(4)} CC (you receive)`;
             receiverGroup.style.display = 'none';
-            ducoInfo.style.display = 'block';
-            swapBtn.innerHTML = '✓ I have sent DUCO';
+            infoNote.innerHTML = '💡 Please select a valid swap pair.';
         }
     }
 
     function updateEstimate() {
-        const sendAmount = parseFloat(document.getElementById('send-amount').value) || 0;
-        const rate = 10;
-        const receiveEstimate = document.getElementById('receive-estimate');
-        
-        if (currentDirection === 'cc-to-duco') {
-            const receiveDuco = sendAmount / rate;
-            receiveEstimate.innerHTML = `≈ ${receiveDuco.toFixed(4)} DUCO (you receive)`;
-        } else {
-            const receiveCc = sendAmount * rate;
-            receiveEstimate.innerHTML = `≈ ${receiveCc.toFixed(4)} CC (you receive)`;
-        }
+        const from = document.getElementById('from-coin').value;
+        const to = document.getElementById('to-coin').value;
+        const amount = parseFloat(document.getElementById('amount-input').value) || 0;
+        const rate = rates[from]?.[to] || 1;
+        const result = amount * rate;
+        const estimateEl = document.getElementById('estimate-display');
+        if (to === 'duco') estimateEl.innerHTML = `≈ ${result.toFixed(6)} DUCO`;
+        else if (to === 'ccpoc') estimateEl.innerHTML = `≈ ${result.toFixed(6)} CC PoC`;
+        else estimateEl.innerHTML = `≈ ${result.toFixed(4)} ${coinNames[to]}`;
     }
 
-    async function performSwapCCtoDUCO(amount, receiver) {
+    async function performSwap() {
+        const from = document.getElementById('from-coin').value;
+        const to = document.getElementById('to-coin').value;
+        const amount = parseFloat(document.getElementById('amount-input').value);
+        const receiver = document.getElementById('receiver-input').value.trim();
         const token = localStorage.getItem('choco_token');
         const user = localStorage.getItem('choco_user');
+
         if (!user || !token) {
             showToast('Please log in first', true);
             setTimeout(() => window.location.href = 'index.html', 1500);
-            return false;
-        }
-        if (!amount || amount <= 0) {
-            showToast('Invalid amount', true);
-            return false;
-        }
-        if (!receiver || receiver.trim() === '') {
-            showToast('Please enter DUCO username', true);
-            return false;
-        }
-        if (amount > currentBalance) {
-            showToast(`Insufficient balance. You have ${currentBalance.toFixed(4)} CC`, true);
-            return false;
-        }
-
-        const payload = {
-            from_user: user,
-            amount_cc: amount,
-            swap_type: 'duco',
-            receiver: receiver.trim()
-        };
-
-        try {
-            const res = await fetch('/swap/create', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + token
-                },
-                body: JSON.stringify(payload)
-            });
-            const data = await res.json();
-            if (data.status === 'success') {
-                showToast(`✓ Swap created! -${amount} CC. DUCO will be sent to ${receiver}`, false);
-                await fetchBalance();
-                document.getElementById('send-amount').value = '';
-                document.getElementById('receiver').value = '';
-                updateEstimate();
-                return true;
-            } else {
-                showToast(data.message || 'Swap failed', true);
-                return false;
-            }
-        } catch (err) {
-            showToast('Server error', true);
-            return false;
-        }
-    }
-
-    function showDucoToCcInstructions() {
-        const amount = parseFloat(document.getElementById('send-amount').value) || 0;
-        if (amount <= 0) {
-            showToast('Please enter DUCO amount first', true);
             return;
         }
-        const receiveCc = amount * 10;
-        const adminName = ADMIN_NAMES[0]; // chocoetom
-        const user = localStorage.getItem('choco_user') || 'your_username';
-        
-        showToast(`📤 Send ${amount} DUCO to "${adminName}" with memo: ${user}. You will receive ${receiveCc} CC after confirmation.`, false);
-        
-        // Optional: auto fill memo in clipboard
-        navigator.clipboard.writeText(user).then(() => {
-            console.log('Username copied to clipboard');
-        }).catch(() => {});
-    }
 
-    document.getElementById('swap-btn').addEventListener('click', async () => {
-        if (currentDirection === 'cc-to-duco') {
-            const amount = parseFloat(document.getElementById('send-amount').value);
-            const receiver = document.getElementById('receiver').value;
-            await performSwapCCtoDUCO(amount, receiver);
-        } else {
-            // DUCO → CC: show instructions
-            showDucoToCcInstructions();
+        if (!amount || amount <= 0) {
+            showToast('Invalid amount', true);
+            return;
         }
-    });
 
-    // Direction selector
-    document.querySelectorAll('.direction-option').forEach(opt => {
-        opt.addEventListener('click', () => {
-            document.querySelectorAll('.direction-option').forEach(o => o.classList.remove('active'));
-            opt.classList.add('active');
-            currentDirection = opt.getAttribute('data-dir');
-            updateUIForDirection();
-            updateEstimate();
-        });
-    });
-
-    document.getElementById('send-amount').addEventListener('input', updateEstimate);
-
-    // Auto set admin name in info box
-    function updateAdminName() {
-        const adminSpan = document.getElementById('admin-name');
-        if (adminSpan) adminSpan.textContent = ADMIN_NAMES[0];
+        // CC → DUCO / CC PoC
+        if (from === 'cc' && (to === 'duco' || to === 'ccpoc')) {
+            if (!receiver) {
+                showToast('Please enter receiver info', true);
+                return;
+            }
+            if (amount > currentBalance) {
+                showToast(`Insufficient CC balance. You have ${currentBalance.toFixed(4)} CC`, true);
+                return;
+            }
+            try {
+                const res = await fetch('/swap/create', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + token
+                    },
+                    body: JSON.stringify({
+                        from_user: user,
+                        amount_cc: amount,
+                        swap_type: to,
+                        receiver: receiver
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showToast(`Swap request created! -${amount} CC`, false);
+                    await fetchBalance();
+                    document.getElementById('amount-input').value = '';
+                    document.getElementById('receiver-input').value = '';
+                    updateEstimate();
+                    updateRateDisplay();
+                } else {
+                    showToast(data.message || 'Swap failed', true);
+                }
+            } catch (err) {
+                showToast('Server error', true);
+            }
+        }
+        // DUCO → CC: manual instruction (only Nam2010)
+        else if (from === 'duco' && to === 'cc') {
+            const ducoAmount = amount;
+            const ccAmount = (amount * 10).toFixed(4);
+            const targetUsername = receiver || user;
+            const instruction = `📤 Send ${ducoAmount} DUCO to Nam2010 with memo: "SWAP CC for ${targetUsername}". After confirmation, ${ccAmount} CC will be credited to ${targetUsername}.`;
+            showToast(instruction, false);
+            // Copy instruction to clipboard
+            navigator.clipboard.writeText(`Send ${ducoAmount} DUCO to Nam2010 with memo: SWAP CC for ${targetUsername}`);
+            showToast('✓ Instruction copied to clipboard!', false);
+        }
+        // CC PoC → CC: simulated
+        else if (from === 'ccpoc' && to === 'cc') {
+            showToast(`Simulated: Admin will process ${amount} CC PoC → ${(amount * rates.ccpoc.cc).toFixed(4)} CC. Please wait.`, false);
+        }
+        else {
+            showToast(`Swap from ${coinNames[from]} to ${coinNames[to]} is not supported yet.`, true);
+        }
     }
 
+    // Event listeners
+    document.getElementById('from-coin').addEventListener('change', () => {
+        updateRateDisplay();
+        updateEstimate();
+        document.getElementById('amount-input').value = '';
+        document.getElementById('receiver-input').value = '';
+    });
+    document.getElementById('to-coin').addEventListener('change', () => {
+        updateRateDisplay();
+        updateEstimate();
+        document.getElementById('amount-input').value = '';
+        document.getElementById('receiver-input').value = '';
+    });
+    document.getElementById('amount-input').addEventListener('input', updateEstimate);
+    document.getElementById('swap-btn').addEventListener('click', performSwap);
+
+    // Initial load
     (async () => {
         await fetchBalance();
-        updateAdminName();
-        updateUIForDirection();
         if (!localStorage.getItem('choco_user')) {
             showToast('Redirecting to login...', true);
             setTimeout(() => window.location.href = 'index.html', 1500);
         }
+        updateRateDisplay();
         setInterval(fetchBalance, 5000);
     })();
 </script>
