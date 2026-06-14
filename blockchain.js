@@ -222,7 +222,7 @@ function submitSolution(bountyId, nonce, workerName, deviceType) {
   }
 
   sqlite.prepare('UPDATE bounties SET status=?, nonce=?, solver_username=? WHERE id=?').run('solved', String(nonce), workerName, bountyId);
-  const reward = bounty.reward || 1.0;
+  const reward = bounty.reward || 0.006;
   db.updateBalance(workerName, reward);
   sqlite.prepare('INSERT INTO blocks_mined (username, bounty_id, reward) VALUES (?, ?, ?)').run(workerName, bountyId, reward);
 
