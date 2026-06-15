@@ -112,6 +112,7 @@ function createStateBlock(previous, representative, balance, link, work = '00000
 
 // Hàm sign block với tweetnacl
 function signBlock(block, privateKeyHex) {
+    // Tạo JSON canonical của block
     const blockString = JSON.stringify({
         type: block.type,
         previous: block.previous,
@@ -121,10 +122,17 @@ function signBlock(block, privateKeyHex) {
         work: block.work
     });
     
+    // Tính hash của block (blake2b)
     const blockHash = blake.blake2bHex(blockString, null, 32);
     const blockHashBuffer = Buffer.from(blockHash, 'hex');
+    
+    // Private key 32 bytes
     const privateKeyBuffer = Buffer.from(privateKeyHex, 'hex');
+    
+    // Tạo key pair từ private key
     const keyPair = nacl.sign.keyPair.fromSeed(privateKeyBuffer.slice(0, 32));
+    
+    // Sign
     const signature = nacl.sign.detached(blockHashBuffer, keyPair.secretKey);
     
     return Buffer.from(signature).toString('hex');
@@ -134,18 +142,23 @@ function signBlock(block, privateKeyHex) {
 async function sendXNO(wallet, toAddress, amountRaw) {
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
+        
         if (!accountInfo.frontier) {
             throw new Error('Account not initialized. Send a small amount first.');
         }
+        
         const previous = accountInfo.frontier;
         const balance = BigInt(accountInfo.balance);
         const amount = BigInt(amountRaw);
         const newBalance = (balance - amount).toString();
         const representative = accountInfo.representative;
+        
         const block = createStateBlock(previous, representative, newBalance, toAddress);
         const signature = signBlock(block, wallet.private_key);
         block.signature = signature;
+        
         const result = await nanoRpcCall('process', { block: JSON.stringify(block) });
+        
         return { success: true, hash: result.hash };
     } catch (err) {
         console.error('Send XNO error:', err);
@@ -157,19 +170,25 @@ async function sendXNO(wallet, toAddress, amountRaw) {
 async function receiveXNO(wallet, transactionHash) {
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
+        
         if (!accountInfo.frontier) {
             throw new Error('Account not initialized');
         }
+        
         const previous = accountInfo.frontier;
         const balance = BigInt(accountInfo.balance);
+        
         const pending = await nanoRpcCall('pending', { account: wallet.address, hash: transactionHash });
         const amount = BigInt(pending.blocks[transactionHash].amount);
         const newBalance = (balance + amount).toString();
         const representative = accountInfo.representative;
+        
         const block = createStateBlock(previous, representative, newBalance, transactionHash);
         const signature = signBlock(block, wallet.private_key);
         block.signature = signature;
+        
         const result = await nanoRpcCall('process', { block: JSON.stringify(block) });
+        
         return { success: true, hash: result.hash };
     } catch (err) {
         console.error('Receive XNO error:', err);
@@ -181,15 +200,20 @@ async function receiveXNO(wallet, transactionHash) {
 async function setRepresentative(wallet, representativeAddress) {
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
+        
         if (!accountInfo.frontier) {
             throw new Error('Account not initialized. Send a small amount first.');
         }
+        
         const previous = accountInfo.frontier;
         const balance = accountInfo.balance;
+        
         const block = createStateBlock(previous, representativeAddress, balance, '0000000000000000000000000000000000000000000000000000000000000000');
         const signature = signBlock(block, wallet.private_key);
         block.signature = signature;
+        
         const result = await nanoRpcCall('process', { block: JSON.stringify(block) });
+        
         return { success: true, hash: result.hash };
     } catch (err) {
         console.error('Set representative error:', err);
@@ -234,6 +258,7 @@ async function processPendingSwaps() {
         
         for (const swap of swaps) {
             if (swap.status !== 'pending') continue;
+            
             if (swap.swap_type === 'xno_to_cc') {
                 await processXNOtoCC(swap, activeWallet, admin);
             } else if (swap.swap_type === 'cc_to_xno') {
@@ -249,11 +274,15 @@ async function processXNOtoCC(swap, wallet, admin) {
     try {
         const pending = await nanoRpcCall('pending', { account: wallet.address, source: true });
         if (!pending.blocks) return;
+        
         const expectedAmount = (swap.amount_cc / 500000).toFixed(8);
+        
         for (const [txHash, txInfo] of Object.entries(pending.blocks)) {
             const amount = parseFloat(txInfo.amount) / 1e30;
+            
             if (Math.abs(amount - expectedAmount) <= 0.0001) {
                 const receiveResult = await receiveXNO(wallet, txHash);
+                
                 if (receiveResult.success) {
                     await axios.post(`${CHOCOHUB_URL}/swap/fulfill`, {
                         request_id: swap.id,
@@ -275,12 +304,15 @@ async function processCCtoXNO(swap, wallet, admin) {
     try {
         const xnoAmount = (swap.amount_cc * 0.000002).toFixed(8);
         const toAddress = swap.receiver;
+        
         if (!isValidNanoAddress(toAddress)) {
             console.error(`Invalid XNO address for swap ${swap.id}: ${toAddress}`);
             return;
         }
+        
         const amountRaw = Math.floor(parseFloat(xnoAmount) * 1e30);
         const sendResult = await sendXNO(wallet, toAddress, amountRaw);
+        
         if (sendResult.success) {
             await axios.post(`${CHOCOHUB_URL}/swap/fulfill`, {
                 request_id: swap.id,
@@ -337,6 +369,7 @@ app.post('/api/setup', requireAuth, async (req, res) => {
             });
             if (authRes.data.status !== 'success') return res.json({ success: false, error: 'Invalid ChocoHub credentials' });
             admin.chocohub_token = authRes.data.token;
+            
             if (swapProcessorInterval) clearInterval(swapProcessorInterval);
             swapProcessorInterval = setInterval(processPendingSwaps, SWAP_CHECK_INTERVAL);
             console.log('🔄 Auto swap processor started');
@@ -382,6 +415,7 @@ app.post('/api/wallet/create', requireAuth, async (req, res) => {
     try {
         const seedHex = await generateRandomSeed();
         const { address, publicKey, privateKey } = await generateNanoAddressFromSeed(seedHex, 0);
+        
         const wallet = {
             id: Date.now().toString(),
             name: name || `Wallet ${new Date().toLocaleString()}`,
@@ -397,6 +431,7 @@ app.post('/api/wallet/create', requireAuth, async (req, res) => {
         data.wallets.push(wallet);
         if (!data.active_wallet) data.active_wallet = wallet.id;
         await updateWallets(data);
+        
         res.json({ success: true, wallet: { id: wallet.id, name: wallet.name, address: wallet.address } });
     } catch (err) {
         console.error('Create wallet error:', err);
@@ -408,6 +443,7 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
     try {
         let { seed, name, index } = req.body;
         if (!seed) return res.json({ success: false, error: 'Seed is required' });
+        
         let seedHex = seed;
         if (seed.length !== 64) {
             try {
@@ -419,11 +455,13 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
         }
         const walletIndex = index || 0;
         const { address, publicKey, privateKey } = await generateNanoAddressFromSeed(seedHex, walletIndex);
+        
         let representative = null;
         try {
             const accountInfo = await nanoRpcCall('account_info', { account: address });
             representative = accountInfo.representative || null;
         } catch (e) {}
+        
         const wallet = {
             id: Date.now().toString(),
             name: name || `Imported ${new Date().toLocaleString()}`,
@@ -442,6 +480,7 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
         data.wallets.push(wallet);
         if (!data.active_wallet) data.active_wallet = wallet.id;
         await updateWallets(data);
+        
         res.json({ success: true, wallet: { id: wallet.id, name: wallet.name, address: wallet.address } });
     } catch (err) {
         console.error('Import wallet error:', err);
@@ -452,9 +491,11 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
 app.post('/api/wallet/import-file', requireAuth, upload.single('seedFile'), async (req, res) => {
     try {
         if (!req.file) return res.json({ success: false, error: 'No file uploaded' });
+        
         const content = await fs.readFile(req.file.path, 'utf8');
         let seed = content.trim();
         await fs.remove(req.file.path);
+        
         if (seed.length !== 64) {
             try {
                 seed = Buffer.from(seed).toString('hex');
@@ -464,11 +505,13 @@ app.post('/api/wallet/import-file', requireAuth, upload.single('seedFile'), asyn
             }
         }
         const { address, publicKey, privateKey } = await generateNanoAddressFromSeed(seed, 0);
+        
         let representative = null;
         try {
             const accountInfo = await nanoRpcCall('account_info', { account: address });
             representative = accountInfo.representative || null;
         } catch (e) {}
+        
         const wallet = {
             id: Date.now().toString(),
             name: `File Import ${new Date().toLocaleString()}`,
@@ -484,6 +527,7 @@ app.post('/api/wallet/import-file', requireAuth, upload.single('seedFile'), asyn
         data.wallets.push(wallet);
         if (!data.active_wallet) data.active_wallet = wallet.id;
         await updateWallets(data);
+        
         res.json({ success: true, wallet: { id: wallet.id, name: wallet.name, address: wallet.address } });
     } catch (err) {
         console.error(err);
@@ -495,6 +539,7 @@ app.get('/api/wallet/:id/export', requireAuth, async (req, res) => {
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
     if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+    
     res.setHeader('Content-Disposition', `attachment; filename="wallet_seed_${wallet.id}.txt"`);
     res.setHeader('Content-Type', 'text/plain');
     res.send(wallet.seed);
@@ -525,15 +570,18 @@ app.get('/api/wallet/:id/balance', requireAuth, async (req, res) => {
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
     if (!wallet) return res.json({ success: false, error: 'Wallet not found' });
+    
     try {
         const balanceRes = await nanoRpcCall('account_balance', { account: wallet.address });
         const balance = parseFloat(balanceRes.balance || '0') / 1e30;
         const pending = parseFloat(balanceRes.pending || '0') / 1e30;
+        
         let representative = wallet.representative;
         try {
             const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
             representative = accountInfo.representative || null;
         } catch(e) {}
+        
         res.json({ success: true, balance, pending, address: wallet.address, representative });
     } catch (err) {
         res.json({ success: false, error: 'Cannot fetch balance' });
@@ -544,12 +592,15 @@ app.post('/api/wallet/:id/set-representative', requireAuth, async (req, res) => 
     const { representative } = req.body;
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
+    
     if (!wallet) return res.json({ success: false, error: 'Wallet not found' });
     if (!isValidNanoAddress(representative)) {
         return res.json({ success: false, error: 'Invalid representative address' });
     }
+    
     try {
         const result = await setRepresentative(wallet, representative);
+        
         if (result.success) {
             wallet.representative = representative;
             await updateWallets(data);
@@ -566,6 +617,7 @@ app.get('/api/wallet/:id/representative', requireAuth, async (req, res) => {
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
     if (!wallet) return res.json({ success: false, error: 'Wallet not found' });
+    
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
         res.json({ 
@@ -602,19 +654,25 @@ app.get('/api/wallet/:id/history', requireAuth, async (req, res) => {
 
 app.post('/api/wallet/send', requireAuth, async (req, res) => {
     const { wallet_id, to_address, amount } = req.body;
+    
     if (!wallet_id || !to_address || !amount) return res.json({ success: false, error: 'Missing required fields' });
     if (!isValidNanoAddress(to_address)) return res.json({ success: false, error: 'Invalid Nano address' });
+    
     const sendAmount = parseFloat(amount);
     if (isNaN(sendAmount) || sendAmount <= 0) return res.json({ success: false, error: 'Invalid amount' });
+    
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === wallet_id);
     if (!wallet) return res.json({ success: false, error: 'Wallet not found' });
+    
     try {
         const balanceRes = await nanoRpcCall('account_balance', { account: wallet.address });
         const balance = parseFloat(balanceRes.balance || '0') / 1e30;
         if (balance < sendAmount) return res.json({ success: false, error: `Insufficient balance. You have ${balance.toFixed(6)} XNO` });
+        
         const amountRaw = Math.floor(sendAmount * 1e30);
         const result = await sendXNO(wallet, to_address, amountRaw);
+        
         if (result.success) {
             res.json({ success: true, hash: result.hash });
         } else {
@@ -661,7 +719,7 @@ app.listen(PORT, () => {
     console.log('╔══════════════════════════════════════╗');
     console.log('║      NANO XNO DASHBOARD             ║');
     console.log('╠══════════════════════════════════════╣');
-    console.log(`║  HTTP: http://localhost:${PORT}     ║');
+    console.log(`║  HTTP: http://localhost:${PORT}     ║`);
     console.log('║  Default login: admin / admin       ║');
     console.log(`║  RPC Node: ${NANO_RPC_URL}          ║');
     console.log('║  Auto Swap: Enabled (30s interval)  ║');
