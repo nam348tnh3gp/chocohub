@@ -25,16 +25,6 @@
         .miner-container {
             max-width: 680px;
             margin: 0 auto;
-            /* Espaço à direita para o anúncio em telas grandes */
-            margin-right: auto;
-        }
-
-        /* Em telas maiores, empurra o miner para a esquerda e libera o lado direito para o anúncio */
-        @media (min-width: 1100px) {
-            .miner-container {
-                margin-left: 2rem;
-                margin-right: 180px;
-            }
         }
 
         /* Header */
@@ -228,19 +218,10 @@
             border-bottom: 1px solid rgba(255,255,255,0.02);
             color: #7FE0A0;
         }
-        .log-info {
-            color: #6BE5FF;
-        }
-        .log-warn {
-            color: #F5A623;
-        }
-        .log-err {
-            color: #FF8888;
-        }
-        .log-win {
-            color: #7FE0A0;
-            font-weight: 600;
-        }
+        .log-info { color: #6BE5FF; }
+        .log-warn { color: #F5A623; }
+        .log-err  { color: #FF8888; }
+        .log-win  { color: #7FE0A0; font-weight: 600; }
 
         /* Toast */
         .toast {
@@ -260,477 +241,375 @@
             transition: opacity 0.2s;
             pointer-events: none;
         }
-        .toast.show {
-            opacity: 1;
-        }
-        .toast.success {
-            border-color: #40C057;
-            color: #40C057;
-        }
-        .toast.error {
-            border-color: #FA5252;
-            color: #FA5252;
-        }
+        .toast.show { opacity: 1; }
+        .toast.success { border-color: #40C057; color: #40C057; }
+        .toast.error { border-color: #FA5252; color: #FA5252; }
 
-        /* ── Anúncio lado direito ── */
-        .ad-sidebar {
-            position: fixed;
-            top: 50%;
-            transform: translateY(-50%);
-            right: 8px;
-            z-index: 99998;
-            width: 160px;
-            min-width: 120px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            text-align: center;
-            font-size: 0;
-        }
-        .ad-sidebar label {
-            position: absolute;
-            bottom: -28px;
-            margin: 0 auto;
-            right: 0;
-            left: 0;
-            max-width: 24px;
-            border-radius: 4px;
-            background: rgba(248, 248, 249, 0.7);
-            padding: 4px;
-            z-index: 99999;
-            cursor: pointer;
-        }
-        .ad-sidebar input:checked ~ .ad-inner {
-            display: none;
-        }
-        .ad-inner {
-            width: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-        }
-        .ad-frame-link {
-            display: inline-block;
-            font-size: 13px;
-            color: #263238;
-            padding: 4px 10px;
-            background: #F8F8F9;
-            text-decoration: none;
-            border-radius: 4px 4px 0 0;
-        }
-        .ad-iframe {
-            border: 0;
-            padding: 0;
-            width: 100%;
-            height: 250px;
-            overflow: hidden;
-            margin: 0 auto;
-        }
-
-        @media (max-width: 1100px) {
-            .ad-sidebar {
-                right: 2px;
-                width: 120px;
-            }
-            .ad-iframe {
-                height: 200px;
-            }
-        }
-        @media (max-width: 768px) {
-            .ad-sidebar {
-                display: none;
-            }
-            .miner-container {
-                margin-right: auto;
-            }
+        @media (max-width: 560px) {
+            .stats-grid { gap: 8px; }
+            .stat-value { font-size: 1.2rem; }
+            .job-header { flex-direction: column; align-items: flex-start; }
         }
     </style>
 </head>
 <body>
-
-    <!-- BEGIN AADS AD UNIT 2444206 - Lado direito -->
-    <div class="ad-sidebar">
-        <input autocomplete="off" type="checkbox" id="aadsstickymqfltshv" hidden />
-        <div class="ad-inner">
-            <div style="width:100%;text-align:center;">
-                <a class="ad-frame-link"
-                   id="frame-link"
-                   target="_blank"
-                   href="https://aads.com/campaigns/new?source_id=2444206&source_type=ad_unit&partner=2444206">
-                    Advertise here
-                </a>
-            </div>
-            <iframe class="ad-iframe"
-                    data-aa="2444206"
-                    src="//acceptable.a-ads.com/2444206/?size=Adaptive">
-            </iframe>
+<div class="miner-container">
+    <div class="header">
+        <div class="logo-area">
+            <span style="font-size: 28px;">⛏️</span>
+            <h1>Web Miner</h1>
         </div>
-        <label for="aadsstickymqfltshv" title="Fechar anúncio">
-            <svg fill="#000000" height="16px" width="16px" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 490 490">
-                <polygon points="456.851,0 245,212.564 33.149,0 0.708,32.337 212.669,245.004 0.708,457.678 33.149,490 245,277.443 456.851,490 489.292,457.678 277.331,245.004 489.292,32.337"/>
-            </svg>
-        </label>
+        <a href="/" class="back-link">← Dashboard</a>
     </div>
-    <!-- END AADS AD UNIT 2444206 -->
 
-    <div class="miner-container">
-        <div class="header">
-            <div class="logo-area">
-                <span style="font-size: 28px;">⛏️</span>
-                <h1>Web Miner</h1>
-            </div>
-            <a href="/" class="back-link">← Dashboard</a>
+    <!-- Stats -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value" id="hashrateValue">0 H/s</div>
+            <div class="stat-label">Hashrate</div>
         </div>
-
-        <!-- Stats -->
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-value" id="hashrateValue">0 H/s</div>
-                <div class="stat-label">Hashrate</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="totalHashesValue">0</div>
-                <div class="stat-label">Total Hashes</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="uptimeValue">0s</div>
-                <div class="stat-label">Session Time</div>
-            </div>
+        <div class="stat-card">
+            <div class="stat-value" id="totalHashesValue">0</div>
+            <div class="stat-label">Total Hashes</div>
         </div>
-
-        <!-- Current job -->
-        <div class="job-card" id="jobCard">
-            <div class="job-header">
-                <span class="job-id" id="jobId">No active job</span>
-                <span class="reward-badge" id="rewardBadge">— CC</span>
-            </div>
-            <div class="difficulty-row">
-                <span>Difficulty</span>
-                <span id="difficultyValue" style="color:#F58A00;">—</span>
-            </div>
-            <div class="progress-bar-bg">
-                <div class="progress-fill" id="progressFill"></div>
-            </div>
-        </div>
-
-        <!-- Controls -->
-        <div class="control-panel">
-            <div class="button-group">
-                <button class="btn btn-primary" id="startBtn">▶ Start Mining</button>
-                <button class="btn btn-secondary" id="stopBtn" disabled>⏹ Stop</button>
-            </div>
-            <div class="console" id="console">
-                <div class="log-line log-info">> Ready. Waiting for job...</div>
-            </div>
+        <div class="stat-card">
+            <div class="stat-value" id="uptimeValue">0s</div>
+            <div class="stat-label">Session Time</div>
         </div>
     </div>
 
-    <div id="toast" class="toast"></div>
+    <!-- Current job -->
+    <div class="job-card" id="jobCard">
+        <div class="job-header">
+            <span class="job-id" id="jobId">No active job</span>
+            <span class="reward-badge" id="rewardBadge">— CC</span>
+        </div>
+        <div class="difficulty-row">
+            <span>Difficulty</span>
+            <span id="difficultyValue" style="color:#F58A00;">—</span>
+        </div>
+        <div class="progress-bar-bg">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+    </div>
 
-    <script>
-        (function() {
-            // ---------- Auth ----------
-            const workerName = localStorage.getItem('choco_user');
-            if (!workerName) {
-                alert('Please log in first.');
-                window.location.href = '/';
+    <!-- Controls -->
+    <div class="control-panel">
+        <div class="button-group">
+            <button class="btn btn-primary" id="startBtn">▶ Start Mining</button>
+            <button class="btn btn-secondary" id="stopBtn" disabled>⏹ Stop</button>
+        </div>
+        <div class="console" id="console">
+            <div class="log-line log-info">> Ready. Waiting for job...</div>
+        </div>
+    </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+    (function() {
+        // ---------- Auth ----------
+        const workerName = localStorage.getItem('choco_user');
+        if (!workerName) {
+            alert('Please log in first.');
+            window.location.href = '/';
+            return;
+        }
+
+        // ---------- DOM elements ----------
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const hashrateSpan = document.getElementById('hashrateValue');
+        const totalHashesSpan = document.getElementById('totalHashesValue');
+        const uptimeSpan = document.getElementById('uptimeValue');
+        const jobIdSpan = document.getElementById('jobId');
+        const rewardSpan = document.getElementById('rewardBadge');
+        const difficultySpan = document.getElementById('difficultyValue');
+        const progressFill = document.getElementById('progressFill');
+        const consoleDiv = document.getElementById('console');
+
+        // ---------- State ----------
+        let miningActive = false;
+        let autoMineEnabled = false;
+        let currentJob = null;
+        let totalHashes = 0;
+        let sessionStart = null;
+        let hashrateInterval = null;
+        let currentHashCount = 0;
+        let lastTimestamp = Date.now();
+        let currentHashrate = 0;
+
+        // Web Worker (mining core)
+        let worker = null;
+
+        // ---------- Helper functions ----------
+        function log(msg, type = 'info') {
+            const line = document.createElement('div');
+            line.className = `log-line log-${type}`;
+            line.textContent = `> ${msg}`;
+            consoleDiv.appendChild(line);
+            line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            while (consoleDiv.children.length > 100) consoleDiv.removeChild(consoleDiv.firstChild);
+        }
+
+        function showToast(msg, isError = false) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = `toast show ${isError ? 'error' : 'success'}`;
+            setTimeout(() => toast.classList.remove('show'), 3500);
+        }
+
+        function formatHashrate(hps) {
+            if (hps >= 1e6) return (hps / 1e6).toFixed(2) + ' MH/s';
+            if (hps >= 1e3) return (hps / 1e3).toFixed(2) + ' kH/s';
+            return hps.toFixed(1) + ' H/s';
+        }
+
+        function formatNumber(n) {
+            if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+            if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+            if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+            return n.toString();
+        }
+
+        function updateUI() {
+            totalHashesSpan.textContent = formatNumber(totalHashes);
+            hashrateSpan.textContent = formatHashrate(currentHashrate);
+            if (sessionStart) {
+                const elapsed = Math.floor((Date.now() - sessionStart) / 1000);
+                uptimeSpan.textContent = elapsed + 's';
+            } else {
+                uptimeSpan.textContent = '0s';
+            }
+        }
+
+        // Hashrate tracker
+        function startHashrateTracker() {
+            if (hashrateInterval) clearInterval(hashrateInterval);
+            currentHashCount = 0;
+            lastTimestamp = Date.now();
+            hashrateInterval = setInterval(() => {
+                const now = Date.now();
+                const delta = (now - lastTimestamp) / 1000;
+                if (delta >= 1) {
+                    currentHashrate = currentHashCount / delta;
+                    currentHashCount = 0;
+                    lastTimestamp = now;
+                    updateUI();
+                }
+            }, 1000);
+        }
+
+        // ---------- Job handling ----------
+        async function fetchNewJob() {
+            try {
+                const res = await fetch('/get_job', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ worker_name: workerName })
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const job = await res.json();
+                if (!job || !job.bounty_id) throw new Error('Invalid job response');
+                return job;
+            } catch (err) {
+                log(`Failed to fetch job: ${err.message}`, 'err');
+                return null;
+            }
+        }
+
+        async function startMiningWithJob(job) {
+            if (!job) return false;
+            currentJob = job;
+
+            // Update UI
+            jobIdSpan.textContent = job.bounty_id.substring(0, 12) + '...';
+            const reward = (job.reward !== undefined && job.reward !== null) ? job.reward.toFixed(4) : '?';
+            rewardSpan.textContent = `${reward} CC`;
+            difficultySpan.textContent = job.difficulty || '?';
+            document.getElementById('jobCard').classList.add('mining');
+            progressFill.style.width = '0%';
+
+            // Send to worker
+            if (!worker) {
+                worker = new Worker('/static/js/cpu.js');
+                worker.onmessage = handleWorkerMessage;
+                worker.onerror = (e) => log(`Worker error: ${e.message}`, 'err');
+            }
+
+            worker.postMessage({
+                type: 'start',
+                last_hash: job.last_hash,
+                username: workerName,
+                target_hex: job.target_hex,
+                bounty_id: job.bounty_id
+            });
+
+            miningActive = true;
+            totalHashes = 0;
+            sessionStart = Date.now();
+            currentHashCount = 0;
+            currentHashrate = 0;
+            startHashrateTracker();
+            updateUI();
+
+            log(`Mining job #${job.bounty_id.substring(0,10)}... | diff: ${job.difficulty} | reward: ${reward} CC`, 'info');
+            return true;
+        }
+
+        function stopMiningProcess(keepJob = false) {
+            if (worker && miningActive) {
+                worker.postMessage({ type: 'stop' });
+            }
+            miningActive = false;
+            if (hashrateInterval) clearInterval(hashrateInterval);
+            hashrateInterval = null;
+            if (!keepJob) {
+                currentJob = null;
+                document.getElementById('jobCard').classList.remove('mining');
+                jobIdSpan.textContent = 'No active job';
+                rewardSpan.textContent = '— CC';
+                difficultySpan.textContent = '—';
+                progressFill.style.width = '0%';
+            }
+            updateUI();
+        }
+
+        // Handle worker messages
+        function handleWorkerMessage(e) {
+            const data = e.data;
+            switch (data.type) {
+                case 'ready':
+                    log('Worker ready', 'info');
+                    break;
+                case 'progress':
+                    const newHashes = data.hashes || 0;
+                    totalHashes += newHashes;
+                    currentHashCount += newHashes;
+                    updateUI();
+                    // Progress bar: approximate based on difficulty (just visual)
+                    const targetTotal = currentJob?.difficulty ? parseInt(currentJob.difficulty) : 50000;
+                    const percent = Math.min(95, (totalHashes / targetTotal) * 100);
+                    progressFill.style.width = percent + '%';
+                    break;
+                case 'found':
+                    log(`🎉 Nonce found: ${data.nonce}`, 'win');
+                    progressFill.style.width = '100%';
+                    miningActive = false;
+                    if (worker) worker.postMessage({ type: 'stop' });
+                    submitSolution(data.bounty_id, data.nonce, workerName);
+                    break;
+                case 'pong':
+                    // heartbeat, ignore
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        // Submit solution
+        async function submitSolution(bountyId, nonce, wName) {
+            log(`Submitting solution for #${bountyId.substring(0,8)}...`, 'info');
+            try {
+                const res = await fetch('/submit_solution', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        bounty_id: bountyId,
+                        nonce: nonce,
+                        worker_name: wName,
+                        device_type: 'web_miner'
+                    })
+                });
+                const result = await res.json();
+                if (res.ok && result.status === 'success') {
+                    const reward = result.reward || '?';
+                    log(`✅ BLOCK SOLVED! +${reward} CC`, 'win');
+                    showToast(`+${reward} CC earned!`, false);
+                    // Auto-fetch next job if auto mode is on
+                    if (autoMineEnabled) {
+                        setTimeout(() => startMiningLoop(), 2000);
+                    } else {
+                        stopMiningProcess(true);
+                        startBtn.textContent = '▶ Start Mining';
+                        stopBtn.disabled = true;
+                    }
+                } else {
+                    log(`❌ Submission rejected: ${result.reason || 'unknown'}`, 'err');
+                    showToast('Solution rejected', true);
+                    if (autoMineEnabled) {
+                        setTimeout(() => startMiningLoop(), 3000);
+                    }
+                }
+            } catch (err) {
+                log(`Submission error: ${err.message}`, 'err');
+                if (autoMineEnabled) {
+                    setTimeout(() => startMiningLoop(), 5000);
+                }
+            }
+        }
+
+        // Main mining loop
+        async function startMiningLoop() {
+            if (!autoMineEnabled) return;
+            stopMiningProcess(true);
+            const job = await fetchNewJob();
+            if (!job) {
+                log('No job available, retrying in 5s...', 'warn');
+                setTimeout(() => startMiningLoop(), 5000);
                 return;
             }
-
-            // ---------- DOM elements ----------
-            const startBtn = document.getElementById('startBtn');
-            const stopBtn = document.getElementById('stopBtn');
-            const hashrateSpan = document.getElementById('hashrateValue');
-            const totalHashesSpan = document.getElementById('totalHashesValue');
-            const uptimeSpan = document.getElementById('uptimeValue');
-            const jobIdSpan = document.getElementById('jobId');
-            const rewardSpan = document.getElementById('rewardBadge');
-            const difficultySpan = document.getElementById('difficultyValue');
-            const progressFill = document.getElementById('progressFill');
-            const consoleDiv = document.getElementById('console');
-
-            // ---------- State ----------
-            let miningActive = false;
-            let autoMineEnabled = false;
-            let currentJob = null;
-            let totalHashes = 0;
-            let sessionStart = null;
-            let hashrateInterval = null;
-            let currentHashCount = 0;
-            let lastTimestamp = Date.now();
-            let currentHashrate = 0;
-
-            // Web Worker (mining core)
-            let worker = null;
-
-            // ---------- Helper functions ----------
-            function log(msg, type = 'info') {
-                const line = document.createElement('div');
-                line.className = `log-line log-${type}`;
-                line.textContent = `> ${msg}`;
-                consoleDiv.appendChild(line);
-                line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                while (consoleDiv.children.length > 100) consoleDiv.removeChild(consoleDiv.firstChild);
+            const ok = await startMiningWithJob(job);
+            if (!ok) {
+                setTimeout(() => startMiningLoop(), 3000);
+            } else {
+                startBtn.textContent = '⏸ Pause';
+                stopBtn.disabled = false;
             }
+        }
 
-            function showToast(msg, isError = false) {
-                const toast = document.getElementById('toast');
-                toast.textContent = msg;
-                toast.className = `toast show ${isError ? 'error' : 'success'}`;
-                setTimeout(() => toast.classList.remove('show'), 3500);
-            }
-
-            function formatHashrate(hps) {
-                if (hps >= 1e6) return (hps / 1e6).toFixed(2) + ' MH/s';
-                if (hps >= 1e3) return (hps / 1e3).toFixed(2) + ' kH/s';
-                return hps.toFixed(1) + ' H/s';
-            }
-
-            function formatNumber(n) {
-                if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-                if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-                if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
-                return n.toString();
-            }
-
-            function updateUI() {
-                totalHashesSpan.textContent = formatNumber(totalHashes);
-                hashrateSpan.textContent = formatHashrate(currentHashrate);
-                if (sessionStart) {
-                    const elapsed = Math.floor((Date.now() - sessionStart) / 1000);
-                    uptimeSpan.textContent = elapsed + 's';
-                } else {
-                    uptimeSpan.textContent = '0s';
-                }
-            }
-
-            // Hashrate tracker
-            function startHashrateTracker() {
-                if (hashrateInterval) clearInterval(hashrateInterval);
-                currentHashCount = 0;
-                lastTimestamp = Date.now();
-                hashrateInterval = setInterval(() => {
-                    const now = Date.now();
-                    const delta = (now - lastTimestamp) / 1000;
-                    if (delta >= 1) {
-                        currentHashrate = currentHashCount / delta;
-                        currentHashCount = 0;
-                        lastTimestamp = now;
-                        updateUI();
-                    }
-                }, 1000);
-            }
-
-            // ---------- Job handling ----------
-            async function fetchNewJob() {
-                try {
-                    const res = await fetch('/get_job', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ worker_name: workerName })
-                    });
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    const job = await res.json();
-                    if (!job || !job.bounty_id) throw new Error('Invalid job response');
-                    return job;
-                } catch (err) {
-                    log(`Failed to fetch job: ${err.message}`, 'err');
-                    return null;
-                }
-            }
-
-            async function startMiningWithJob(job) {
-                if (!job) return false;
-                currentJob = job;
-
-                // Update UI
-                jobIdSpan.textContent = job.bounty_id.substring(0, 12) + '...';
-                const reward = (job.reward !== undefined && job.reward !== null) ? job.reward.toFixed(4) : '?';
-                rewardSpan.textContent = `${reward} CC`;
-                difficultySpan.textContent = job.difficulty || '?';
-                document.getElementById('jobCard').classList.add('mining');
-                progressFill.style.width = '0%';
-
-                // Send to worker
-                if (!worker) {
-                    worker = new Worker('/static/js/cpu.js');
-                    worker.onmessage = handleWorkerMessage;
-                    worker.onerror = (e) => log(`Worker error: ${e.message}`, 'err');
-                }
-
-                worker.postMessage({
-                    type: 'start',
-                    last_hash: job.last_hash,
-                    username: workerName,
-                    target_hex: job.target_hex,
-                    bounty_id: job.bounty_id
-                });
-
-                miningActive = true;
-                totalHashes = 0;
-                sessionStart = Date.now();
-                currentHashCount = 0;
-                currentHashrate = 0;
-                startHashrateTracker();
-                updateUI();
-
-                log(`Mining job #${job.bounty_id.substring(0, 10)}... | diff: ${job.difficulty} | reward: ${reward} CC`, 'info');
-                return true;
-            }
-
-            function stopMiningProcess(keepJob = false) {
-                if (worker && miningActive) {
-                    worker.postMessage({ type: 'stop' });
-                }
-                miningActive = false;
-                if (hashrateInterval) clearInterval(hashrateInterval);
-                hashrateInterval = null;
-                if (!keepJob) {
-                    currentJob = null;
-                    document.getElementById('jobCard').classList.remove('mining');
-                    jobIdSpan.textContent = 'No active job';
-                    rewardSpan.textContent = '— CC';
-                    difficultySpan.textContent = '—';
-                    progressFill.style.width = '0%';
-                }
-                updateUI();
-            }
-
-            // Handle worker messages
-            function handleWorkerMessage(e) {
-                const data = e.data;
-                switch (data.type) {
-                    case 'ready':
-                        log('Worker ready', 'info');
-                        break;
-                    case 'progress':
-                        const newHashes = data.hashes || 0;
-                        totalHashes += newHashes;
-                        currentHashCount += newHashes;
-                        updateUI();
-                        // Progress bar: approximate based on difficulty (just visual)
-                        const targetTotal = currentJob?.difficulty ? parseInt(currentJob.difficulty) : 50000;
-                        const percent = Math.min(95, (totalHashes / targetTotal) * 100);
-                        progressFill.style.width = percent + '%';
-                        break;
-                    case 'found':
-                        log(`🎉 Nonce found: ${data.nonce}`, 'win');
-                        progressFill.style.width = '100%';
-                        miningActive = false;
-                        if (worker) worker.postMessage({ type: 'stop' });
-                        submitSolution(data.bounty_id, data.nonce, workerName);
-                        break;
-                    case 'pong':
-                        // heartbeat, ignore
-                        break;
-                    default:
-                        break;
-                }
-            }
-
-            // Submit solution
-            async function submitSolution(bountyId, nonce, wName) {
-                log(`Submitting solution for #${bountyId.substring(0, 8)}...`, 'info');
-                try {
-                    const res = await fetch('/submit_solution', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            bounty_id: bountyId,
-                            nonce: nonce,
-                            worker_name: wName,
-                            device_type: 'web_miner'
-                        })
-                    });
-                    const result = await res.json();
-                    if (res.ok && result.status === 'success') {
-                        const reward = result.reward || '?';
-                        log(`✅ BLOCK SOLVED! +${reward} CC`, 'win');
-                        showToast(`+${reward} CC earned!`, false);
-                        // Auto-fetch next job if auto mode is on
-                        if (autoMineEnabled) {
-                            setTimeout(() => startMiningLoop(), 2000);
-                        } else {
-                            stopMiningProcess(true);
-                            startBtn.textContent = '▶ Start Mining';
-                            stopBtn.disabled = true;
-                        }
-                    } else {
-                        log(`❌ Submission rejected: ${result.reason || 'unknown'}`, 'err');
-                        showToast('Solution rejected', true);
-                        if (autoMineEnabled) {
-                            setTimeout(() => startMiningLoop(), 3000);
-                        }
-                    }
-                } catch (err) {
-                    log(`Submission error: ${err.message}`, 'err');
-                    if (autoMineEnabled) {
-                        setTimeout(() => startMiningLoop(), 5000);
-                    }
-                }
-            }
-
-            // Main mining loop
-            async function startMiningLoop() {
-                if (!autoMineEnabled) return;
-                stopMiningProcess(true);
-                const job = await fetchNewJob();
-                if (!job) {
-                    log('No job available, retrying in 5s...', 'warn');
-                    setTimeout(() => startMiningLoop(), 5000);
-                    return;
-                }
-                const ok = await startMiningWithJob(job);
-                if (!ok) {
-                    setTimeout(() => startMiningLoop(), 3000);
-                } else {
-                    startBtn.textContent = '⏸ Pause';
-                    stopBtn.disabled = false;
-                }
-            }
-
-            // ---------- UI actions ----------
-            function onStart() {
-                if (miningActive) {
-                    // Pause
-                    autoMineEnabled = false;
-                    stopMiningProcess(true);
-                    startBtn.textContent = '▶ Start Mining';
-                    stopBtn.disabled = true;
-                    log('Mining paused.', 'info');
-                } else {
-                    // Start/resume
-                    autoMineEnabled = true;
-                    startBtn.textContent = '⏸ Pause';
-                    stopBtn.disabled = false;
-                    log('Starting mining...', 'info');
-                    startMiningLoop();
-                }
-            }
-
-            function onStop() {
+        // ---------- UI actions ----------
+        function onStart() {
+            if (miningActive) {
+                // Pause
                 autoMineEnabled = false;
-                stopMiningProcess(false);
+                stopMiningProcess(true);
                 startBtn.textContent = '▶ Start Mining';
                 stopBtn.disabled = true;
-                log('Miner stopped completely.', 'warn');
+                log('Mining paused.', 'info');
+            } else {
+                // Start/resume
+                autoMineEnabled = true;
+                startBtn.textContent = '⏸ Pause';
+                stopBtn.disabled = false;
+                log('Starting mining...', 'info');
+                startMiningLoop();
             }
+        }
 
-            // ---------- Initialize ----------
-            function init() {
-                startBtn.addEventListener('click', onStart);
-                stopBtn.addEventListener('click', onStop);
-                log(`Logged in as: ${workerName}`, 'info');
-                // Auto-start after 1 second
-                setTimeout(() => {
-                    autoMineEnabled = true;
-                    startMiningLoop();
-                }, 1000);
-            }
+        function onStop() {
+            autoMineEnabled = false;
+            stopMiningProcess(false);
+            startBtn.textContent = '▶ Start Mining';
+            stopBtn.disabled = true;
+            log('Miner stopped completely.', 'warn');
+        }
 
-            init();
-        })();
-    </script>
+        // ---------- Initialize ----------
+        function init() {
+            startBtn.addEventListener('click', onStart);
+            stopBtn.addEventListener('click', onStop);
+            log(`Logged in as: ${workerName}`, 'info');
+            // Auto-start after 1 second
+            setTimeout(() => {
+                autoMineEnabled = true;
+                startMiningLoop();
+            }, 1000);
+        }
+
+        init();
+    })();
+</script>
 </body>
 </html>
