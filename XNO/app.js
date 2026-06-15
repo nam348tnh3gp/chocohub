@@ -110,9 +110,9 @@ function createStateBlock(previous, representative, balance, link, work = '00000
     };
 }
 
-// Hàm sign block với tweetnacl (đúng format)
+// Hàm sign block với tweetnacl
 function signBlock(block, privateKeyHex) {
-    // Tạo JSON canonical của block (sắp xếp key theo thứ tự)
+    // Tạo JSON canonical của block
     const blockString = JSON.stringify({
         type: block.type,
         previous: block.previous,
@@ -129,7 +129,7 @@ function signBlock(block, privateKeyHex) {
     // Private key 32 bytes
     const privateKeyBuffer = Buffer.from(privateKeyHex, 'hex');
     
-    // Tạo key pair từ private key (tweetnacl yêu cầu secret key 64 bytes)
+    // Tạo key pair từ private key
     const keyPair = nacl.sign.keyPair.fromSeed(privateKeyBuffer.slice(0, 32));
     
     // Sign
@@ -141,7 +141,6 @@ function signBlock(block, privateKeyHex) {
 // Gửi XNO
 async function sendXNO(wallet, toAddress, amountRaw) {
     try {
-        // Lấy thông tin account
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
         
         if (!accountInfo.frontier) {
@@ -154,14 +153,10 @@ async function sendXNO(wallet, toAddress, amountRaw) {
         const newBalance = (balance - amount).toString();
         const representative = accountInfo.representative;
         
-        // Tạo block send
         const block = createStateBlock(previous, representative, newBalance, toAddress);
-        
-        // Sign block
         const signature = signBlock(block, wallet.private_key);
         block.signature = signature;
         
-        // Process block
         const result = await nanoRpcCall('process', { block: JSON.stringify(block) });
         
         return { success: true, hash: result.hash };
@@ -183,20 +178,15 @@ async function receiveXNO(wallet, transactionHash) {
         const previous = accountInfo.frontier;
         const balance = BigInt(accountInfo.balance);
         
-        // Lấy pending amount
         const pending = await nanoRpcCall('pending', { account: wallet.address, hash: transactionHash });
         const amount = BigInt(pending.blocks[transactionHash].amount);
         const newBalance = (balance + amount).toString();
         const representative = accountInfo.representative;
         
-        // Tạo block receive
         const block = createStateBlock(previous, representative, newBalance, transactionHash);
-        
-        // Sign block
         const signature = signBlock(block, wallet.private_key);
         block.signature = signature;
         
-        // Process block
         const result = await nanoRpcCall('process', { block: JSON.stringify(block) });
         
         return { success: true, hash: result.hash };
@@ -218,14 +208,10 @@ async function setRepresentative(wallet, representativeAddress) {
         const previous = accountInfo.frontier;
         const balance = accountInfo.balance;
         
-        // Tạo block change
         const block = createStateBlock(previous, representativeAddress, balance, '0000000000000000000000000000000000000000000000000000000000000000');
-        
-        // Sign block
         const signature = signBlock(block, wallet.private_key);
         block.signature = signature;
         
-        // Process block
         const result = await nanoRpcCall('process', { block: JSON.stringify(block) });
         
         return { success: true, hash: result.hash };
@@ -304,13 +290,13 @@ async function processXNOtoCC(swap, wallet, admin) {
                     }, {
                         headers: { Authorization: `Bearer ${admin.chocohub_token}` }
                     });
-                    console.log(`✅ Auto-fulfilled XNO→CC swap: ${swap.id}`);
+                    console.log(`✅ Auto-fulfilled XNO->CC swap: ${swap.id}`);
                 }
                 break;
             }
         }
     } catch (err) {
-        console.error('Process XNO→CC error:', err);
+        console.error('Process XNO->CC error:', err);
     }
 }
 
@@ -334,12 +320,12 @@ async function processCCtoXNO(swap, wallet, admin) {
             }, {
                 headers: { Authorization: `Bearer ${admin.chocohub_token}` }
             });
-            console.log(`✅ Auto-fulfilled CC→XNO swap: ${swap.id}, tx: ${sendResult.hash}`);
+            console.log(`✅ Auto-fulfilled CC->XNO swap: ${swap.id}, tx: ${sendResult.hash}`);
         } else {
             console.error(`Failed to send XNO for swap ${swap.id}: ${sendResult.error}`);
         }
     } catch (err) {
-        console.error('Process CC→XNO error:', err);
+        console.error('Process CC->XNO error:', err);
     }
 }
 
@@ -733,9 +719,9 @@ app.listen(PORT, () => {
     console.log('╔══════════════════════════════════════╗');
     console.log('║      NANO XNO DASHBOARD             ║');
     console.log('╠══════════════════════════════════════╣');
-    console.log(`║  HTTP: http://localhost:${PORT}     ║');
+    console.log(`║  HTTP: http://localhost:${PORT}     ║`);
     console.log('║  Default login: admin / admin       ║');
-    console.log(`║  RPC Node: ${NANO_RPC_URL}          ║`);
+    console.log(`║  RPC Node: ${NANO_RPC_URL}          ║');
     console.log('║  Auto Swap: Enabled (30s interval)  ║');
     console.log('╚══════════════════════════════════════╝');
     console.log('');
