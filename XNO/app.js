@@ -10,7 +10,8 @@ const blake = require('blakejs');
 const nacl = require('tweetnacl');
 const nanoBase32 = require('nano-base32');
 const nanocurrency = require('nanocurrency');
-const nanoPow = require('nano-pow');          // ← PoW thật
+
+// Không require nano-pow ở đây nữa - sẽ dùng dynamic import
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -132,15 +133,34 @@ function computeBlockHash(block) {
     return blake.blake2bHex(blockString, null, 32);
 }
 
+// Cache nano-pow instance
+let nanoPowInstance = null;
+
+// Khởi tạo nano-pow (dynamic import cho ES module)
+async function initNanoPow() {
+    if (!nanoPowInstance) {
+        try {
+            const nanoPowModule = await import('nano-pow');
+            nanoPowInstance = nanoPowModule.default || nanoPowModule;
+            console.log('✅ nano-pow initialized successfully');
+        } catch (err) {
+            console.error('❌ Failed to load nano-pow:', err.message);
+            throw new Error('Cannot load nano-pow module. Run: npm install nano-pow@5.1.15');
+        }
+    }
+    return nanoPowInstance;
+}
+
 // Sinh PoW thật cho một block hash
 async function generateRealWork(blockHashHex, difficultyHex = 'ffffffc000000000') {
     try {
-        // nano-pow nhận blockHash dạng Buffer hoặc hex string
+        const nanoPow = await initNanoPow();
+        // nano-pow nhận blockHash dạng hex string
         const work = await nanoPow.generateWork(blockHashHex, difficultyHex);
         return work; // work là hex string 16 ký tự
     } catch (err) {
         console.error('PoW generation failed:', err);
-        throw new Error('Failed to generate Proof of Work');
+        throw new Error('Failed to generate Proof of Work: ' + err.message);
     }
 }
 
@@ -590,7 +610,15 @@ app.get('/logout', (req, res) => {
     res.redirect('/login');
 });
 
+// Khởi tạo nano-pow trước khi start (preload để tránh delay lần đầu)
 setTimeout(async () => {
+    try {
+        await initNanoPow();
+        console.log('⚡ nano-pow ready for PoW generation');
+    } catch (err) {
+        console.error('⚠️ nano-pow initialization failed:', err.message);
+    }
+    
     const admin = await getAdmin();
     if (admin.chocohub_token) {
         swapProcessorInterval = setInterval(processPendingSwaps, SWAP_CHECK_INTERVAL);
@@ -607,7 +635,7 @@ app.listen(PORT, () => {
     console.log('║  Default login: admin / admin       ║');
     console.log(`║  RPC Node: ${NANO_RPC_URL}          ║`);
     console.log('║  Auto Swap: Enabled (30s interval)  ║');
-    console.log('║  PoW: Real (nano-pow)               ║');
+    console.log('║  PoW: Real (nano-pow v5 ES module)  ║');
     console.log('╚══════════════════════════════════════╝');
     console.log('');
 });
