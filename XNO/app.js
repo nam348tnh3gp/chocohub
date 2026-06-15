@@ -19,7 +19,7 @@ const PORT = process.env.PORT || 3000;
 const NANO_RPC_URL = 'https://rpc.nano.to';
 
 // Swap check interval (ms)
-const SWAP_CHECK_INTERVAL = 30000; // 30 seconds
+const SWAP_CHECK_INTERVAL = 30000;
 
 // ========== CONFIG ==========
 const DATA_DIR = path.join(__dirname, 'data');
@@ -72,14 +72,6 @@ function isValidNanoAddress(address) {
     return address && address.startsWith('nano_') && address.length >= 60;
 }
 
-// Lưu private key trực tiếp (không mã hóa, chỉ lưu seed thôi)
-async function saveWalletToFile(walletData) {
-    const data = await getWallets();
-    data.wallets.push(walletData);
-    if (!data.active_wallet) data.active_wallet = walletData.id;
-    await updateWallets(data);
-}
-
 // Tạo địa chỉ Nano từ seed
 async function generateNanoAddressFromSeed(seedHex, index = 0) {
     try {
@@ -106,45 +98,70 @@ async function generateRandomSeed() {
     return seedBuffer.toString('hex');
 }
 
-// Sign với tweetnacl
-function signWithPrivateKey(messageHex, privateKeyHex) {
-    const message = Buffer.from(messageHex, 'hex');
-    const privateKey = Buffer.from(privateKeyHex, 'hex');
-    // tweetnacl yêu cầu secret key 64 bytes (private + public)
-    // Cần lấy public key từ private key
-    const keyPair = nacl.sign.keyPair.fromSeed(privateKey.slice(0, 32));
-    const signature = nacl.sign.detached(message, keyPair.secretKey);
+// Tạo state block (send, receive, change)
+function createStateBlock(previous, representative, balance, link, work = '0000000000000000') {
+    return {
+        type: 'state',
+        previous: previous,
+        representative: representative,
+        balance: balance,
+        link: link,
+        work: work
+    };
+}
+
+// Hàm sign block với tweetnacl (đúng format)
+function signBlock(block, privateKeyHex) {
+    // Tạo JSON canonical của block (sắp xếp key theo thứ tự)
+    const blockString = JSON.stringify({
+        type: block.type,
+        previous: block.previous,
+        representative: block.representative,
+        balance: block.balance,
+        link: block.link,
+        work: block.work
+    });
+    
+    // Tính hash của block (blake2b)
+    const blockHash = blake.blake2bHex(blockString, null, 32);
+    const blockHashBuffer = Buffer.from(blockHash, 'hex');
+    
+    // Private key 32 bytes
+    const privateKeyBuffer = Buffer.from(privateKeyHex, 'hex');
+    
+    // Tạo key pair từ private key (tweetnacl yêu cầu secret key 64 bytes)
+    const keyPair = nacl.sign.keyPair.fromSeed(privateKeyBuffer.slice(0, 32));
+    
+    // Sign
+    const signature = nacl.sign.detached(blockHashBuffer, keyPair.secretKey);
+    
     return Buffer.from(signature).toString('hex');
 }
 
 // Gửi XNO
-async function sendXNO(wallet, toAddress, amountRaw, work = '0000000000000000') {
+async function sendXNO(wallet, toAddress, amountRaw) {
     try {
+        // Lấy thông tin account
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
         
         if (!accountInfo.frontier) {
-            throw new Error('Account not initialized');
+            throw new Error('Account not initialized. Send a small amount first.');
         }
         
         const previous = accountInfo.frontier;
         const balance = BigInt(accountInfo.balance);
         const amount = BigInt(amountRaw);
         const newBalance = (balance - amount).toString();
+        const representative = accountInfo.representative;
         
-        const block = {
-            type: 'state',
-            previous: previous,
-            representative: accountInfo.representative,
-            balance: newBalance,
-            link: toAddress,
-            work: work
-        };
+        // Tạo block send
+        const block = createStateBlock(previous, representative, newBalance, toAddress);
         
-        const blockHash = blake.blake2bHex(JSON.stringify(block), null, 32);
-        const signature = signWithPrivateKey(blockHash, wallet.private_key);
-        
+        // Sign block
+        const signature = signBlock(block, wallet.private_key);
         block.signature = signature;
         
+        // Process block
         const result = await nanoRpcCall('process', { block: JSON.stringify(block) });
         
         return { success: true, hash: result.hash };
@@ -154,8 +171,43 @@ async function sendXNO(wallet, toAddress, amountRaw, work = '0000000000000000') 
     }
 }
 
+// Receive XNO
+async function receiveXNO(wallet, transactionHash) {
+    try {
+        const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
+        
+        if (!accountInfo.frontier) {
+            throw new Error('Account not initialized');
+        }
+        
+        const previous = accountInfo.frontier;
+        const balance = BigInt(accountInfo.balance);
+        
+        // Lấy pending amount
+        const pending = await nanoRpcCall('pending', { account: wallet.address, hash: transactionHash });
+        const amount = BigInt(pending.blocks[transactionHash].amount);
+        const newBalance = (balance + amount).toString();
+        const representative = accountInfo.representative;
+        
+        // Tạo block receive
+        const block = createStateBlock(previous, representative, newBalance, transactionHash);
+        
+        // Sign block
+        const signature = signBlock(block, wallet.private_key);
+        block.signature = signature;
+        
+        // Process block
+        const result = await nanoRpcCall('process', { block: JSON.stringify(block) });
+        
+        return { success: true, hash: result.hash };
+    } catch (err) {
+        console.error('Receive XNO error:', err);
+        return { success: false, error: err.message };
+    }
+}
+
 // Set representative
-async function setRepresentative(wallet, representativeAddress, work = '0000000000000000') {
+async function setRepresentative(wallet, representativeAddress) {
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
         
@@ -166,59 +218,19 @@ async function setRepresentative(wallet, representativeAddress, work = '00000000
         const previous = accountInfo.frontier;
         const balance = accountInfo.balance;
         
-        const block = {
-            type: 'state',
-            previous: previous,
-            representative: representativeAddress,
-            balance: balance,
-            link: '0000000000000000000000000000000000000000000000000000000000000000',
-            work: work
-        };
+        // Tạo block change
+        const block = createStateBlock(previous, representativeAddress, balance, '0000000000000000000000000000000000000000000000000000000000000000');
         
-        const blockHash = blake.blake2bHex(JSON.stringify(block), null, 32);
-        const signature = signWithPrivateKey(blockHash, wallet.private_key);
-        
+        // Sign block
+        const signature = signBlock(block, wallet.private_key);
         block.signature = signature;
         
+        // Process block
         const result = await nanoRpcCall('process', { block: JSON.stringify(block) });
         
         return { success: true, hash: result.hash };
     } catch (err) {
         console.error('Set representative error:', err);
-        return { success: false, error: err.message };
-    }
-}
-
-// Receive XNO
-async function receiveXNO(wallet, transactionHash) {
-    try {
-        const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
-        const previous = accountInfo.frontier;
-        const balance = BigInt(accountInfo.balance);
-        
-        const pending = await nanoRpcCall('pending', { account: wallet.address, hash: transactionHash });
-        const amount = BigInt(pending.blocks[transactionHash].amount);
-        const newBalance = (balance + amount).toString();
-        
-        const block = {
-            type: 'state',
-            previous: previous,
-            representative: accountInfo.representative,
-            balance: newBalance,
-            link: transactionHash,
-            work: '0000000000000000'
-        };
-        
-        const blockHash = blake.blake2bHex(JSON.stringify(block), null, 32);
-        const signature = signWithPrivateKey(blockHash, wallet.private_key);
-        
-        block.signature = signature;
-        
-        const result = await nanoRpcCall('process', { block: JSON.stringify(block) });
-        
-        return { success: true, hash: result.hash };
-    } catch (err) {
-        console.error('Receive XNO error:', err);
         return { success: false, error: err.message };
     }
 }
@@ -256,7 +268,7 @@ async function processPendingSwaps() {
         const data = await getWallets();
         const activeWallet = data.wallets.find(w => w.id === data.active_wallet);
         
-        if (!activeWallet || !activeWallet.private_key) return;
+        if (!activeWallet) return;
         
         for (const swap of swaps) {
             if (swap.status !== 'pending') continue;
@@ -397,7 +409,7 @@ app.get('/api/admin', requireAuth, async (req, res) => {
     });
 });
 
-// ========== WALLET MANAGEMENT (no encryption, direct private key) ==========
+// ========== WALLET MANAGEMENT ==========
 app.get('/api/wallets', requireAuth, async (req, res) => {
     const data = await getWallets();
     const safeWallets = data.wallets.map(w => ({
@@ -721,7 +733,7 @@ app.listen(PORT, () => {
     console.log('╔══════════════════════════════════════╗');
     console.log('║      NANO XNO DASHBOARD             ║');
     console.log('╠══════════════════════════════════════╣');
-    console.log(`║  HTTP: http://localhost:${PORT}     ║`);
+    console.log(`║  HTTP: http://localhost:${PORT}     ║');
     console.log('║  Default login: admin / admin       ║');
     console.log(`║  RPC Node: ${NANO_RPC_URL}          ║`);
     console.log('║  Auto Swap: Enabled (30s interval)  ║');
