@@ -392,9 +392,100 @@
             .game-title { font-size: 1.6rem; }
             .dpad-btn { font-size: 1.3rem; }
         }
+
+        /* ── Ad unit fixo no lado direito ── */
+        .ad-sidebar {
+            position: fixed;
+            top: 50%;
+            right: 8px;
+            transform: translateY(-50%);
+            z-index: 9998;
+            width: 150px;
+            text-align: center;
+            font-size: 0;
+        }
+        .ad-sidebar input[type="checkbox"] {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .ad-sidebar .ad-inner {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .ad-sidebar .close-btn {
+            position: absolute;
+            bottom: -24px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(248, 248, 249, 0.7);
+            border-radius: 4px;
+            padding: 4px;
+            cursor: pointer;
+            z-index: 99999;
+            line-height: 0;
+        }
+        .ad-sidebar .close-btn svg {
+            display: block;
+            width: 16px;
+            height: 16px;
+            fill: #000;
+        }
+        #aadsstickymqfltshv:checked ~ .ad-inner,
+        #aadsstickymqfltshv:checked ~ .close-btn {
+            display: none;
+        }
+        .ad-frame-link {
+            display: inline-block;
+            font-size: 13px;
+            color: #263238;
+            padding: 4px 10px;
+            background: #F8F8F9;
+            text-decoration: none;
+            border-radius: 4px 4px 0 0;
+        }
+        .ad-iframe {
+            border: 0;
+            padding: 0;
+            width: 100%;
+            height: 200px;
+            overflow: hidden;
+            margin: 0 auto;
+        }
+        @media (max-width: 768px) {
+            .ad-sidebar {
+                display: none;
+            }
+        }
     </style>
 </head>
 <body>
+
+    <!-- BEGIN AADS AD UNIT 2444206 -->
+    <div class="ad-sidebar">
+        <input autocomplete="off" type="checkbox" id="aadsstickymqfltshv" hidden />
+        <div class="ad-inner">
+            <div style="width:100%;text-align:center;">
+                <a class="ad-frame-link"
+                   target="_blank"
+                   href="https://aads.com/campaigns/new?source_id=2444206&source_type=ad_unit&partner=2444206">
+                    Advertise here
+                </a>
+            </div>
+            <iframe class="ad-iframe"
+                    data-aa="2444206"
+                    src="//acceptable.a-ads.com/2444206/?size=Adaptive">
+            </iframe>
+        </div>
+        <label for="aadsstickymqfltshv" class="close-btn" title="Fechar anúncio">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 490 490">
+                <polygon points="456.851,0 245,212.564 33.149,0 0.708,32.337 212.669,245.004 0.708,457.678 33.149,490 245,277.443 456.851,490 489.292,457.678 277.331,245.004 489.292,32.337"/>
+            </svg>
+        </label>
+    </div>
+    <!-- END AADS AD UNIT 2444206 -->
 
     <a href="/" class="btn-back">← BACK</a>
     <div class="liquid-bg"></div>
@@ -560,11 +651,5 @@
     <!-- Các script gốc của bạn (game logic + hardcore) -->
     <script src="static/js/hardcore.js" defer></script>
     <script src="static/js/game.js" defer></script>
-
-    <!-- 
-        KHÔNG cần script nội tuyến vì game.js đã định nghĩa đầy đủ:
-        checkUser(), startGame(), claimReward(), showLb(), ...
-        và các onclick đều gọi đúng hàm toàn cục.
-    -->
 </body>
 </html>
