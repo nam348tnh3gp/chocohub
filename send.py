@@ -6,7 +6,6 @@ import asyncio
 import aiohttp
 import requests
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
 
 # ========== CONFIG FILE ==========
 CONFIG_FILE = "swap_config.json"
@@ -65,7 +64,7 @@ def interactive_setup():
     memo = input("Memo prefix for SWAP [SWAP CC for]: ").strip()
     config["MEMO_PREFIX"] = memo if memo else "SWAP CC for"
     
-    interval = input("Check interval (seconds) [5]: ").strip()  # Giảm xuống 5s để fetch nhanh hơn
+    interval = input("Check interval (seconds) [5]: ").strip()
     config["SLEEP_INTERVAL"] = int(interval) if interval.isdigit() else 5
     
     print("\n" + "="*50)
@@ -107,9 +106,6 @@ DUCO_HEADERS = {
     "Accept": "application/json",
     "Connection": "keep-alive"
 }
-
-# Thread pool cho operations sync
-executor = ThreadPoolExecutor(max_workers=2)
 
 def truncate_hash(hash_str, length=9):
     """Rút gọn hash cho hiển thị đẹp"""
@@ -270,8 +266,8 @@ def send_duco(recipient, amount_cc):
         return False, str(e)
 
 # ========== ASYNC FUNCTIONS DÙNG AIOHTTP ==========
-async def fetch_transactions_async(session, username, limit=50):
-    """Fetch transactions async bằng aiohttp - GỌI NGAY LẬP TỨC"""
+async def fetch_all_transactions_async(session, username, limit=50):
+    """Fetch ALL transactions (both incoming and outgoing) của username"""
     url = f"https://server.duinocoin.com/user_transactions/{username}?limit={limit}"
     try:
         async with session.get(url, headers=DUCO_HEADERS, timeout=aiohttp.ClientTimeout(total=10)) as resp:
@@ -289,37 +285,36 @@ async def fetch_transactions_async(session, username, limit=50):
         print(f"   ⚠️ Error fetching: {e}")
     return []
 
-async def check_incoming_duco_async(processed_txids, pending_swaps):
+async def check_all_duco_transactions_async(processed_txids, pending_swaps):
     """
-    Async check incoming DUCO transactions NGAY LẬP TỨC
+    CHECK FULL 50 TRANSACTIONS - không lọc recipient
+    Tìm bất kỳ transaction nào có memo đúng format và amount đúng
     """
     async with aiohttp.ClientSession() as session:
-        # Fetch transactions của ví bạn
-        transactions = await fetch_transactions_async(session, DUCO_RECIPIENT, 50)
+        # Fetch FULL 50 transactions của ví bạn (cả gửi và nhận)
+        all_transactions = await fetch_all_transactions_async(session, DUCO_RECIPIENT, 50)
         
-        if not transactions:
+        if not all_transactions:
             print(f"   ❌ No transactions found for {DUCO_RECIPIENT}")
             return None
         
-        print(f"   ✅ Fetched {len(transactions)} total transactions")
+        print(f"   ✅ Fetched {len(all_transactions)} total transactions (both send & receive)")
         
-        # Lọc giao dịch NHẬN (recipient = bạn) và chưa xử lý
-        incoming_txs = [
-            tx for tx in transactions 
-            if tx.get("recipient") == DUCO_RECIPIENT 
-            and tx.get("hash") not in processed_txids
-        ]
+        # Lọc transactions chưa xử lý
+        new_txs = [tx for tx in all_transactions if tx.get("hash") not in processed_txids]
         
-        if not incoming_txs:
-            print(f"   ℹ️ No new incoming transactions")
+        if not new_txs:
+            print(f"   ℹ️ No new transactions (all {len(all_transactions)} already processed)")
             return None
         
-        print(f"   🎯 Found {len(incoming_txs)} new incoming transactions")
+        print(f"   🎯 Found {len(new_txs)} new transactions to check")
         
-        # Debug: Log 5 transactions đầu
-        for idx, tx in enumerate(incoming_txs[:5], 1):
-            memo_display = tx.get('memo', '')[:40]
-            print(f"      {idx}. {tx.get('sender')[:15]} -> {tx.get('amount')} DUCO | Memo: '{memo_display}'")
+        # Debug: Log 5 transactions mới nhất
+        print(f"   📋 Recent transactions:")
+        for idx, tx in enumerate(new_txs[:10], 1):
+            tx_type = "➡️ SENT" if tx.get("sender") == DUCO_RECIPIENT else "⬅️ RECEIVED"
+            memo_display = tx.get('memo', '')[:35]
+            print(f"      {idx}. {tx_type} | {tx.get('sender')[:12]} -> {tx.get('recipient')[:12]} | {tx.get('amount')} DUCO | Memo: '{memo_display}'")
         
         # Lọc các pending duco_to_cc swaps
         pending_ducos = [req for req in pending_swaps 
@@ -338,26 +333,37 @@ async def check_incoming_duco_async(processed_txids, pending_swaps):
             pending_by_memo[expected_memo] = req
             print(f"      📌 Waiting for memo: '{expected_memo}' (Swap: {req['id'][:8]}..., Amount: {req['amount_cc']/10} DUCO)")
         
-        # Duyệt từng incoming transaction
-        for tx in incoming_txs:
+        # Duyệt qua TẤT CẢ transactions (không phân biệt send/receive)
+        for tx in new_txs:
             tx_hash = tx.get("hash")
             memo = tx.get("memo", "").strip()
             amount_duco = float(tx.get("amount", 0))
             sender = tx.get("sender", "unknown")
+            recipient = tx.get("recipient", "unknown")
+            
+            # Log đang check transaction nào
+            print(f"\n   🔍 Checking TX: {truncate_hash(tx_hash)}")
+            print(f"      From: {sender} → To: {recipient}")
+            print(f"      Amount: {amount_duco} DUCO")
+            print(f"      Memo: '{memo}'")
             
             # Tìm swap matching với memo này
             if memo not in pending_by_memo:
-                # Chỉ log nếu memo có chứa MEMO_PREFIX
                 if MEMO_PREFIX in memo:
-                    print(f"   ⚠️ Memo '{memo}' not in pending list")
+                    print(f"      ⚠️ Memo contains '{MEMO_PREFIX}' but not in pending list")
                 continue
             
             req = pending_by_memo[memo]
             expected_duco = req.get("amount_cc", 0) / 10.0
             
-            # Kiểm tra amount (cho phép sai số 0.01 DUCO)
+            # Kiểm tra amount
             if abs(amount_duco - expected_duco) > 0.01:
-                print(f"   ⚠️ Amount mismatch: expected {expected_duco}, got {amount_duco}")
+                print(f"      ❌ Amount mismatch: expected {expected_duco}, got {amount_duco}")
+                continue
+            
+            # Kiểm tra recipient có phải là bạn không
+            if recipient != DUCO_RECIPIENT:
+                print(f"      ❌ Recipient mismatch: expected {DUCO_RECIPIENT}, got {recipient}")
                 continue
             
             print(f"\n   ✅✅✅ MATCH FOUND! ✅✅✅")
@@ -369,13 +375,14 @@ async def check_incoming_duco_async(processed_txids, pending_swaps):
             
             return tx, req
     
+    print(f"\n   ⏳ No matching transaction found in all {len(new_txs)} new transactions")
     return None
 
 def check_incoming_duco_immediately():
     """
-    CHECK GIAO DỊCH USER GỬI CHO BẠN NGAY LẬP TỨC - DÙNG ASYNC
+    CHECK FULL 50 TRANSACTIONS NGAY LẬP TỨC
     """
-    print(f"\n🔍 IMMEDIATE CHECK - Fetching DUCO transactions for {DUCO_RECIPIENT}...")
+    print(f"\n🔍 IMMEDIATE CHECK - Fetching ALL transactions for {DUCO_RECIPIENT}...")
     
     processed_txids = load_processed_txids()
     pending_swaps = get_pending_swaps()
@@ -384,10 +391,10 @@ def check_incoming_duco_immediately():
         print("   ℹ️ No pending swaps")
         return False
     
-    # Chạy async fetch
+    # Chạy async fetch full transactions
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    result = loop.run_until_complete(check_incoming_duco_async(processed_txids, pending_swaps))
+    result = loop.run_until_complete(check_all_duco_transactions_async(processed_txids, pending_swaps))
     loop.close()
     
     if result:
@@ -407,7 +414,6 @@ def check_incoming_duco_immediately():
             print(f"   ❌ Failed to fulfill swap {req['id']}")
             return False
     
-    print(f"   ⏳ No matching transaction found")
     return False
 
 def process_swap(req):
@@ -452,10 +458,10 @@ def process_swap(req):
             return False
 
     elif swap_type == "duco_to_cc":
-        # DUCO → CC: User gửi DUCO cho bạn, bạn check NGAY LẬP TỨC
+        # DUCO → CC: User gửi DUCO cho bạn, bạn check FULL transactions
         print(f"\n   🔍 User needs to send {amount_cc/10:.2f} DUCO to {DUCO_RECIPIENT}")
         print(f"   📝 Expected memo: '{MEMO_PREFIX} {receiver}'")
-        print(f"   ⚡ Checking IMMEDIATELY...")
+        print(f"   ⚡ Checking ALL transactions IMMEDIATELY...")
         
         # Check ngay lập tức không chờ
         success = check_incoming_duco_immediately()
@@ -463,7 +469,7 @@ def process_swap(req):
         if success:
             print(f"   ✅ Swap {rid} processed and fulfilled!")
         else:
-            print(f"   ⏳ No transaction found yet for swap {rid}")
+            print(f"   ⏳ No matching transaction found yet for swap {rid}")
             print(f"   💡 Waiting for user to send DUCO with correct memo")
         
         return success
@@ -481,13 +487,13 @@ def process_swap(req):
         return False
 
 async def periodic_check_async():
-    """Periodic check for incoming transactions"""
+    """Periodic check for incoming transactions - check FULL 50 transactions"""
     print("\n🔄 Periodic check for pending DUCO→CC swaps...")
     processed_txids = load_processed_txids()
     pending_swaps = get_pending_swaps()
     
     if pending_swaps:
-        result = await check_incoming_duco_async(processed_txids, pending_swaps)
+        result = await check_all_duco_transactions_async(processed_txids, pending_swaps)
         if result:
             tx, req = result
             tx_hash = tx.get("hash")
@@ -500,7 +506,7 @@ async def periodic_check_async():
 
 def main():
     print("\n" + "="*60)
-    print("🚀 SWAP CLIENT - ChocoHub (Instant Async Fetch)")
+    print("🚀 SWAP CLIENT - Check ALL 50 Transactions")
     print("="*60)
     print(f"📍 Server: {RENDER_API_URL}")
     print(f"👤 Admin: {ADMIN_USERNAME}")
@@ -526,10 +532,10 @@ def main():
                     swap_type = req.get("swap_type")
                     
                     if swap_type == "duco_to_cc":
-                        # XỬ LÝ NGAY LẬP TỨC - KHÔNG CHỜ
+                        # XỬ LÝ NGAY LẬP TỨC
                         print(f"\n⚡⚡⚡ Processing DUCO→CC swap {req['id']} IMMEDIATELY! ⚡⚡⚡")
                         process_swap(req)
-                        time.sleep(1)  # Delay nhẹ
+                        time.sleep(1)
                     elif swap_type == "duco":
                         print(f"\n💰 Processing CC→DUCO swap {req['id']}")
                         process_swap(req)
@@ -543,10 +549,9 @@ def main():
             else:
                 print("✅ No pending swaps")
 
-            # Periodic check mỗi 30s cho các transaction đến sau
+            # Periodic check mỗi 30s
             now = time.time()
             if now - last_incoming_check > 30:
-                # Chạy periodic check async
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 loop.run_until_complete(periodic_check_async())
