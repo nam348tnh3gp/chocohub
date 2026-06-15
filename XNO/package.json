@@ -13,6 +13,6 @@
     "axios": "^1.6.0",
     "fs-extra": "^11.1.1",
     "multer": "^1.4.5-lts.1",
-    "nanocurrency": "^5.0.0"
+    "nanocurrency": "^2.5.0"
   }
 }
