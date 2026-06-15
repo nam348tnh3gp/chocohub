@@ -98,12 +98,36 @@ function isValidNanoAddress(address) {
     return address && address.startsWith('nano_') && address.length >= 60;
 }
 
-// Hàm tạo địa chỉ Nano từ seed - dùng API đúng của nanocurrency 2.5.0
-async function generateNanoAddressFromSeed(seedHex, index = 0) {
+// Validate seed (phải là 64 hex chars hoặc Buffer 32 bytes)
+function isValidSeed(seed) {
+    if (Buffer.isBuffer(seed)) {
+        return seed.length === 32;
+    }
+    if (typeof seed === 'string') {
+        return /^[0-9a-fA-F]{64}$/.test(seed);
+    }
+    return false;
+}
+
+// Hàm tạo địa chỉ Nano từ seed
+async function generateNanoAddressFromSeed(seedInput, index = 0) {
     try {
-        // Tạo key pair từ seed
-        // Trong nanocurrency 2.5.0, dùng deriveKeyPair hoặc từ seed
-        const seedBuffer = typeof seedHex === 'string' ? Buffer.from(seedHex, 'hex') : seedHex;
+        // Chuyển đổi seed sang Buffer 32 bytes
+        let seedBuffer;
+        if (Buffer.isBuffer(seedInput)) {
+            seedBuffer = seedInput;
+        } else if (typeof seedInput === 'string') {
+            if (!isValidSeed(seedInput)) {
+                throw new Error('Invalid seed format: must be 64 hex characters');
+            }
+            seedBuffer = Buffer.from(seedInput, 'hex');
+        } else {
+            throw new Error('Seed must be Buffer or hex string');
+        }
+        
+        if (seedBuffer.length !== 32) {
+            throw new Error(`Seed must be 32 bytes, got ${seedBuffer.length} bytes`);
+        }
         
         // Dùng deriveSecretKey và derivePublicKey
         const privateKey = await nanocurrency.deriveSecretKey(seedBuffer, index);
@@ -119,6 +143,11 @@ async function generateNanoAddressFromSeed(seedHex, index = 0) {
         console.error('Generate address error:', err);
         throw err;
     }
+}
+
+// Tạo seed ngẫu nhiên 32 byte
+function generateRandomSeed() {
+    return crypto.randomBytes(32);
 }
 
 // ========== AUTH MIDDLEWARE ==========
@@ -212,14 +241,16 @@ app.get('/api/wallets', requireAuth, async (req, res) => {
     });
 });
 
-// Create new wallet
+// Create new wallet - Tạo ví mới với seed random
 app.post('/api/wallet/create', requireAuth, async (req, res) => {
     try {
-        // Generate random 32-byte seed
-        const seed = crypto.randomBytes(32);
-        const seedHex = seed.toString('hex');
+        // Tạo seed ngẫu nhiên 32 byte
+        const seedBuffer = generateRandomSeed();
+        const seedHex = seedBuffer.toString('hex');
         
-        const { address, publicKey, privateKey } = await generateNanoAddressFromSeed(seed, 0);
+        console.log(`Creating wallet with seed length: ${seedBuffer.length} bytes`);
+        
+        const { address, publicKey, privateKey } = await generateNanoAddressFromSeed(seedBuffer, 0);
         
         const wallet = {
             id: Date.now().toString(),
@@ -241,23 +272,40 @@ app.post('/api/wallet/create', requireAuth, async (req, res) => {
         
         res.json({ success: true, wallet: { ...wallet, seed: undefined, private_key: undefined } });
     } catch (err) {
-        console.error(err);
+        console.error('Create wallet error:', err);
         res.json({ success: false, error: err.message });
     }
 });
 
-// Import wallet from seed
+// Import wallet from seed hex string
 app.post('/api/wallet/import', requireAuth, async (req, res) => {
     try {
         const { seed, name, index } = req.body;
         
-        if (!seed || seed.length < 64) {
-            return res.json({ success: false, error: 'Invalid seed (must be 64 hex chars)' });
+        if (!seed) {
+            return res.json({ success: false, error: 'Seed is required' });
         }
         
-        const seedHex = seed.length === 64 ? seed : Buffer.from(seed).toString('hex');
+        // Chuẩn hóa seed
+        let seedHex = seed;
+        if (seed.length !== 64) {
+            // Nếu không phải hex 64 ký tự, thử chuyển từ buffer
+            try {
+                seedHex = Buffer.from(seed).toString('hex');
+                if (seedHex.length !== 64) {
+                    return res.json({ success: false, error: 'Seed must be 32 bytes (64 hex characters)' });
+                }
+            } catch (e) {
+                return res.json({ success: false, error: 'Invalid seed format' });
+            }
+        }
+        
         const walletIndex = index || 0;
         const seedBuffer = Buffer.from(seedHex, 'hex');
+        
+        if (seedBuffer.length !== 32) {
+            return res.json({ success: false, error: `Seed must be 32 bytes, got ${seedBuffer.length} bytes` });
+        }
         
         const { address, publicKey, privateKey } = await generateNanoAddressFromSeed(seedBuffer, walletIndex);
         
@@ -287,7 +335,7 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
         
         res.json({ success: true, wallet: { ...wallet, seed: undefined, private_key: undefined } });
     } catch (err) {
-        console.error(err);
+        console.error('Import wallet error:', err);
         res.json({ success: false, error: err.message });
     }
 });
@@ -300,15 +348,29 @@ app.post('/api/wallet/import-file', requireAuth, upload.single('seedFile'), asyn
         }
         
         const content = await fs.readFile(req.file.path, 'utf8');
-        const seed = content.trim();
+        let seed = content.trim();
         
         await fs.remove(req.file.path);
         
-        if (!seed || seed.length < 64) {
-            return res.json({ success: false, error: 'Invalid seed file content' });
+        // Chuẩn hóa seed
+        if (seed.length !== 64) {
+            try {
+                seed = Buffer.from(seed).toString('hex');
+            } catch (e) {
+                return res.json({ success: false, error: 'Invalid seed file content' });
+            }
+        }
+        
+        if (seed.length !== 64) {
+            return res.json({ success: false, error: 'Seed must be 64 hex characters' });
         }
         
         const seedBuffer = Buffer.from(seed, 'hex');
+        
+        if (seedBuffer.length !== 32) {
+            return res.json({ success: false, error: `Invalid seed: ${seedBuffer.length} bytes (expected 32)` });
+        }
+        
         const { address, publicKey, privateKey } = await generateNanoAddressFromSeed(seedBuffer, 0);
         
         const wallet = {
