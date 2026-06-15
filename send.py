@@ -61,8 +61,11 @@ def interactive_setup():
     
     # Options
     print("\n--- Options (Press Enter for defaults) ---")
-    memo = input("Memo prefix for SWAP [SWAP CC for]: ").strip()
-    config["MEMO_PREFIX"] = memo if memo else "SWAP CC for"
+    memo_receive = input("Memo prefix for RECEIVING (user gửi cho bạn) [SWAP CC for]: ").strip()
+    config["MEMO_PREFIX_RECEIVE"] = memo_receive if memo_receive else "SWAP CC for"
+    
+    memo_send = input("Memo prefix for SENDING (bạn gửi cho user) [swap from chocohub]: ").strip()
+    config["MEMO_PREFIX_SEND"] = memo_send if memo_send else "swap from chocohub"
     
     interval = input("Check interval (seconds) [3]: ").strip()
     config["SLEEP_INTERVAL"] = int(interval) if interval.isdigit() else 3
@@ -86,7 +89,8 @@ ADMIN_PIN = config.get("ADMIN_PIN")
 DUCO_FAUCET_USERNAME = config.get("DUCO_FAUCET_USERNAME")
 DUCO_FAUCET_PASSWORD = config.get("DUCO_FAUCET_PASSWORD")
 DUCO_RECIPIENT = config.get("DUCO_RECIPIENT", "Nam2010")
-MEMO_PREFIX = config.get("MEMO_PREFIX", "SWAP CC for")
+MEMO_PREFIX_RECEIVE = config.get("MEMO_PREFIX_RECEIVE", "SWAP CC for")
+MEMO_PREFIX_SEND = config.get("MEMO_PREFIX_SEND", "swap from chocohub")
 SLEEP_INTERVAL = config.get("SLEEP_INTERVAL", 3)
 
 # Cache JWT
@@ -241,14 +245,16 @@ def update_faucet_balance():
     return balance_cache["balance"] or 0.0
 
 def send_duco(recipient, amount_cc):
-    """Gửi DUCO đi (CC → DUCO)"""
+    """Gửi DUCO đi (CC → DUCO) - Dùng memo riêng để phân biệt"""
     amount_duco = amount_cc / 10.0
+    # SỬA MEMO: dùng MEMO_PREFIX_SEND để phân biệt giao dịch từ ChocoHub
+    memo = f"{MEMO_PREFIX_SEND} {recipient}"
     params = {
         "username": DUCO_FAUCET_USERNAME,
         "password": DUCO_FAUCET_PASSWORD,
         "recipient": recipient,
         "amount": amount_duco,
-        "memo": f"{MEMO_PREFIX} {recipient}"
+        "memo": memo
     }
     try:
         resp = requests.get("https://server.duinocoin.com/transaction/", params=params, headers=DUCO_HEADERS, timeout=15)
@@ -256,7 +262,7 @@ def send_duco(recipient, amount_cc):
             data = resp.json()
             if data.get("success"):
                 print(f"   ✅ DUCO transfer initiated")
-                print(f"   📝 Memo: {params['memo']}")
+                print(f"   📝 Memo: {memo}")
                 print(f"   💰 Amount: {amount_duco} DUCO")
                 return True, None
             else:
@@ -289,6 +295,7 @@ async def check_raw_duco_transactions_async(processed_txids, pending_swaps):
     """
     CHECK RAW TRANSACTIONS - KHÔNG FILTER GÌ CẢ
     Lấy tất cả transactions từ API, check từng cái một
+    Dùng MEMO_PREFIX_RECEIVE để nhận diện giao dịch từ user
     """
     async with aiohttp.ClientSession() as session:
         # Fetch RAW transactions - lấy 100 transactions để chắc chắn
@@ -328,11 +335,11 @@ async def check_raw_duco_transactions_async(processed_txids, pending_swaps):
             print(f"   ℹ️ No pending duco_to_cc swaps")
             return None
         
-        # Tạo map memo -> swap request
+        # Tạo map memo -> swap request (dùng MEMO_PREFIX_RECEIVE)
         pending_by_memo = {}
         for req in pending_ducos:
             receiver = req.get("receiver")
-            expected_memo = f"{MEMO_PREFIX} {receiver}"
+            expected_memo = f"{MEMO_PREFIX_RECEIVE} {receiver}"
             pending_by_memo[expected_memo] = req
             print(f"      📌 EXPECTED: Memo '{expected_memo}' for {req['amount_cc']/10} DUCO")
         
@@ -351,12 +358,10 @@ async def check_raw_duco_transactions_async(processed_txids, pending_swaps):
             print(f"      💰 Amount: {amount_duco} DUCO")
             print(f"      📝 Memo: '{memo}'")
             
-            # BỎ QUA FILTER RECIPIENT - check tất cả
-            
             # Tìm swap matching với memo
             if memo not in pending_by_memo:
-                if MEMO_PREFIX in memo:
-                    print(f"      ⚠️ Memo contains '{MEMO_PREFIX}' but not expected")
+                if MEMO_PREFIX_RECEIVE in memo:
+                    print(f"      ⚠️ Memo contains '{MEMO_PREFIX_RECEIVE}' but not expected")
                 continue
             
             req = pending_by_memo[memo]
@@ -466,7 +471,7 @@ def process_swap(req):
     elif swap_type == "duco_to_cc":
         # DUCO → CC: User gửi DUCO cho bạn, check RAW transactions
         print(f"\n   🔍 User needs to send {amount_cc/10:.2f} DUCO to {DUCO_RECIPIENT}")
-        print(f"   📝 Expected memo: '{MEMO_PREFIX} {receiver}'")
+        print(f"   📝 Expected memo: '{MEMO_PREFIX_RECEIVE} {receiver}'")
         print(f"   ⚡ Checking RAW transactions (no filter)...")
         
         # Check ngay lập tức không chờ
@@ -518,7 +523,8 @@ def main():
     print(f"👤 Admin: {ADMIN_USERNAME}")
     print(f"💰 DUCO Faucet: {DUCO_FAUCET_USERNAME}")
     print(f"📥 Your DUCO Wallet: {DUCO_RECIPIENT}")
-    print(f"📝 Memo Prefix: {MEMO_PREFIX}")
+    print(f"📝 Memo Receive (user → you): {MEMO_PREFIX_RECEIVE}")
+    print(f"📝 Memo Send (you → user): {MEMO_PREFIX_SEND}")
     print(f"⏱️  Interval: {SLEEP_INTERVAL}s")
     print("="*60 + "\n")
 
