@@ -6,14 +6,24 @@ const path = require('path');
 const multer = require('multer');
 const axios = require('axios');
 const { nanocurrency } = require('nanocurrency');
-const { NanoRPC } = require('nano-node-rpc');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 
-// Nano RPC (public node ổn định)
-const rpc = new NanoRPC('https://www.nanode.co/api');
+// Nano RPC URL (public node ổn định)
+const NANO_RPC_URL = 'https://www.nanode.co/api';
+
+// Nano RPC wrapper function
+async function nanoRpcCall(action, params = {}) {
+    try {
+        const response = await axios.post(NANO_RPC_URL, { action, ...params });
+        return response.data;
+    } catch (err) {
+        console.error(`RPC error (${action}):`, err.message);
+        throw err;
+    }
+}
 
 // ========== CONFIG ==========
 const DATA_DIR = path.join(__dirname, 'data');
@@ -367,7 +377,7 @@ app.delete('/api/wallet/:id', requireAuth, async (req, res) => {
     res.json({ success: true });
 });
 
-// Get wallet balance
+// Get wallet balance (using axios Nano RPC)
 app.get('/api/wallet/:id/balance', requireAuth, async (req, res) => {
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
@@ -377,7 +387,7 @@ app.get('/api/wallet/:id/balance', requireAuth, async (req, res) => {
     }
     
     try {
-        const balanceRes = await rpc.account_balance(wallet.address);
+        const balanceRes = await nanoRpcCall('account_balance', { account: wallet.address });
         const balance = parseFloat(balanceRes.balance || '0') / 1e30;
         const pending = parseFloat(balanceRes.pending || '0') / 1e30;
         
@@ -393,7 +403,7 @@ app.get('/api/wallet/:id/balance', requireAuth, async (req, res) => {
     }
 });
 
-// Get transaction history
+// Get transaction history (using axios Nano RPC)
 app.get('/api/wallet/:id/history', requireAuth, async (req, res) => {
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
@@ -403,7 +413,7 @@ app.get('/api/wallet/:id/history', requireAuth, async (req, res) => {
     }
     
     try {
-        const history = await rpc.account_history(wallet.address, 50);
+        const history = await nanoRpcCall('account_history', { account: wallet.address, count: 50 });
         const transactions = (history.history || []).map(tx => ({
             hash: tx.hash,
             type: tx.type,
@@ -447,7 +457,7 @@ app.post('/api/wallet/send', requireAuth, async (req, res) => {
     
     // Check balance
     try {
-        const balanceRes = await rpc.account_balance(wallet.address);
+        const balanceRes = await nanoRpcCall('account_balance', { account: wallet.address });
         const balance = parseFloat(balanceRes.balance || '0') / 1e30;
         
         if (balance < sendAmount) {
