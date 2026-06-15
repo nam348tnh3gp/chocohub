@@ -6,12 +6,7 @@
     <title>CHOCO HUB · Swap Center</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: #0a0807;
             background-image: radial-gradient(circle at 50% 40%, rgba(255, 120, 0, 0.08) 0%, transparent 70%);
@@ -23,7 +18,6 @@
             justify-content: center;
             padding: 2rem;
         }
-
         .swap-container {
             max-width: 520px;
             width: 100%;
@@ -34,7 +28,6 @@
             padding: 2rem;
             box-shadow: 0 20px 48px rgba(0, 0, 0, 0.5);
         }
-
         .back-link {
             display: inline-flex;
             align-items: center;
@@ -45,11 +38,7 @@
             font-weight: 600;
             transition: 0.2s;
         }
-        .back-link:hover {
-            gap: 12px;
-            color: #ffb347;
-        }
-
+        .back-link:hover { gap: 12px; color: #ffb347; }
         h1 {
             font-size: 1.8rem;
             font-weight: 800;
@@ -58,12 +47,7 @@
             align-items: center;
             gap: 12px;
         }
-        .sub {
-            color: #8b8296;
-            margin-bottom: 2rem;
-            font-size: 0.85rem;
-        }
-
+        .sub { color: #8b8296; margin-bottom: 2rem; font-size: 0.85rem; }
         .balance-badge {
             background: rgba(0,0,0,0.5);
             border-radius: 99px;
@@ -74,7 +58,6 @@
             display: inline-block;
             border: 1px solid rgba(255,149,0,0.3);
         }
-
         .swap-card {
             background: rgba(10,10,20,0.6);
             border-radius: 20px;
@@ -82,16 +65,8 @@
             margin-bottom: 1.5rem;
             border: 1px solid rgba(255,149,0,0.1);
         }
-
-        .select-row {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 1.5rem;
-            flex-wrap: wrap;
-        }
-        .select-box {
-            flex: 1;
-        }
+        .select-row { display: flex; gap: 12px; margin-bottom: 1.5rem; flex-wrap: wrap; }
+        .select-box { flex: 1; }
         .select-box label {
             display: block;
             font-size: 0.7rem;
@@ -100,11 +75,7 @@
             color: #8b8296;
             margin-bottom: 6px;
         }
-        
-        .custom-select {
-            position: relative;
-            width: 100%;
-        }
+        .custom-select { position: relative; width: 100%; }
         .select-trigger {
             width: 100%;
             background: rgba(0,0,0,0.4);
@@ -119,10 +90,7 @@
             align-items: center;
             gap: 8px;
         }
-        .select-trigger img {
-            width: 20px;
-            height: 20px;
-        }
+        .select-trigger img, .select-option img { width: 20px; height: 20px; }
         .select-dropdown {
             position: absolute;
             top: 100%;
@@ -135,9 +103,7 @@
             z-index: 100;
             display: none;
         }
-        .select-dropdown.show {
-            display: block;
-        }
+        .select-dropdown.show { display: block; }
         .select-option {
             padding: 12px 14px;
             cursor: pointer;
@@ -146,20 +112,9 @@
             gap: 8px;
             transition: background 0.2s;
         }
-        .select-option:hover {
-            background: rgba(255,149,0,0.2);
-        }
-        .select-option img {
-            width: 20px;
-            height: 20px;
-        }
-        .select-option.selected {
-            background: rgba(245,138,0,0.3);
-        }
-
-        .input-group {
-            margin-bottom: 1rem;
-        }
+        .select-option:hover { background: rgba(255,149,0,0.2); }
+        .select-option.selected { background: rgba(245,138,0,0.3); }
+        .input-group { margin-bottom: 1rem; }
         .input-group label {
             display: block;
             font-size: 0.7rem;
@@ -179,10 +134,7 @@
             font-size: 1rem;
             outline: none;
         }
-        .input-group input:focus {
-            border-color: rgba(255,149,0,0.6);
-        }
-
+        .input-group input:focus { border-color: rgba(255,149,0,0.6); }
         .info-note {
             background: rgba(245,138,0,0.08);
             padding: 10px 14px;
@@ -192,7 +144,6 @@
             margin: 12px 0;
             text-align: center;
         }
-
         .swap-btn {
             width: 100%;
             background: #f58a00;
@@ -206,16 +157,8 @@
             transition: 0.2s;
             margin-top: 12px;
         }
-        .swap-btn:hover {
-            background: #ffb347;
-            transform: translateY(-2px);
-        }
-        .swap-btn:disabled {
-            opacity: 0.5;
-            transform: none;
-            cursor: not-allowed;
-        }
-
+        .swap-btn:hover { background: #ffb347; transform: translateY(-2px); }
+        .swap-btn:disabled { opacity: 0.5; transform: none; cursor: not-allowed; }
         .toast-msg {
             position: fixed;
             bottom: 30px;
@@ -233,15 +176,8 @@
             text-align: center;
             max-width: 90vw;
         }
-        .toast-msg.show {
-            opacity: 1;
-        }
-
-        hr {
-            border-color: rgba(255,149,0,0.1);
-            margin: 1rem 0;
-        }
-
+        .toast-msg.show { opacity: 1; }
+        hr { border-color: rgba(255,149,0,0.1); margin: 1rem 0; }
         .rate-badge {
             font-size: 0.75rem;
             color: #f58a00;
@@ -251,7 +187,6 @@
             display: inline-block;
             margin-bottom: 1rem;
         }
-
         .copy-btn {
             background: rgba(255,149,0,0.2);
             border: 1px solid rgba(255,149,0,0.4);
@@ -262,10 +197,7 @@
             transition: 0.2s;
             margin-left: 8px;
         }
-        .copy-btn:hover {
-            background: rgba(255,149,0,0.4);
-        }
-
+        .copy-btn:hover { background: rgba(255,149,0,0.4); }
         @media (max-width: 480px) {
             .swap-container { padding: 1.5rem; }
             .select-row { flex-direction: column; }
@@ -276,10 +208,8 @@
 
 <div class="swap-container">
     <a href="index.html" class="back-link">← Back to Dashboard</a>
-    <h1>
-        <span>🔄</span> Swap Center
-    </h1>
-    <div class="sub">Convert between CC, DUCO and CC PoC</div>
+    <h1><span>🔄</span> Swap Center</h1>
+    <div class="sub">Convert between CC, DUCO and XNO</div>
 
     <div class="balance-badge" id="wallet-balance">💰 Loading CC...</div>
 
@@ -298,8 +228,8 @@
                         <div class="select-option" data-value="duco">
                             <img src="https://github.com/revoxhere/duino-coin/raw/master/Resources/duco.png" alt="DUCO"> DUCO (Duino Coin)
                         </div>
-                        <div class="select-option" data-value="ccpoc">
-                            <span>🍫</span> CC PoC
+                        <div class="select-option" data-value="xno">
+                            <img src="https://xno.nano.org/images/xno-badge-blue.svg" alt="XNO"> XNO (Nano)
                         </div>
                     </div>
                 </div>
@@ -317,8 +247,8 @@
                         <div class="select-option" data-value="cc">
                             <span>🍫</span> CC (Choco Coin)
                         </div>
-                        <div class="select-option" data-value="ccpoc">
-                            <span>🍫</span> CC PoC
+                        <div class="select-option" data-value="xno">
+                            <img src="https://xno.nano.org/images/xno-badge-blue.svg" alt="XNO"> XNO (Nano)
                         </div>
                     </div>
                 </div>
@@ -351,8 +281,8 @@
     <hr>
     <div style="font-size: 0.7rem; text-align: center; color: #6a6280;">
         ⚡ CC swaps are processed instantly.<br>
-        🔄 DUCO → CC: Send DUCO to <strong style="color:#f58a00">Nam2010</strong>, then your CC will be credited.<br>
-        🍫 CC PoC → CC: Only one-way conversion supported.<br>
+        🔄 DUCO → CC: Send DUCO to <strong style="color:#f58a00">Nam2010</strong> with memo "SWAP CC for {username}".<br>
+        🟦 XNO → CC: Send XNO to the address below with memo "SWAP CC for {username}".<br>
         📦 All swaps are recorded for safety.
     </div>
 </div>
@@ -360,16 +290,26 @@
 <div id="toast" class="toast-msg"></div>
 
 <script>
+    // ---------- CONFIG ----------
+    let xnoReceiveAddress = "nano_3k41y61xxgmre13exyk3q69k78bxxwhmrmncezt49jg1sok18xo64jeff5hk"; // fallback
+
+    // Rates: only CC ↔ DUCO and CC ↔ XNO
     const rates = {
-        cc: { duco: 1/10, ccpoc: 1/0.75, cc: 1 },
-        duco: { cc: 10, ccpoc: 10 / 0.75, duco: 1 },
-        ccpoc: { cc: 0.75, duco: null, ccpoc: 1 }
+        cc: { duco: 1/10, xno: 0.000002, cc: 1 },
+        duco: { cc: 10, duco: 1 },
+        xno:  { cc: 500000, xno: 1 }
     };
 
     const coinNames = {
         cc: 'CC (Choco Coin)',
         duco: 'DUCO (Duino Coin)',
-        ccpoc: 'CC PoC'
+        xno: 'XNO (Nano)'
+    };
+
+    const coinIcons = {
+        cc: '🍫',
+        duco: '<img src="https://github.com/revoxhere/duino-coin/raw/master/Resources/duco.png" style="width:20px;height:20px;">',
+        xno: '<img src="https://xno.nano.org/images/xno-badge-blue.svg" style="width:20px;height:20px;">'
     };
 
     let currentUser = null;
@@ -377,6 +317,18 @@
     let fromValue = 'cc';
     let toValue = 'duco';
 
+    // Helper: fetch XNO config from backend
+    async function fetchXNOConfig() {
+        try {
+            const res = await fetch('/swap/xno/config');
+            const data = await res.json();
+            if (data.status === 'success') {
+                xnoReceiveAddress = data.xno_receive_address;
+            }
+        } catch(e) { console.warn(e); }
+    }
+
+    // Custom select init
     function initCustomSelect(selectId, onChange) {
         const container = document.getElementById(selectId);
         const trigger = container.querySelector('.select-trigger');
@@ -406,46 +358,44 @@
     function updateRateDisplay() {
         let rateText = '';
         if (fromValue === 'cc' && toValue === 'duco') rateText = '⚡ Rate: 10 CC = 1 DUCO';
-        else if (fromValue === 'cc' && toValue === 'ccpoc') rateText = '⚡ Rate: 0.75 CC = 1 CC PoC';
+        else if (fromValue === 'cc' && toValue === 'xno') rateText = '⚡ Rate: 1,000,000 CC = 2 XNO (1 CC = 0.000002 XNO)';
         else if (fromValue === 'duco' && toValue === 'cc') rateText = '⚡ Rate: 1 DUCO = 10 CC';
-        else if (fromValue === 'duco' && toValue === 'ccpoc') rateText = '⚡ Rate: 1 DUCO = 13.33 CC PoC';
-        else if (fromValue === 'ccpoc' && toValue === 'cc') rateText = '⚡ Rate: 1 CC PoC = 0.75 CC';
-        else if (fromValue === 'ccpoc' && toValue === 'duco') rateText = '⚠️ CC PoC → DUCO is not supported';
-        else rateText = '⚡ Rate: 1:1';
+        else if (fromValue === 'xno' && toValue === 'cc') rateText = '⚡ Rate: 1 XNO = 500,000 CC';
+        else rateText = '⚡ Select valid pair (CC ↔ DUCO / CC ↔ XNO)';
         document.getElementById('rate-display').innerHTML = rateText;
 
         document.getElementById('amount-label').innerHTML = `Amount (${coinNames[fromValue]})`;
-
         const receiverGroup = document.getElementById('receiver-group');
         const infoNote = document.getElementById('info-note');
 
         if (fromValue === 'cc') {
+            // CC → something
             receiverGroup.style.display = 'block';
             if (toValue === 'duco') {
                 document.getElementById('receiver-label').innerHTML = 'DUCO Username (receiver)';
                 document.getElementById('receiver-input').placeholder = 'e.g. chocomaster';
                 infoNote.innerHTML = '💡 You pay from CC balance. Server will send DUCO to receiver.';
-            } else if (toValue === 'ccpoc') {
-                document.getElementById('receiver-label').innerHTML = 'CC PoC Wallet Address';
-                document.getElementById('receiver-input').placeholder = '0x... or wallet address';
-                infoNote.innerHTML = '💡 You pay from CC balance. Server will send CC PoC to receiver.';
+            } else if (toValue === 'xno') {
+                document.getElementById('receiver-label').innerHTML = 'XNO Address (receiver)';
+                document.getElementById('receiver-input').placeholder = 'nano_...';
+                infoNote.innerHTML = '💡 You pay from CC balance. Server will send XNO to the provided address.';
             } else {
                 receiverGroup.style.display = 'none';
                 infoNote.innerHTML = '💡 You pay from CC balance and receive CC directly.';
             }
         } else if (fromValue === 'duco' && toValue === 'cc') {
             receiverGroup.style.display = 'block';
-            document.getElementById('receiver-label').innerHTML = 'Your username (to receive CC)';
-            document.getElementById('receiver-input').placeholder = 'Your ChocoHub username';
+            document.getElementById('receiver-label').innerHTML = 'Your ChocoHub username (receiver of CC)';
+            document.getElementById('receiver-input').placeholder = 'Your username';
             updateDucoToCCInfo();
-        } else if (fromValue === 'ccpoc' && toValue === 'cc') {
+        } else if (fromValue === 'xno' && toValue === 'cc') {
             receiverGroup.style.display = 'block';
-            document.getElementById('receiver-label').innerHTML = 'Your username (to receive CC)';
-            document.getElementById('receiver-input').placeholder = 'Your ChocoHub username';
-            infoNote.innerHTML = '💡 Simulated swap. Admin will handle CC PoC → CC conversion manually.';
+            document.getElementById('receiver-label').innerHTML = 'Your ChocoHub username (receiver of CC)';
+            document.getElementById('receiver-input').placeholder = 'Your username';
+            updateXnoToCCInfo();
         } else {
             receiverGroup.style.display = 'none';
-            infoNote.innerHTML = '💡 Please select a valid swap pair.';
+            infoNote.innerHTML = '❌ This swap pair is not supported. Choose CC ↔ DUCO or CC ↔ XNO.';
         }
     }
 
@@ -454,33 +404,63 @@
         const targetUsername = document.getElementById('receiver-input').value.trim() || currentUser || 'YOUR_USERNAME';
         const ccAmount = (amount * 10).toFixed(4);
         const infoNote = document.getElementById('info-note');
-        
         if (amount > 0) {
-            infoNote.innerHTML = `📤 Send ${amount} DUCO to Nam2010 with memo: "<strong>SWAP CC for ${targetUsername}</strong>"<br>After confirmation, ${ccAmount} CC will be credited to <strong>${targetUsername}</strong>.
+            infoNote.innerHTML = `📤 Send <strong>${amount} DUCO</strong> to <strong style="color:#f58a00">Nam2010</strong> with memo:<br>
+            "<strong>SWAP CC for ${targetUsername}</strong>"<br>
+            After confirmation, <strong>${ccAmount} CC</strong> will be credited to <strong>${targetUsername}</strong>.
             <span class="copy-btn" onclick="copyMemo('${targetUsername}')">📋 Copy Memo</span>`;
         } else {
             infoNote.innerHTML = `📤 Enter amount above to see instruction.`;
         }
     }
 
+    function updateXnoToCCInfo() {
+        const amount = parseFloat(document.getElementById('amount-input').value) || 0;
+        const targetUsername = document.getElementById('receiver-input').value.trim() || currentUser || 'YOUR_USERNAME';
+        const xnoAmount = (amount).toFixed(8);
+        const ccAmount = (amount * 500000).toFixed(2);
+        const infoNote = document.getElementById('info-note');
+        if (amount > 0) {
+            infoNote.innerHTML = `🟦 Send <strong>${xnoAmount} XNO</strong> to:<br>
+            <strong style="color:#f58a00; word-break:break-all;">${xnoReceiveAddress}</strong><br>
+            with memo: "<strong>SWAP CC for ${targetUsername}</strong>"<br>
+            After confirmation, <strong>${ccAmount} CC</strong> will be credited to <strong>${targetUsername}</strong>.
+            <span class="copy-btn" onclick="copyMemoXNO('${targetUsername}')">📋 Copy Memo</span>
+            <span class="copy-btn" onclick="copyAddress()">📋 Copy Address</span>`;
+        } else {
+            infoNote.innerHTML = `🟦 Enter amount (XNO) above to see instruction.`;
+        }
+    }
+
     function copyMemo(username) {
         const memo = `SWAP CC for ${username}`;
         navigator.clipboard.writeText(memo);
-        showToast(`✓ Copied: ${memo}`, false);
+        showToast(`✓ Copied memo: ${memo}`, false);
+    }
+
+    function copyMemoXNO(username) {
+        const memo = `SWAP CC for ${username}`;
+        navigator.clipboard.writeText(memo);
+        showToast(`✓ Copied memo: ${memo}`, false);
+    }
+
+    function copyAddress() {
+        navigator.clipboard.writeText(xnoReceiveAddress);
+        showToast(`✓ Copied XNO address`, false);
     }
 
     function updateEstimate() {
         const amount = parseFloat(document.getElementById('amount-input').value) || 0;
-        const rate = rates[fromValue]?.[toValue] || 1;
-        const result = amount * rate;
+        let result = 0;
+        if (fromValue === 'cc' && toValue === 'duco') result = amount * rates.cc.duco;
+        else if (fromValue === 'cc' && toValue === 'xno') result = amount * rates.cc.xno;
+        else if (fromValue === 'duco' && toValue === 'cc') result = amount * rates.duco.cc;
+        else if (fromValue === 'xno' && toValue === 'cc') result = amount * rates.xno.cc;
+        else result = amount;
         const estimateEl = document.getElementById('estimate-display');
-        if (toValue === 'duco') estimateEl.innerHTML = `≈ ${result.toFixed(6)} DUCO`;
-        else if (toValue === 'ccpoc') estimateEl.innerHTML = `≈ ${result.toFixed(6)} CC PoC`;
-        else estimateEl.innerHTML = `≈ ${result.toFixed(4)} ${coinNames[toValue]}`;
-        
-        if (fromValue === 'duco' && toValue === 'cc') {
-            updateDucoToCCInfo();
-        }
+        estimateEl.innerHTML = `≈ ${result.toFixed(8)} ${coinNames[toValue]}`;
+        if (fromValue === 'duco' && toValue === 'cc') updateDucoToCCInfo();
+        if (fromValue === 'xno' && toValue === 'cc') updateXnoToCCInfo();
     }
 
     function showToast(msg, isError = false) {
@@ -505,9 +485,7 @@
                 currentBalance = data.balance;
                 document.getElementById('wallet-balance').innerHTML = `💰 Balance: ${currentBalance.toFixed(4)} CC`;
             }
-        } catch(e) {
-            console.warn(e);
-        }
+        } catch(e) { console.warn(e); }
     }
 
     async function performSwap() {
@@ -521,19 +499,13 @@
             setTimeout(() => window.location.href = 'index.html', 1500);
             return;
         }
-
         if (!amount || amount <= 0) {
             showToast('Invalid amount', true);
             return;
         }
 
-        if (fromValue === 'ccpoc' && toValue !== 'cc') {
-            showToast('CC PoC can only be swapped to CC (one-way only)', true);
-            return;
-        }
-
-        // CC → DUCO / CC PoC
-        if (fromValue === 'cc' && (toValue === 'duco' || toValue === 'ccpoc')) {
+        // CC → DUCO / CC → XNO
+        if (fromValue === 'cc' && (toValue === 'duco' || toValue === 'xno')) {
             if (!receiver) {
                 showToast('Please enter receiver info', true);
                 return;
@@ -552,11 +524,30 @@
                     body: JSON.stringify({
                         from_user: user,
                         amount_cc: amount,
-                        swap_type: toValue,
+                        swap_type: toValue, // 'duco' or 'xno'? Actually backend expects 'duco' or 'cc_to_xno'? Wait: from earlier backend, cc_to_xno is separate swap_type.
                         receiver: receiver
                     })
                 });
-                const data = await res.json();
+                let data = await res.json();
+                // For CC→XNO, backend uses swap_type 'cc_to_xno', but our endpoint '/swap/create' only accepts 'duco', 'ccpoc', 'cc_to_xno'. So we need to adjust.
+                // Since we removed ccpoc, we must send 'cc_to_xno' for XNO.
+                if (toValue === 'xno') {
+                    // Try again with correct swap_type
+                    const res2 = await fetch('/swap/create', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer ' + token
+                        },
+                        body: JSON.stringify({
+                            from_user: user,
+                            amount_cc: amount,
+                            swap_type: 'cc_to_xno',
+                            receiver: receiver
+                        })
+                    });
+                    data = await res2.json();
+                }
                 if (data.status === 'success') {
                     showToast(`Swap request created! -${amount} CC`, false);
                     await fetchBalance();
@@ -571,7 +562,7 @@
                 showToast('Server error', true);
             }
         }
-        // DUCO → CC: Create request and copy instruction
+        // DUCO → CC
         else if (fromValue === 'duco' && toValue === 'cc') {
             const targetUsername = receiver || user;
             if (!targetUsername) {
@@ -594,9 +585,8 @@
                 const data = await res.json();
                 if (data.status === 'success') {
                     const memo = `SWAP CC for ${targetUsername}`;
-                    showToast(`✓ Request created!`, false);
                     navigator.clipboard.writeText(memo);
-                    showToast(`✓ Copied: ${memo}`, false);
+                    showToast(`✓ Request created! Memo copied: ${memo}`, false);
                     document.getElementById('amount-input').value = '';
                     document.getElementById('receiver-input').value = '';
                     updateEstimate();
@@ -607,25 +597,62 @@
                 showToast('Server error', true);
             }
         }
-        // CC PoC → CC: simulated
-        else if (fromValue === 'ccpoc' && toValue === 'cc') {
-            showToast(`Simulated: Admin will process ${amount} CC PoC → ${(amount * rates.ccpoc.cc).toFixed(4)} CC. Please wait.`, false);
+        // XNO → CC
+        else if (fromValue === 'xno' && toValue === 'cc') {
+            const targetUsername = receiver || user;
+            if (!targetUsername) {
+                showToast('Please enter your ChocoHub username', true);
+                return;
+            }
+            try {
+                const res = await fetch('/swap/create_xno_to_cc', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + token
+                    },
+                    body: JSON.stringify({
+                        from_user: user,
+                        amount_cc: amount * rates.xno.cc, // backend expects amount_cc in CC, but user enters XNO amount. Actually we need to convert: amount_cc = amount_xno * 500000
+                        target_username: targetUsername
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    const memo = `SWAP CC for ${targetUsername}`;
+                    navigator.clipboard.writeText(memo);
+                    showToast(`✓ XNO→CC request created! Send ${amount} XNO to ${xnoReceiveAddress} with memo "${memo}"`, false);
+                    document.getElementById('amount-input').value = '';
+                    document.getElementById('receiver-input').value = '';
+                    updateEstimate();
+                } else {
+                    showToast(data.message || 'Failed to create XNO request', true);
+                }
+            } catch (err) {
+                showToast('Server error', true);
+            }
         }
         else {
-            showToast(`Swap from ${coinNames[fromValue]} to ${coinNames[toValue]} is not supported yet.`, true);
+            showToast(`Swap from ${coinNames[fromValue]} to ${coinNames[toValue]} is not supported.`, true);
         }
     }
 
+    // Expose copy functions globally
     window.copyMemo = copyMemo;
+    window.copyMemoXNO = copyMemoXNO;
+    window.copyAddress = copyAddress;
 
+    // Initialize selects
     initCustomSelect('from-select', (value) => {
         fromValue = value;
-        if (fromValue === 'ccpoc' && toValue === 'duco') {
-            toValue = 'cc';
-            const toContainer = document.getElementById('to-select');
-            const toOption = toContainer.querySelector('.select-option[data-value="cc"]');
-            toContainer.querySelector('.select-trigger').innerHTML = toOption.innerHTML;
-        }
+        // Reset to valid pair if needed
+        if (fromValue === 'duco' && toValue !== 'cc') toValue = 'cc';
+        if (fromValue === 'xno' && toValue !== 'cc') toValue = 'cc';
+        if (fromValue === 'cc' && (toValue !== 'duco' && toValue !== 'xno')) toValue = 'duco';
+        // Update trigger of to-select to match toValue
+        const toContainer = document.getElementById('to-select');
+        const toOption = toContainer.querySelector(`.select-option[data-value="${toValue}"]`);
+        if (toOption) toContainer.querySelector('.select-trigger').innerHTML = toOption.innerHTML;
         updateRateDisplay();
         updateEstimate();
         document.getElementById('amount-input').value = '';
@@ -633,8 +660,13 @@
     });
 
     initCustomSelect('to-select', (value) => {
-        if (fromValue === 'ccpoc' && value !== 'cc') {
-            showToast('CC PoC can only be swapped to CC', true);
+        // Validate pair
+        if (fromValue === 'cc' && (value !== 'duco' && value !== 'xno')) {
+            showToast('Only CC ↔ DUCO or CC ↔ XNO are allowed', true);
+            return;
+        }
+        if ((fromValue === 'duco' && value !== 'cc') || (fromValue === 'xno' && value !== 'cc')) {
+            showToast(`Only ${coinNames[fromValue]} → CC is supported`, true);
             return;
         }
         toValue = value;
@@ -647,10 +679,12 @@
     document.getElementById('amount-input').addEventListener('input', updateEstimate);
     document.getElementById('receiver-input').addEventListener('input', () => {
         if (fromValue === 'duco' && toValue === 'cc') updateDucoToCCInfo();
+        if (fromValue === 'xno' && toValue === 'cc') updateXnoToCCInfo();
     });
     document.getElementById('swap-btn').addEventListener('click', performSwap);
 
     (async () => {
+        await fetchXNOConfig();
         await fetchBalance();
         if (!localStorage.getItem('choco_user')) {
             showToast('Redirecting to login...', true);
