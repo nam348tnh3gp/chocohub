@@ -9,6 +9,13 @@ const db = require('../db');
 
 const router = express.Router();
 
+// ========== XNO CONFIGURATION ==========
+const XNO_CONFIG = {
+    CC_TO_XNO_RATE: 0.000002,    // 1 CC = 0.000002 XNO
+    XNO_TO_CC_RATE: 500000,      // 1 XNO = 500,000 CC
+    XNO_RECEIVE_ADDRESS: "nano_3k41y61xxgmre13exyk3q69k78bxxwhmrmncezt49jg1sok18xo64jeff5hk",
+};
+
 // Auth 
 const ADMIN_USERS = ['chocoetom', 'Nam2010'];
 
@@ -102,7 +109,7 @@ function refundUser(request) {
     }
 }
 
-// Helper: Mint CC from system (for DUCO → CC or CCPoC → CC)
+// Helper: Mint CC from system (for DUCO → CC, XNO → CC, CCPoC → CC)
 function mintCCForUser(username, amount, swapId, swapType) {
     db.updateBalance(username, amount);
     if (db.addTransaction.length >= 4) {
@@ -116,7 +123,7 @@ function mintCCForUser(username, amount, swapId, swapType) {
 
 // ─────────────────────────────────  Swap Routes ─────────────────────────────────────────
 
-// 1. CC → DUCO / CC → CC PoC
+// 1. CC → DUCO / CC → CC PoC / CC → XNO
 router.post('/create', verifyToken, swapLimiter, (req, res) => {
     try {
         const { from_user, amount_cc, swap_type, receiver } = req.body;
@@ -134,8 +141,8 @@ router.post('/create', verifyToken, swapLimiter, (req, res) => {
             return res.status(400).json({ status: 'error', message: 'Invalid amount' });
         }
 
-        if (swap_type !== 'duco' && swap_type !== 'ccpoc') {
-            return res.status(400).json({ status: 'error', message: 'Invalid swap type. Must be "duco" or "ccpoc"' });
+        if (swap_type !== 'duco' && swap_type !== 'ccpoc' && swap_type !== 'cc_to_xno') {
+            return res.status(400).json({ status: 'error', message: 'Invalid swap type. Must be "duco", "ccpoc", or "cc_to_xno"' });
         }
 
         const user = db.getUser(from_user);
@@ -156,15 +163,31 @@ router.post('/create', verifyToken, swapLimiter, (req, res) => {
             db.addTransaction(from_user, 'swap_holding', amount);
         }
 
+        // Tính tỉ giá cho XNO
+        let rateInfo = {};
+        if (swap_type === 'cc_to_xno') {
+            const xno_amount = amount * XNO_CONFIG.CC_TO_XNO_RATE;
+            rateInfo = {
+                exchange_rate: XNO_CONFIG.CC_TO_XNO_RATE,
+                xno_amount: xno_amount,
+                note: `${amount} CC = ${xno_amount.toFixed(8)} XNO`
+            };
+        } else if (swap_type === 'duco') {
+            rateInfo = { rate: 10, note: '1 DUCO = 10 CC' };
+        } else if (swap_type === 'ccpoc') {
+            rateInfo = { rate: 0.75, note: '1 CC PoC = 0.75 CC' };
+        }
+
         const newRequest = {
             id: Date.now() + '-' + crypto.randomBytes(8).toString('hex'),
             from_user,
             amount_cc: amount,
             swap_type,
             receiver: receiver.trim(),
-            rate: swap_type === 'duco' ? 10 : 0.75,
+            rate: swap_type === 'duco' ? 10 : (swap_type === 'ccpoc' ? 0.75 : XNO_CONFIG.CC_TO_XNO_RATE),
             status: 'pending',
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            ...rateInfo
         };
 
         swapRequests.push(newRequest);
@@ -178,7 +201,8 @@ router.post('/create', verifyToken, swapLimiter, (req, res) => {
             status: 'success',
             message: `Swap request created. ${amount} CC moved to holding.`,
             request_id: newRequest.id,
-            new_balance: user.balance - amount
+            new_balance: user.balance - amount,
+            swap_details: rateInfo
         });
     } catch (e) {
         console.error('Swap create error:', e);
@@ -188,6 +212,7 @@ router.post('/create', verifyToken, swapLimiter, (req, res) => {
 
 // 2. DUCO → CC (tạo request, KHÔNG trừ CC user)
 router.post('/create_duco_to_cc', verifyToken, swapLimiter, (req, res) => {
+    // ... giữ nguyên như code cũ ...
     try {
         const { from_user, amount_duco, target_username } = req.body;
 
@@ -209,11 +234,10 @@ router.post('/create_duco_to_cc', verifyToken, swapLimiter, (req, res) => {
             return res.status(404).json({ status: 'error', message: 'User not found' });
         }
 
-        // KHÔNG trừ CC user
         const newRequest = {
             id: Date.now() + '-' + crypto.randomBytes(8).toString('hex'),
             from_user,
-            amount_cc: amount * 10,  // Số CC sẽ nhận
+            amount_cc: amount * 10,
             amount_duco: amount,
             swap_type: 'duco_to_cc',
             receiver: target_username.trim(),
@@ -226,7 +250,6 @@ router.post('/create_duco_to_cc', verifyToken, swapLimiter, (req, res) => {
 
         require('https').request('https://ntfy.sh/chocohub-pending-swaps', {method: 'POST'}).end(`new swap DUCO→CC: ${newRequest.id} | ${from_user} send ${amount} DUCO for ${target_username} (will receive ${newRequest.amount_cc} CC)`);
 
-
         console.log(`🔄 DUCO→CC request created: ${newRequest.id} | ${from_user} -> ${amount} DUCO to CC for ${target_username}`);
 
         res.json({
@@ -236,6 +259,67 @@ router.post('/create_duco_to_cc', verifyToken, swapLimiter, (req, res) => {
         });
     } catch (e) {
         console.error('DUCO→CC create error:', e);
+        res.status(500).json({ status: 'error', message: e.message });
+    }
+});
+
+// 3. XNO → CC (tạo request, KHÔNG trừ CC user, yêu cầu gửi XNO đến ví cố định)
+router.post('/create_xno_to_cc', verifyToken, swapLimiter, (req, res) => {
+    // ... giữ nguyên ...
+    try {
+        const { from_user, amount_cc, target_username } = req.body;
+
+        if (req.user.username !== from_user) {
+            return res.status(403).json({ status: 'error', message: 'Unauthorized: username mismatch' });
+        }
+
+        if (!amount_cc || !target_username) {
+            return res.status(400).json({ status: 'error', message: 'Missing required fields' });
+        }
+
+        const amount = parseFloat(amount_cc);
+        if (isNaN(amount) || amount <= 0) {
+            return res.status(400).json({ status: 'error', message: 'Invalid amount' });
+        }
+
+        const user = db.getUser(from_user);
+        if (!user) {
+            return res.status(404).json({ status: 'error', message: 'User not found' });
+        }
+
+        const xno_amount = amount / XNO_CONFIG.XNO_TO_CC_RATE;
+
+        const newRequest = {
+            id: Date.now() + '-' + crypto.randomBytes(8).toString('hex'),
+            from_user,
+            amount_cc: amount,
+            amount_xno: xno_amount,
+            swap_type: 'xno_to_cc',
+            receiver: target_username.trim(),
+            xno_receive_address: XNO_CONFIG.XNO_RECEIVE_ADDRESS,
+            status: 'pending',
+            created_at: new Date().toISOString(),
+            exchange_rate: XNO_CONFIG.XNO_TO_CC_RATE
+        };
+
+        swapRequests.push(newRequest);
+        saveSwapRequests();
+
+        const ntfyMsg = `XNO→CC: ${newRequest.id} | ${from_user} wants ${amount} CC, send ${xno_amount.toFixed(8)} XNO to ${XNO_CONFIG.XNO_RECEIVE_ADDRESS} for ${target_username}`;
+        require('https').request('https://ntfy.sh/chocohub-pending-swaps', {method: 'POST'}).end(ntfyMsg);
+
+        console.log(`🪙 XNO→CC request created: ${newRequest.id} | ${from_user} -> ${xno_amount.toFixed(8)} XNO for ${amount} CC to ${target_username}`);
+
+        res.json({
+            status: 'success',
+            message: `XNO→CC request created. Send ${xno_amount.toFixed(8)} XNO to: ${XNO_CONFIG.XNO_RECEIVE_ADDRESS}`,
+            request_id: newRequest.id,
+            xno_amount: xno_amount,
+            xno_address: XNO_CONFIG.XNO_RECEIVE_ADDRESS,
+            will_receive_cc: amount
+        });
+    } catch (e) {
+        console.error('XNO→CC create error:', e);
         res.status(500).json({ status: 'error', message: e.message });
     }
 });
@@ -257,10 +341,10 @@ router.get('/pending', verifyToken, (req, res) => {
     }
 });
 
-// Fulfill (complete) a swap - admin only
+// ========== CẬP NHẬT: FULFILL SWAP (cho phép nhập xno_txid) ==========
 router.post('/fulfill', verifyToken, verifyAdmin, (req, res) => {
     try {
-        const { request_id } = req.body;
+        const { request_id, xno_txid } = req.body;  // nhận thêm xno_txid
         if (!request_id) {
             return res.status(400).json({ status: 'error', message: 'Missing request_id' });
         }
@@ -278,7 +362,7 @@ router.post('/fulfill', verifyToken, verifyAdmin, (req, res) => {
         const adminName = req.user.username;
 
         if (request.swap_type === 'duco' || request.swap_type === 'ccpoc') {
-            // CC → DUCO / CC → CC PoC: chuyển CC từ holding sang admin
+            // CC → DUCO / CC → CCPOC: chuyển CC từ holding sang admin
             db.updateBalance('swap_holding', -request.amount_cc);
             db.updateBalance(adminName, request.amount_cc);
             if (db.addTransaction.length >= 4) {
@@ -287,22 +371,64 @@ router.post('/fulfill', verifyToken, verifyAdmin, (req, res) => {
                 db.addTransaction('swap_holding', adminName, request.amount_cc);
             }
             console.log(`✅ Swap fee: ${request.amount_cc} CC from holding → ${adminName} (${request.swap_type})`);
+        
         } else if (request.swap_type === 'duco_to_cc') {
             // DUCO → CC: mint CC mới cho user
             mintCCForUser(request.receiver, request.amount_cc, request.id, 'DUCO');
             console.log(`✅ Minted ${request.amount_cc} CC to ${request.receiver} from DUCO→CC swap`);
+        
+        } else if (request.swap_type === 'xno_to_cc') {
+            // XNO → CC: mint CC mới cho receiver
+            mintCCForUser(request.receiver, request.amount_cc, request.id, 'XNO');
+            console.log(`✅ Minted ${request.amount_cc} CC to ${request.receiver} from XNO→CC swap`);
+        
+        } else if (request.swap_type === 'cc_to_xno') {
+            // CC → XNO: chuyển CC từ holding sang admin
+            db.updateBalance('swap_holding', -request.amount_cc);
+            db.updateBalance(adminName, request.amount_cc);
+            if (db.addTransaction.length >= 4) {
+                db.addTransaction('swap_holding', adminName, request.amount_cc, `CC→XNO swap fee from ${request.from_user} (${request.id})`);
+            } else {
+                db.addTransaction('swap_holding', adminName, request.amount_cc);
+            }
+            console.log(`✅ CC→XNO fee: ${request.amount_cc} CC from holding → ${adminName}`);
+            
+            // Ghi nhận txid XNO nếu có
+            if (xno_txid) {
+                console.log(`   XNO transaction hash: ${xno_txid}`);
+            } else {
+                console.log(`   ⚠️ No XNO txid provided (admin must send manually later)`);
+            }
         } else {
             return res.status(400).json({ status: 'error', message: 'Unknown swap type' });
         }
 
+        // Cập nhật swap request
         swapRequests[reqIndex].status = 'completed';
         swapRequests[reqIndex].completed_at = new Date().toISOString();
         swapRequests[reqIndex].fulfilled_by = adminName;
+        if (xno_txid) {
+            swapRequests[reqIndex].xno_txid = xno_txid;
+        }
         saveSwapRequests();
 
         res.json({ status: 'success', message: 'Swap completed' });
     } catch (e) {
         console.error('Swap fulfill error:', e);
+        res.status(500).json({ status: 'error', message: e.message });
+    }
+});
+
+// ========== ENDPOINT MỚI: Lấy danh sách pending CC→XNO (cho admin) ==========
+router.get('/admin/pending_xno', verifyToken, verifyAdmin, (req, res) => {
+    try {
+        const pendingXno = swapRequests.filter(r => r.status === 'pending' && r.swap_type === 'cc_to_xno');
+        res.json({
+            status: 'success',
+            swaps: pendingXno,
+            count: pendingXno.length
+        });
+    } catch (e) {
         res.status(500).json({ status: 'error', message: e.message });
     }
 });
@@ -314,7 +440,14 @@ router.get('/rates', (req, res) => {
         rates: {
             cc_to_duco: 10,
             cc_to_ccpoc: 0.75,
-            note: '1 DUCO = 10 CC, 1 CC PoC = 0.75 CC'
+            xno_to_cc: XNO_CONFIG.XNO_TO_CC_RATE,
+            cc_to_xno: XNO_CONFIG.CC_TO_XNO_RATE,
+            note: {
+                duco: '1 DUCO = 10 CC',
+                ccpoc: '1 CC PoC = 0.75 CC',
+                xno: `1 XNO = ${XNO_CONFIG.XNO_TO_CC_RATE.toLocaleString()} CC | 1 CC = ${XNO_CONFIG.CC_TO_XNO_RATE} XNO`,
+                xno_receive_address: XNO_CONFIG.XNO_RECEIVE_ADDRESS
+            }
         }
     });
 });
@@ -357,12 +490,15 @@ router.delete('/admin/swaps/:id', verifyToken, verifyAdmin, (req, res) => {
         }
 
         const request = swapRequests[index];
-        if (request.status === 'pending' && (request.swap_type === 'duco' || request.swap_type === 'ccpoc')) {
+        
+        // Refund nếu là CC → XNO, CC → DUCO, CC → CCPOC (đã trừ CC user)
+        if (request.status === 'pending' && (request.swap_type === 'duco' || request.swap_type === 'ccpoc' || request.swap_type === 'cc_to_xno')) {
             refundUser(request);
-        } else if (request.status === 'pending' && request.swap_type === 'duco_to_cc') {
-            // DUCO → CC: không refund vì user chưa bị trừ CC
-            console.log(`🗑️ Deleted DUCO→CC request ${id} (no refund needed)`);
+        } else if (request.status === 'pending' && (request.swap_type === 'duco_to_cc' || request.swap_type === 'xno_to_cc')) {
+            // DUCO → CC hoặc XNO → CC: không refund vì user chưa bị trừ CC
+            console.log(`🗑️ Deleted ${request.swap_type} request ${id} (no refund needed)`);
         }
+        
         swapRequests.splice(index, 1);
         saveSwapRequests();
 
@@ -371,6 +507,18 @@ router.delete('/admin/swaps/:id', verifyToken, verifyAdmin, (req, res) => {
         console.error('Swap delete error:', e);
         res.status(500).json({ status: 'error', message: e.message });
     }
+});
+
+// API lấy thông tin XNO config (cho client)
+router.get('/xno/config', (req, res) => {
+    res.json({
+        status: 'success',
+        xno_receive_address: XNO_CONFIG.XNO_RECEIVE_ADDRESS,
+        rates: {
+            xno_to_cc: XNO_CONFIG.XNO_TO_CC_RATE,
+            cc_to_xno: XNO_CONFIG.CC_TO_XNO_RATE
+        }
+    });
 });
 
 module.exports = router;
