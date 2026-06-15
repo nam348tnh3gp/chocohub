@@ -11,7 +11,8 @@ const nacl = require('tweetnacl');
 const nanoBase32 = require('nano-base32');
 const nanocurrency = require('nanocurrency');
 
-// Không require nano-pow ở đây nữa - sẽ dùng dynamic import
+// Import NanoPow ES module
+let NanoPow = null;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -133,31 +134,36 @@ function computeBlockHash(block) {
     return blake.blake2bHex(blockString, null, 32);
 }
 
-// Cache nano-pow instance
-let nanoPowInstance = null;
-
 // Khởi tạo nano-pow (dynamic import cho ES module)
 async function initNanoPow() {
-    if (!nanoPowInstance) {
+    if (!NanoPow) {
         try {
             const nanoPowModule = await import('nano-pow');
-            nanoPowInstance = nanoPowModule.default || nanoPowModule;
+            NanoPow = nanoPowModule.NanoPow || nanoPowModule.default;
             console.log('✅ nano-pow initialized successfully');
         } catch (err) {
             console.error('❌ Failed to load nano-pow:', err.message);
             throw new Error('Cannot load nano-pow module. Run: npm install nano-pow@5.1.15');
         }
     }
-    return nanoPowInstance;
+    return NanoPow;
 }
 
 // Sinh PoW thật cho một block hash
 async function generateRealWork(blockHashHex, difficultyHex = 'ffffffc000000000') {
     try {
-        const nanoPow = await initNanoPow();
-        // nano-pow nhận blockHash dạng hex string
-        const work = await nanoPow.generateWork(blockHashHex, difficultyHex);
-        return work; // work là hex string 16 ký tự
+        const NanoPow = await initNanoPow();
+        // API đúng: NanoPow.work_generate(hash, options)
+        const result = await NanoPow.work_generate(blockHashHex, { 
+            difficulty: difficultyHex,
+            effort: 4  // Tăng effort để sinh PoW nhanh hơn (mặc định là 2)
+        });
+        const work = result.work;
+        if (!work || work === '0000000000000000') {
+            throw new Error('Generated work is invalid');
+        }
+        console.log(`✅ PoW generated: ${work} for hash ${blockHashHex.substring(0, 16)}...`);
+        return work;
     } catch (err) {
         console.error('PoW generation failed:', err);
         throw new Error('Failed to generate Proof of Work: ' + err.message);
