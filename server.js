@@ -383,12 +383,12 @@ app.get('/admin/api/transactions/:username', requireAdminSession, async (req, re
 
 app.post('/admin/api/fulfill', requireAdminSession, async (req, res) => {
   try {
-    const { request_id } = req.body;
+    const { request_id, xno_txid } = req.body;
     const token = req.session.adminToken;
     const response = await fetch(`http://localhost:${PORT}/swap/fulfill`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ request_id })
+      body: JSON.stringify({ request_id, xno_txid })
     });
     const data = await response.json();
     res.json(data);
@@ -412,7 +412,7 @@ app.delete('/admin/api/delete/:id', requireAdminSession, async (req, res) => {
   }
 });
 
-// Dashboard admin mở rộng
+// Dashboard admin mở rộng - HIỂN THỊ ĐẦY ĐỦ XNO SWAPS
 app.get('/admin/dashboard', requireAdminSession, (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -428,7 +428,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             h1 { background: linear-gradient(135deg, #f58a00, #ffbf00); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: 2rem; }
             .logout-btn { background: #2a2a36; border: 1px solid #ff4444; color: #ff4444; padding: 0.5rem 1.2rem; border-radius: 40px; text-decoration: none; transition: 0.2s; }
             .logout-btn:hover { background: #ff4444; color: white; }
-            .tabs { display: flex; gap: 1rem; margin-bottom: 2rem; border-bottom: 1px solid #2a2a36; }
+            .tabs { display: flex; gap: 1rem; margin-bottom: 2rem; border-bottom: 1px solid #2a2a36; flex-wrap: wrap; }
             .tab-btn { background: none; border: none; color: #8b8296; padding: 0.75rem 1.5rem; font-size: 1rem; cursor: pointer; transition: 0.2s; }
             .tab-btn:hover { color: #f58a00; }
             .tab-btn.active { color: #f58a00; border-bottom: 2px solid #f58a00; }
@@ -437,10 +437,13 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             .card { background: #1e1e2a; border-radius: 24px; padding: 1.5rem; margin-bottom: 2rem; box-shadow: 0 8px 20px rgba(0,0,0,0.3); }
             .card h2 { margin-bottom: 1rem; color: #f58a00; font-weight: 500; }
             table { width: 100%; border-collapse: collapse; }
-            th, td { padding: 14px 12px; text-align: left; border-bottom: 1px solid #2a2a36; }
+            th, td { padding: 12px 10px; text-align: left; border-bottom: 1px solid #2a2a36; font-size: 0.85rem; }
             th { background: #2a2a36; font-weight: 600; color: #ffbf00; }
-            .status-pending { background: #ffaa4433; color: #ffaa44; padding: 4px 10px; border-radius: 40px; font-size: 0.8rem; font-weight: bold; display: inline-block; }
-            .status-completed { background: #44ff4433; color: #44ff44; padding: 4px 10px; border-radius: 40px; font-size: 0.8rem; font-weight: bold; display: inline-block; }
+            .status-pending { background: #ffaa4433; color: #ffaa44; padding: 4px 10px; border-radius: 40px; font-size: 0.75rem; font-weight: bold; display: inline-block; }
+            .status-completed { background: #44ff4433; color: #44ff44; padding: 4px 10px; border-radius: 40px; font-size: 0.75rem; font-weight: bold; display: inline-block; }
+            .badge-xno { background: #2a6eff33; color: #2a6eff; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; }
+            .badge-duco { background: #ffaa4433; color: #ffaa44; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; }
+            .badge-cc { background: #f58a0033; color: #f58a00; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; }
             .btn-complete { background: #f58a00; color: #0a0a12; border: none; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; margin-right: 8px; transition: 0.2s; }
             .btn-complete:hover { background: #ff9e20; transform: scale(1.02); }
             .btn-delete { background: #ff4444; color: white; border: none; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
@@ -451,7 +454,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             .refresh { float: right; font-size: 0.8rem; color: #888; margin-top: 0.5rem; cursor: pointer; }
             .refresh:hover { color: #f58a00; }
             .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; }
-            .modal-content { background: #1e1e2a; border-radius: 24px; padding: 2rem; width: 400px; max-width: 90%; }
+            .modal-content { background: #1e1e2a; border-radius: 24px; padding: 2rem; width: 450px; max-width: 90%; }
             .modal-content h3 { margin-bottom: 1rem; color: #f58a00; }
             .modal-content input { width: 100%; padding: 12px; margin: 10px 0; background: #2a2a36; border: 1px solid #3a3a46; border-radius: 12px; color: white; }
             .modal-buttons { display: flex; gap: 1rem; margin-top: 1rem; }
@@ -461,6 +464,14 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             .search-box { margin-bottom: 1rem; display: flex; gap: 0.5rem; }
             .search-box input { flex: 1; padding: 10px; background: #2a2a36; border: 1px solid #3a3a46; border-radius: 12px; color: white; }
             .search-box button { background: #f58a00; color: #0a0a12; border: none; padding: 10px 20px; border-radius: 30px; cursor: pointer; }
+            .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+            .stat-card { background: #2a2a36; padding: 1rem; border-radius: 16px; text-align: center; }
+            .stat-card strong { display: block; font-size: 1.5rem; color: #f58a00; margin-top: 0.5rem; }
+            @media (max-width: 768px) {
+                body { padding: 1rem; }
+                th, td { font-size: 0.7rem; padding: 8px 6px; }
+                .tab-btn { padding: 0.5rem 1rem; font-size: 0.8rem; }
+            }
         </style>
     </head>
     <body>
@@ -479,11 +490,16 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             <!-- Swaps Tab -->
             <div id="swaps-tab" class="tab-content active">
                 <div class="card">
-                    <h2>⏳ Pending Swaps</h2>
+                    <h2>⏳ Pending Swaps <span class="refresh" onclick="loadAllSwaps()">🔄 Refresh</span></h2>
                     <div style="overflow-x: auto;">
                         <table id="pendingTable">
-                            <thead><tr><th>ID</th><th>From</th><th>Amount</th><th>Type</th><th>Receiver</th><th>Status</th><th>Actions</th></tr></thead>
-                            <tbody id="pendingBody"><tr class="empty-row"><td colspan="7">Loading...</td></tr></tbody>
+                            <thead>
+                                <tr>
+                                    <th>ID</th><th>From</th><th>Amount (CC)</th><th>Type</th><th>Receiver</th><th>Details</th><th>Status</th><th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pendingBody"><tr class="empty-row"><td colspan="8">Loading...</td></tr>
+                            </tbody>
                         </table>
                     </div>
                 </div>
@@ -491,8 +507,13 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     <h2>✅ Completed Swaps</h2>
                     <div style="overflow-x: auto;">
                         <table id="completedTable">
-                            <thead><tr><th>ID</th><th>From</th><th>Amount</th><th>Type</th><th>Receiver</th><th>Status</th><th>Completed At</th></tr></thead>
-                            <tbody id="completedBody"><tr class="empty-row"><td colspan="7">Loading...</td></tr></tbody>
+                            <thead>
+                                <tr>
+                                    <th>ID</th><th>From</th><th>Amount (CC)</th><th>Type</th><th>Receiver</th><th>XNO TxID</th><th>Status</th><th>Completed At</th>
+                                </tr>
+                            </thead>
+                            <tbody id="completedBody"><tr class="empty-row"><td colspan="8">Loading...</td></tr>
+                            </tbody>
                         </table>
                     </div>
                 </div>
@@ -538,11 +559,28 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                 </div>
             </div>
         </div>
+        
+        <!-- Fulfill XNO Modal (for cc_to_xno swaps) -->
+        <div id="fulfillXnoModal" class="modal">
+            <div class="modal-content">
+                <h3>🟦 Complete XNO Swap</h3>
+                <p>Swap ID: <strong id="fulfillSwapId"></strong></p>
+                <p>Receiver: <strong id="fulfillReceiver"></strong></p>
+                <p>Amount XNO: <strong id="fulfillAmount"></strong></p>
+                <label>XNO Transaction Hash (optional):</label>
+                <input type="text" id="xnoTxid" placeholder="nano_tx_hash...">
+                <div class="modal-buttons">
+                    <button class="btn-save" onclick="confirmCompleteWithXno()">✅ Complete</button>
+                    <button class="btn-cancel" onclick="closeXnoModal()">Cancel</button>
+                </div>
+            </div>
+        </div>
 
         <script>
             let allSwaps = [];
             let allUsers = [];
             let currentEditUser = null;
+            let currentPendingSwap = null;
             
             // Tab switching
             document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -555,6 +593,33 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     if (btn.dataset.tab === 'stats') loadStats();
                 });
             });
+            
+            function getSwapTypeBadge(type) {
+                const badges = {
+                    'duco': '<span class="badge-duco">💰 DUCO</span>',
+                    'duco_to_cc': '<span class="badge-duco">🔄 DUCO→CC</span>',
+                    'xno_to_cc': '<span class="badge-xno">🟦 XNO→CC</span>',
+                    'cc_to_xno': '<span class="badge-xno">➡️ CC→XNO</span>',
+                    'ccpoc': '<span class="badge-cc">🍫 CC PoC</span>'
+                };
+                return badges[type] || '<span class="badge-cc">🍫 CC</span>';
+            }
+            
+            function formatSwapDetails(swap) {
+                if (swap.swap_type === 'xno_to_cc') {
+                    return \`XNO: \${swap.amount_xno?.toFixed(8) || '?'} XNO → \${swap.amount_cc} CC\`;
+                }
+                if (swap.swap_type === 'cc_to_xno') {
+                    return \`\${swap.amount_cc} CC → \${(swap.amount_cc * 0.000002).toFixed(8)} XNO\`;
+                }
+                if (swap.swap_type === 'duco') {
+                    return \`\${swap.amount_cc} CC → \${swap.amount_cc/10} DUCO\`;
+                }
+                if (swap.swap_type === 'duco_to_cc') {
+                    return \`\${swap.amount_duco || swap.amount_cc/10} DUCO → \${swap.amount_cc} CC\`;
+                }
+                return \`\${swap.amount_cc} CC\`;
+            }
             
             async function loadAllSwaps() {
                 try {
@@ -573,7 +638,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             function renderPending(swaps) {
                 const tbody = document.getElementById('pendingBody');
                 if (swaps.length === 0) {
-                    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">✨ No pending swaps</td></tr>';
+                    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">✨ No pending swaps</td></tr>';
                     return;
                 }
                 tbody.innerHTML = '';
@@ -582,18 +647,28 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     row.insertCell(0).innerText = swap.id;
                     row.insertCell(1).innerText = swap.from_user;
                     row.insertCell(2).innerText = swap.amount_cc;
-                    row.insertCell(3).innerText = swap.swap_type;
+                    row.insertCell(3).innerHTML = getSwapTypeBadge(swap.swap_type);
                     row.insertCell(4).innerText = swap.receiver;
-                    row.insertCell(5).innerHTML = '<span class="status-pending">pending</span>';
-                    const actions = row.insertCell(6);
+                    row.insertCell(5).innerHTML = '<small>' + formatSwapDetails(swap) + '</small>';
+                    row.insertCell(6).innerHTML = '<span class="status-pending">pending</span>';
+                    const actions = row.insertCell(7);
+                    
                     const completeBtn = document.createElement('button');
                     completeBtn.innerText = '✅ Complete';
                     completeBtn.className = 'btn-complete';
-                    completeBtn.onclick = () => completeSwap(swap.id);
+                    completeBtn.onclick = () => {
+                        if (swap.swap_type === 'cc_to_xno') {
+                            openXnoModal(swap);
+                        } else {
+                            completeSwap(swap.id);
+                        }
+                    };
+                    
                     const deleteBtn = document.createElement('button');
                     deleteBtn.innerText = '🗑️ Delete';
                     deleteBtn.className = 'btn-delete';
                     deleteBtn.onclick = () => deleteSwap(swap.id);
+                    
                     actions.appendChild(completeBtn);
                     actions.appendChild(deleteBtn);
                 }
@@ -602,7 +677,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             function renderCompleted(swaps) {
                 const tbody = document.getElementById('completedBody');
                 if (swaps.length === 0) {
-                    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">📭 No completed swaps yet</td></tr>';
+                    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">📭 No completed swaps yet</tr>';
                     return;
                 }
                 tbody.innerHTML = '';
@@ -611,11 +686,34 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     row.insertCell(0).innerText = swap.id;
                     row.insertCell(1).innerText = swap.from_user;
                     row.insertCell(2).innerText = swap.amount_cc;
-                    row.insertCell(3).innerText = swap.swap_type;
+                    row.insertCell(3).innerHTML = getSwapTypeBadge(swap.swap_type);
                     row.insertCell(4).innerText = swap.receiver;
-                    row.insertCell(5).innerHTML = '<span class="status-completed">completed</span>';
-                    row.insertCell(6).innerText = swap.completed_at ? new Date(swap.completed_at).toLocaleString() : '-';
+                    row.insertCell(5).innerHTML = swap.xno_txid ? `<span style="color:#2a6eff;font-size:0.7rem;">${swap.xno_txid.substring(0, 20)}...</span>` : '-';
+                    row.insertCell(6).innerHTML = '<span class="status-completed">completed</span>';
+                    row.insertCell(7).innerText = swap.completed_at ? new Date(swap.completed_at).toLocaleString() : '-';
                 }
+            }
+            
+            function openXnoModal(swap) {
+                currentPendingSwap = swap;
+                document.getElementById('fulfillSwapId').innerText = swap.id;
+                document.getElementById('fulfillReceiver').innerText = swap.receiver;
+                const xnoAmount = (swap.amount_cc * 0.000002).toFixed(8);
+                document.getElementById('fulfillAmount').innerHTML = `<span style="color:#2a6eff">${xnoAmount} XNO</span>`;
+                document.getElementById('xnoTxid').value = '';
+                document.getElementById('fulfillXnoModal').style.display = 'flex';
+            }
+            
+            function closeXnoModal() {
+                document.getElementById('fulfillXnoModal').style.display = 'none';
+                currentPendingSwap = null;
+            }
+            
+            async function confirmCompleteWithXno() {
+                if (!currentPendingSwap) return;
+                const xnoTxid = document.getElementById('xnoTxid').value.trim();
+                await completeSwap(currentPendingSwap.id, xnoTxid);
+                closeXnoModal();
             }
             
             async function loadUsers() {
@@ -632,7 +730,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             function renderUsers(users) {
                 const tbody = document.getElementById('usersBody');
                 if (users.length === 0) {
-                    tbody.innerHTML = '<tr class="empty-row"><td colspan="3">👻 No users found</td></tr>';
+                    tbody.innerHTML = '<tr class="empty-row"><td colspan="3">👻 No users found</tr>';
                     return;
                 }
                 tbody.innerHTML = '';
@@ -665,17 +763,20 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                         const totalSwaps = data.swaps.length;
                         const pendingSwaps = data.swaps.filter(s => s.status === 'pending').length;
                         const completedSwaps = data.swaps.filter(s => s.status === 'completed').length;
+                        const xnoSwaps = data.swaps.filter(s => s.swap_type === 'xno_to_cc' || s.swap_type === 'cc_to_xno').length;
                         const totalUsers = usersData.users.length;
                         const totalBalance = usersData.users.reduce((sum, u) => sum + u.balance, 0);
                         
-                        document.getElementById('statsContent').innerHTML = 
-                            '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">' +
-                            '<div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>📊 Total Swaps</strong><br>' + totalSwaps + '</div>' +
-                            '<div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>⏳ Pending Swaps</strong><br>' + pendingSwaps + '</div>' +
-                            '<div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>✅ Completed Swaps</strong><br>' + completedSwaps + '</div>' +
-                            '<div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>👥 Total Users</strong><br>' + totalUsers + '</div>' +
-                            '<div style="background: #2a2a36; padding: 1rem; border-radius: 16px;"><strong>💰 Total CC Supply</strong><br>' + totalBalance.toFixed(4) + ' CC</div>' +
-                            '</div>';
+                        document.getElementById('statsContent').innerHTML = \`
+                            <div class="stats-grid">
+                                <div class="stat-card">📊 Total Swaps<br><strong>\${totalSwaps}</strong></div>
+                                <div class="stat-card">⏳ Pending Swaps<br><strong>\${pendingSwaps}</strong></div>
+                                <div class="stat-card">✅ Completed Swaps<br><strong>\${completedSwaps}</strong></div>
+                                <div class="stat-card">🟦 XNO Swaps<br><strong>\${xnoSwaps}</strong></div>
+                                <div class="stat-card">👥 Total Users<br><strong>\${totalUsers}</strong></div>
+                                <div class="stat-card">💰 Total CC Supply<br><strong>\${totalBalance.toFixed(4)} CC</strong></div>
+                            </div>
+                        \`;
                     }
                 } catch(e) { console.error(e); }
             }
@@ -716,18 +817,20 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                 } catch(e) { alert(e.message); }
             }
             
-            async function completeSwap(id) {
+            async function completeSwap(id, xnoTxid = null) {
                 if (!confirm('Mark this swap as completed?')) return;
                 try {
+                    const body = xnoTxid ? { request_id: id, xno_txid: xnoTxid } : { request_id: id };
                     const resp = await fetch('/admin/api/fulfill', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ request_id: id })
+                        body: JSON.stringify(body)
                     });
                     const data = await resp.json();
                     if (data.status === 'success') {
-                        alert('✅ Swap completed!');
+                        alert('✅ Swap completed!' + (xnoTxid ? ' XNO txid saved.' : ''));
                         loadAllSwaps();
+                        loadStats();
                     } else {
                         alert('❌ Error: ' + (data.message || 'Unknown error'));
                     }
@@ -742,14 +845,19 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     if (data.status === 'success') {
                         alert('🗑️ Swap deleted.');
                         loadAllSwaps();
+                        loadStats();
                     } else {
                         alert('❌ Error: ' + (data.message || 'Unknown error'));
                     }
                 } catch(e) { alert(e.message); }
             }
             
+            // Auto refresh every 30 seconds
             loadAllSwaps();
-            setInterval(loadAllSwaps, 30000);
+            setInterval(() => {
+                loadAllSwaps();
+                loadStats();
+            }, 30000);
         </script>
     </body>
     </html>
