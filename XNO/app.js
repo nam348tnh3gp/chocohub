@@ -72,14 +72,12 @@ function isValidNanoAddress(address) {
     return address && address.startsWith('nano_') && address.length >= 60;
 }
 
-// Sign with tweetnacl
-function signWithPrivateKey(messageHex, privateKeyHex) {
-    const message = Buffer.from(messageHex, 'hex');
-    const privateKey = Buffer.from(privateKeyHex, 'hex');
-    const publicKey = Buffer.from(privateKey).slice(32);
-    const secretKey = Buffer.concat([privateKey, publicKey]);
-    const signature = nacl.sign.detached(message, secretKey);
-    return Buffer.from(signature).toString('hex');
+// Lưu private key trực tiếp (không mã hóa, chỉ lưu seed thôi)
+async function saveWalletToFile(walletData) {
+    const data = await getWallets();
+    data.wallets.push(walletData);
+    if (!data.active_wallet) data.active_wallet = walletData.id;
+    await updateWallets(data);
 }
 
 // Tạo địa chỉ Nano từ seed
@@ -108,7 +106,18 @@ async function generateRandomSeed() {
     return seedBuffer.toString('hex');
 }
 
-// Gửi XNO (auto)
+// Sign với tweetnacl
+function signWithPrivateKey(messageHex, privateKeyHex) {
+    const message = Buffer.from(messageHex, 'hex');
+    const privateKey = Buffer.from(privateKeyHex, 'hex');
+    // tweetnacl yêu cầu secret key 64 bytes (private + public)
+    // Cần lấy public key từ private key
+    const keyPair = nacl.sign.keyPair.fromSeed(privateKey.slice(0, 32));
+    const signature = nacl.sign.detached(message, keyPair.secretKey);
+    return Buffer.from(signature).toString('hex');
+}
+
+// Gửi XNO
 async function sendXNO(wallet, toAddress, amountRaw, work = '0000000000000000') {
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
@@ -145,7 +154,7 @@ async function sendXNO(wallet, toAddress, amountRaw, work = '0000000000000000') 
     }
 }
 
-// Tạo block change representative
+// Set representative
 async function setRepresentative(wallet, representativeAddress, work = '0000000000000000') {
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
@@ -247,19 +256,14 @@ async function processPendingSwaps() {
         const data = await getWallets();
         const activeWallet = data.wallets.find(w => w.id === data.active_wallet);
         
-        if (!activeWallet || !activeWallet.private_key) {
-            // Need to decrypt wallet first (store decrypted private key in memory for auto ops)
-            console.log('Active wallet has no private key loaded');
-            return;
-        }
+        if (!activeWallet || !activeWallet.private_key) return;
         
         for (const swap of swaps) {
             if (swap.status !== 'pending') continue;
             
             if (swap.swap_type === 'xno_to_cc') {
                 await processXNOtoCC(swap, activeWallet, admin);
-            }
-            else if (swap.swap_type === 'cc_to_xno') {
+            } else if (swap.swap_type === 'cc_to_xno') {
                 await processCCtoXNO(swap, activeWallet, admin);
             }
         }
@@ -271,7 +275,6 @@ async function processPendingSwaps() {
 async function processXNOtoCC(swap, wallet, admin) {
     try {
         const pending = await nanoRpcCall('pending', { account: wallet.address, source: true });
-        
         if (!pending.blocks) return;
         
         const expectedAmount = (swap.amount_cc / 500000).toFixed(8);
@@ -371,6 +374,7 @@ app.post('/api/setup', requireAuth, async (req, res) => {
             
             if (swapProcessorInterval) clearInterval(swapProcessorInterval);
             swapProcessorInterval = setInterval(processPendingSwaps, SWAP_CHECK_INTERVAL);
+            console.log('🔄 Auto swap processor started');
         } catch (err) {
             return res.json({ success: false, error: 'Cannot connect to ChocoHub: ' + err.message });
         }
@@ -393,7 +397,7 @@ app.get('/api/admin', requireAuth, async (req, res) => {
     });
 });
 
-// ========== WALLET MANAGEMENT ==========
+// ========== WALLET MANAGEMENT (no encryption, direct private key) ==========
 app.get('/api/wallets', requireAuth, async (req, res) => {
     const data = await getWallets();
     const safeWallets = data.wallets.map(w => ({
@@ -403,59 +407,24 @@ app.get('/api/wallets', requireAuth, async (req, res) => {
         public_key: w.public_key,
         index: w.index,
         created_at: w.created_at,
-        representative: w.representative,
-        has_encrypted_seed: !!w.encrypted_seed,
-        has_private_key: !!w.private_key
+        representative: w.representative
     }));
     res.json({ wallets: safeWallets, active: data.active_wallet });
 });
 
-// Set active wallet and load private key for auto ops
-app.post('/api/wallet/:id/activate', requireAuth, async (req, res) => {
-    const { password } = req.body;
-    const data = await getWallets();
-    const walletIndex = data.wallets.findIndex(w => w.id === req.params.id);
-    
-    if (walletIndex === -1) return res.json({ success: false, error: 'Wallet not found' });
-    
-    // Decrypt and store private key for auto operations
-    if (password && data.wallets[walletIndex].encrypted_private_key) {
-        try {
-            const privateKey = await decryptPrivateKey(data.wallets[walletIndex].encrypted_private_key, password);
-            data.wallets[walletIndex].private_key = privateKey;
-        } catch (err) {
-            return res.json({ success: false, error: 'Invalid password' });
-        }
-    }
-    
-    data.active_wallet = data.wallets[walletIndex].id;
-    await updateWallets(data);
-    res.json({ success: true });
-});
-
-// Tạo ví mới
 app.post('/api/wallet/create', requireAuth, async (req, res) => {
-    const { password, name } = req.body;
-    
-    if (!password) {
-        return res.json({ success: false, error: 'Password required to encrypt wallet' });
-    }
-    
+    const { name } = req.body;
     try {
         const seedHex = await generateRandomSeed();
         const { address, publicKey, privateKey } = await generateNanoAddressFromSeed(seedHex, 0);
-        
-        const encryptedPrivateKey = await encryptPrivateKey(privateKey, password);
-        const encryptedSeed = await encryptPrivateKey(seedHex, password);
         
         const wallet = {
             id: Date.now().toString(),
             name: name || `Wallet ${new Date().toLocaleString()}`,
             address: address,
             public_key: publicKey,
-            encrypted_private_key: encryptedPrivateKey,
-            encrypted_seed: encryptedSeed,
-            private_key: privateKey, // Keep in memory for auto ops
+            private_key: privateKey,
+            seed: seedHex,
             index: 0,
             created_at: new Date().toISOString(),
             representative: null
@@ -472,13 +441,10 @@ app.post('/api/wallet/create', requireAuth, async (req, res) => {
     }
 });
 
-// Import wallet
 app.post('/api/wallet/import', requireAuth, async (req, res) => {
     try {
-        let { seed, name, index, password } = req.body;
-        
+        let { seed, name, index } = req.body;
         if (!seed) return res.json({ success: false, error: 'Seed is required' });
-        if (!password) return res.json({ success: false, error: 'Password required to encrypt wallet' });
         
         let seedHex = seed;
         if (seed.length !== 64) {
@@ -492,9 +458,6 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
         const walletIndex = index || 0;
         const { address, publicKey, privateKey } = await generateNanoAddressFromSeed(seedHex, walletIndex);
         
-        const encryptedPrivateKey = await encryptPrivateKey(privateKey, password);
-        const encryptedSeed = await encryptPrivateKey(seedHex, password);
-        
         let representative = null;
         try {
             const accountInfo = await nanoRpcCall('account_info', { account: address });
@@ -506,9 +469,8 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
             name: name || `Imported ${new Date().toLocaleString()}`,
             address: address,
             public_key: publicKey,
-            encrypted_private_key: encryptedPrivateKey,
-            encrypted_seed: encryptedSeed,
             private_key: privateKey,
+            seed: seedHex,
             index: walletIndex,
             created_at: new Date().toISOString(),
             representative: representative
@@ -528,11 +490,9 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
     }
 });
 
-// Import from file
 app.post('/api/wallet/import-file', requireAuth, upload.single('seedFile'), async (req, res) => {
     try {
         if (!req.file) return res.json({ success: false, error: 'No file uploaded' });
-        if (!req.body.password) return res.json({ success: false, error: 'Password required' });
         
         const content = await fs.readFile(req.file.path, 'utf8');
         let seed = content.trim();
@@ -548,9 +508,6 @@ app.post('/api/wallet/import-file', requireAuth, upload.single('seedFile'), asyn
         }
         const { address, publicKey, privateKey } = await generateNanoAddressFromSeed(seed, 0);
         
-        const encryptedPrivateKey = await encryptPrivateKey(privateKey, req.body.password);
-        const encryptedSeed = await encryptPrivateKey(seed, req.body.password);
-        
         let representative = null;
         try {
             const accountInfo = await nanoRpcCall('account_info', { account: address });
@@ -562,9 +519,8 @@ app.post('/api/wallet/import-file', requireAuth, upload.single('seedFile'), asyn
             name: `File Import ${new Date().toLocaleString()}`,
             address: address,
             public_key: publicKey,
-            encrypted_private_key: encryptedPrivateKey,
-            encrypted_seed: encryptedSeed,
             private_key: privateKey,
+            seed: seed,
             index: 0,
             created_at: new Date().toISOString(),
             representative: representative
@@ -581,24 +537,25 @@ app.post('/api/wallet/import-file', requireAuth, upload.single('seedFile'), asyn
     }
 });
 
-// Export seed (yêu cầu mật khẩu)
-app.post('/api/wallet/:id/export', requireAuth, async (req, res) => {
-    const { password } = req.body;
+app.get('/api/wallet/:id/export', requireAuth, async (req, res) => {
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
-    
     if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
-    if (!wallet.encrypted_seed) return res.status(404).json({ error: 'Seed not available' });
     
-    try {
-        const seed = await decryptPrivateKey(wallet.encrypted_seed, password);
-        res.json({ success: true, seed: seed });
-    } catch (err) {
-        res.json({ success: false, error: 'Invalid password' });
-    }
+    res.setHeader('Content-Disposition', `attachment; filename="wallet_seed_${wallet.id}.txt"`);
+    res.setHeader('Content-Type', 'text/plain');
+    res.send(wallet.seed);
 });
 
-// Delete wallet
+app.post('/api/wallet/:id/activate', requireAuth, async (req, res) => {
+    const data = await getWallets();
+    const wallet = data.wallets.find(w => w.id === req.params.id);
+    if (!wallet) return res.json({ success: false, error: 'Wallet not found' });
+    data.active_wallet = wallet.id;
+    await updateWallets(data);
+    res.json({ success: true });
+});
+
 app.delete('/api/wallet/:id', requireAuth, async (req, res) => {
     const data = await getWallets();
     const index = data.wallets.findIndex(w => w.id === req.params.id);
@@ -611,7 +568,6 @@ app.delete('/api/wallet/:id', requireAuth, async (req, res) => {
     res.json({ success: true });
 });
 
-// Lấy số dư
 app.get('/api/wallet/:id/balance', requireAuth, async (req, res) => {
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
@@ -634,9 +590,8 @@ app.get('/api/wallet/:id/balance', requireAuth, async (req, res) => {
     }
 });
 
-// SET REPRESENTATIVE
 app.post('/api/wallet/:id/set-representative', requireAuth, async (req, res) => {
-    const { representative, password } = req.body;
+    const { representative } = req.body;
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
     
@@ -645,24 +600,8 @@ app.post('/api/wallet/:id/set-representative', requireAuth, async (req, res) => 
         return res.json({ success: false, error: 'Invalid representative address' });
     }
     
-    let privateKey = wallet.private_key;
-    
-    // If private key not in memory, decrypt it
-    if (!privateKey && password && wallet.encrypted_private_key) {
-        try {
-            privateKey = await decryptPrivateKey(wallet.encrypted_private_key, password);
-        } catch (err) {
-            return res.json({ success: false, error: 'Invalid password' });
-        }
-    }
-    
-    if (!privateKey) {
-        return res.json({ success: false, error: 'Private key not available. Activate wallet first or provide password.' });
-    }
-    
     try {
-        const tempWallet = { ...wallet, private_key: privateKey };
-        const result = await setRepresentative(tempWallet, representative);
+        const result = await setRepresentative(wallet, representative);
         
         if (result.success) {
             wallet.representative = representative;
@@ -676,7 +615,6 @@ app.post('/api/wallet/:id/set-representative', requireAuth, async (req, res) => 
     }
 });
 
-// Lấy thông tin representative
 app.get('/api/wallet/:id/representative', requireAuth, async (req, res) => {
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
@@ -695,7 +633,6 @@ app.get('/api/wallet/:id/representative', requireAuth, async (req, res) => {
     }
 });
 
-// Lịch sử giao dịch
 app.get('/api/wallet/:id/history', requireAuth, async (req, res) => {
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
@@ -717,9 +654,8 @@ app.get('/api/wallet/:id/history', requireAuth, async (req, res) => {
     }
 });
 
-// Gửi XNO (yêu cầu mật khẩu cho manual send)
 app.post('/api/wallet/send', requireAuth, async (req, res) => {
-    const { wallet_id, to_address, amount, password } = req.body;
+    const { wallet_id, to_address, amount } = req.body;
     
     if (!wallet_id || !to_address || !amount) return res.json({ success: false, error: 'Missing required fields' });
     if (!isValidNanoAddress(to_address)) return res.json({ success: false, error: 'Invalid Nano address' });
@@ -731,28 +667,13 @@ app.post('/api/wallet/send', requireAuth, async (req, res) => {
     const wallet = data.wallets.find(w => w.id === wallet_id);
     if (!wallet) return res.json({ success: false, error: 'Wallet not found' });
     
-    let privateKey = wallet.private_key;
-    
-    if (!privateKey && password && wallet.encrypted_private_key) {
-        try {
-            privateKey = await decryptPrivateKey(wallet.encrypted_private_key, password);
-        } catch (err) {
-            return res.json({ success: false, error: 'Invalid password' });
-        }
-    }
-    
-    if (!privateKey) {
-        return res.json({ success: false, error: 'Private key not available. Activate wallet first or provide password.' });
-    }
-    
     try {
         const balanceRes = await nanoRpcCall('account_balance', { account: wallet.address });
         const balance = parseFloat(balanceRes.balance || '0') / 1e30;
         if (balance < sendAmount) return res.json({ success: false, error: `Insufficient balance. You have ${balance.toFixed(6)} XNO` });
         
-        const tempWallet = { ...wallet, private_key: privateKey };
         const amountRaw = Math.floor(sendAmount * 1e30);
-        const result = await sendXNO(tempWallet, to_address, amountRaw);
+        const result = await sendXNO(wallet, to_address, amountRaw);
         
         if (result.success) {
             res.json({ success: true, hash: result.hash });
@@ -764,7 +685,6 @@ app.post('/api/wallet/send', requireAuth, async (req, res) => {
     }
 });
 
-// Kết nối ChocoHub
 app.get('/api/chocohub/swaps', requireAuth, async (req, res) => {
     const admin = await getAdmin();
     if (!admin.chocohub_token) return res.json({ success: false, error: 'Not connected to ChocoHub' });
@@ -778,7 +698,6 @@ app.get('/api/chocohub/swaps', requireAuth, async (req, res) => {
     }
 });
 
-// Manually trigger swap processing
 app.post('/api/chocohub/process', requireAuth, async (req, res) => {
     await processPendingSwaps();
     res.json({ success: true, message: 'Swap processing triggered' });
@@ -789,20 +708,8 @@ app.get('/logout', (req, res) => {
     res.redirect('/login');
 });
 
-// Start auto swap processor on server start
 setTimeout(async () => {
     const admin = await getAdmin();
-    const data = await getWallets();
-    // Auto-activate first wallet for auto ops
-    if (data.active_wallet && data.wallets.length > 0) {
-        const activeWallet = data.wallets.find(w => w.id === data.active_wallet);
-        if (activeWallet && activeWallet.private_key) {
-            console.log('✅ Active wallet ready for auto swap');
-        } else if (activeWallet && activeWallet.encrypted_private_key) {
-            console.log('⚠️ Active wallet encrypted. Auto swap will use stored key from activation.');
-        }
-    }
-    
     if (admin.chocohub_token) {
         swapProcessorInterval = setInterval(processPendingSwaps, SWAP_CHECK_INTERVAL);
         console.log('🔄 Auto swap processor started');
