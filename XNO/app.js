@@ -11,9 +11,6 @@ const nacl = require('tweetnacl');
 const nanoBase32 = require('nano-base32');
 const nanocurrency = require('nanocurrency');
 
-// Import NanoPow ES module
-let NanoPow = null;
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -134,40 +131,54 @@ function computeBlockHash(block) {
     return blake.blake2bHex(blockString, null, 32);
 }
 
-// Khởi tạo nano-pow (dynamic import cho ES module)
-async function initNanoPow() {
-    if (!NanoPow) {
-        try {
-            const nanoPowModule = await import('nano-pow');
-            NanoPow = nanoPowModule.NanoPow || nanoPowModule.default;
-            console.log('✅ nano-pow initialized successfully');
-        } catch (err) {
-            console.error('❌ Failed to load nano-pow:', err.message);
-            throw new Error('Cannot load nano-pow module. Run: npm install nano-pow@5.1.15');
+// ========== PROOF OF WORK GENERATION ==========
+// Phương thức 1: Sử dụng RPC work_generate
+async function generateWorkViaRPC(hash, difficulty = 'ffffffc000000000') {
+    try {
+        const response = await axios.post(NANO_RPC_URL, {
+            action: 'work_generate',
+            hash: hash,
+            difficulty: difficulty
+        }, { timeout: 10000 });
+        
+        if (response.data && response.data.work) {
+            console.log(`✅ PoW via RPC: ${response.data.work} for hash ${hash.substring(0, 16)}...`);
+            return response.data.work;
         }
+        throw new Error('No work returned from RPC');
+    } catch (err) {
+        console.warn('RPC work generation failed:', err.message);
+        return null;
     }
-    return NanoPow;
 }
 
-// Sinh PoW thật cho một block hash
-async function generateRealWork(blockHashHex, difficultyHex = 'ffffffc000000000') {
+// Phương thức 2: Sử dụng CPU (nanocurrency)
+async function generateWorkViaCPU(hash, difficulty = 'ffffffc000000000') {
     try {
-        const NanoPow = await initNanoPow();
-        // API đúng: NanoPow.work_generate(hash, options)
-        const result = await NanoPow.work_generate(blockHashHex, { 
-            difficulty: difficultyHex,
-            effort: 4  // Tăng effort để sinh PoW nhanh hơn (mặc định là 2)
-        });
-        const work = result.work;
-        if (!work || work === '0000000000000000') {
-            throw new Error('Generated work is invalid');
+        console.log(`🖥️ Generating PoW via CPU for hash ${hash.substring(0, 16)}... (may take 10-20 seconds)`);
+        const work = await nanocurrency.computeWork(hash, { workThreshold: difficulty });
+        if (work && work !== '0000000000000000') {
+            console.log(`✅ PoW via CPU: ${work} for hash ${hash.substring(0, 16)}...`);
+            return work;
         }
-        console.log(`✅ PoW generated: ${work} for hash ${blockHashHex.substring(0, 16)}...`);
-        return work;
+        throw new Error('CPU work generation returned invalid result');
     } catch (err) {
-        console.error('PoW generation failed:', err);
-        throw new Error('Failed to generate Proof of Work: ' + err.message);
+        console.error('CPU work generation failed:', err);
+        return null;
     }
+}
+
+// Phương thức tổng hợp: thử RPC trước, fallback sang CPU
+async function generateRealWork(blockHashHex, difficultyHex = 'ffffffc000000000') {
+    // Thử RPC trước
+    let work = await generateWorkViaRPC(blockHashHex, difficultyHex);
+    if (work) return work;
+    
+    // Fallback sang CPU
+    work = await generateWorkViaCPU(blockHashHex, difficultyHex);
+    if (work) return work;
+    
+    throw new Error('All PoW generation methods failed');
 }
 
 // Ký block (sau khi đã có work thật)
@@ -616,13 +627,16 @@ app.get('/logout', (req, res) => {
     res.redirect('/login');
 });
 
-// Khởi tạo nano-pow trước khi start (preload để tránh delay lần đầu)
+// Khởi tạo và start
 setTimeout(async () => {
+    // Kiểm tra PoW hoạt động
     try {
-        await initNanoPow();
-        console.log('⚡ nano-pow ready for PoW generation');
+        const testHash = '0000000000000000000000000000000000000000000000000000000000000000';
+        console.log('🔍 Testing PoW generation...');
+        const testWork = await generateRealWork(testHash);
+        console.log(`✅ PoW test successful: ${testWork}`);
     } catch (err) {
-        console.error('⚠️ nano-pow initialization failed:', err.message);
+        console.error('⚠️ PoW initialization warning:', err.message);
     }
     
     const admin = await getAdmin();
@@ -641,7 +655,7 @@ app.listen(PORT, () => {
     console.log('║  Default login: admin / admin       ║');
     console.log(`║  RPC Node: ${NANO_RPC_URL}          ║`);
     console.log('║  Auto Swap: Enabled (30s interval)  ║');
-    console.log('║  PoW: Real (nano-pow v5 ES module)  ║');
+    console.log('║  PoW: RPC + CPU fallback            ║');
     console.log('╚══════════════════════════════════════╝');
     console.log('');
 });
