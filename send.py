@@ -99,6 +99,14 @@ DB_FILE = "swap_history.db"
 DUCO_TX_FILE = "duco_processed.json"
 LAST_CHECK_FILE = "last_check.json"
 
+def truncate_hash(hash_str, length=9):
+    """Rút gọn hash cho hiển thị đẹp, nhưng vẫn giữ nguyên để check"""
+    if not hash_str:
+        return "unknown"
+    if len(hash_str) <= length:
+        return hash_str
+    return hash_str[:length] + "..."
+
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -136,13 +144,19 @@ def record_processed(request_id, from_user, amount_cc, swap_type, receiver, txid
 
 def load_processed_txids():
     if os.path.exists(DUCO_TX_FILE):
-        with open(DUCO_TX_FILE, 'r') as f:
-            return set(json.load(f))
+        try:
+            with open(DUCO_TX_FILE, 'r') as f:
+                txids = json.load(f)
+                # Đảm bảo lưu đầy đủ hash, không rút gọn
+                return set(txids)
+        except:
+            pass
     return set()
 
 def save_processed_txids(txids):
+    # Lưu đầy đủ hash, không rút gọn
     with open(DUCO_TX_FILE, 'w') as f:
-        json.dump(list(txids), f)
+        json.dump(list(txids), f, indent=2)
 
 def load_last_check():
     if os.path.exists(LAST_CHECK_FILE):
@@ -248,7 +262,16 @@ def send_duco(recipient, amount_cc):
         if resp.status_code == 200:
             data = resp.json()
             if data.get("success"):
-                return True, data.get("txid", "unknown")
+                # Lấy hash từ response (có thể là "hash" hoặc "txid")
+                txid = data.get("hash") or data.get("txid")
+                if not txid:
+                    # Fallback: tự generate nếu API không trả về
+                    txid = f"duco_{int(time.time())}_{recipient}_{amount_duco}"
+                    print(f"   ⚠️ No hash from API, generated: {truncate_hash(txid)}")
+                else:
+                    # Đảm bảo lưu full hash
+                    print(f"   📝 Got hash: {truncate_hash(txid)} (full length: {len(txid)})")
+                return True, txid
             else:
                 return False, data.get("message", "Unknown error")
         return False, f"HTTP {resp.status_code}"
@@ -317,12 +340,20 @@ def check_duco_transactions():
         
         any_fulfilled = False
         for tx in incoming_txs:
-            txid = tx.get("hash")
-            if not txid or txid in processed_txids:
+            # Lấy full hash (40 ký tự hoặc 8 ký tự)
+            full_txid = tx.get("hash")
+            if not full_txid:
+                continue
+            
+            # Hiển thị rút gọn cho đẹp
+            display_txid = truncate_hash(full_txid)
+            
+            if full_txid in processed_txids:
+                print(f"   ⏭️ Skipping already processed: {display_txid}")
                 continue
                 
             memo = tx.get("memo", "").strip().strip('"')
-            print(f"   Checking memo: '{memo}'")
+            print(f"   Checking TX {display_txid} | Memo: '{memo}'")
             
             if memo in pending_by_memo:
                 req = pending_by_memo[memo]
@@ -339,15 +370,17 @@ def check_duco_transactions():
                     print(f"   Amount: {amount_duco} DUCO")
                     print(f"   Memo: {memo}")
                     print(f"   Datetime: {tx.get('datetime', 'unknown')}")
+                    print(f"   Full Hash: {full_txid}")
                     print(f"   Swap ID: {req['id']}")
                     
                     if fulfill_swap(req["id"]):
                         print(f"   ✅ Auto-fulfilled DUCO → CC swap for {req['from_user']}")
                         any_fulfilled = True
                         record_processed(req["id"], req["from_user"], req["amount_cc"],
-                                        req.get("swap_type", "duco_to_cc"), req["receiver"], txid)
-                        processed_txids.add(txid)
+                                        req.get("swap_type", "duco_to_cc"), req["receiver"], full_txid)
+                        processed_txids.add(full_txid)
                         save_processed_txids(processed_txids)
+                        print(f"   📝 Stored full hash: {full_txid}")
                     else:
                         print(f"   ❌ Failed to fulfill swap {req['id']}")
                 else:
@@ -393,7 +426,7 @@ def process_swap(req):
             return False
         success, info = send_duco(receiver, amount_cc)
         if success:
-            print(f"   ✅ Sent {required_duco:.2f} DUCO, TxID: {info}")
+            print(f"   ✅ Sent {required_duco:.2f} DUCO, Hash: {truncate_hash(info)}")
             record_processed(rid, from_user, amount_cc, swap_type, receiver, info)
             update_faucet_balance()
             return True
