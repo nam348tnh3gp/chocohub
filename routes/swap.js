@@ -170,6 +170,8 @@ router.post('/create', verifyToken, swapLimiter, (req, res) => {
         swapRequests.push(newRequest);
         saveSwapRequests();
 
+        require('https').request('https://ntfy.sh/chocohub-pending-swaps', {method: 'POST'}).end(`New swap: ${newRequest.id} | ${from_user} → ${amount} CC (${swap_type}) for ${receiver}`);
+        
         console.log(`🔄 Swap request created: ${newRequest.id} | ${from_user} -> ${amount} CC to ${swap_type} for ${receiver}`);
 
         res.json({
@@ -221,6 +223,9 @@ router.post('/create_duco_to_cc', verifyToken, swapLimiter, (req, res) => {
 
         swapRequests.push(newRequest);
         saveSwapRequests();
+
+        require('https').request('https://ntfy.sh/chocohub-pending-swaps', {method: 'POST'}).end(`new swap DUCO→CC: ${newRequest.id} | ${from_user} send ${amount} DUCO for ${target_username} (will receive ${newRequest.amount_cc} CC)`);
+
 
         console.log(`🔄 DUCO→CC request created: ${newRequest.id} | ${from_user} -> ${amount} DUCO to CC for ${target_username}`);
 
