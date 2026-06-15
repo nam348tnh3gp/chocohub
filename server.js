@@ -494,87 +494,80 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     <div style="overflow-x: auto;">
                         <table id="pendingTable">
                             <thead>
-                                <tr>
-                                    <th>ID</th><th>From</th><th>Amount (CC)</th><th>Type</th><th>Receiver</th><th>Details</th><th>Status</th><th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="pendingBody"><tr class="empty-row"><td colspan="8">Loading...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+                                <tr><th>ID</th><th>From</th><th>Amount (CC)</th><th>Type</th><th>Receiver</th><th>Details</th><th>Status</th><th>Actions</th></tr></thead>
+                            <tbody id="pendingBody"><tr class="empty-row"><td colspan="8">Loading...<\/tr><\/tbody>
+                        <\/table>
+                    <\/div>
+                <\/div>
                 <div class="card">
-                    <h2>✅ Completed Swaps</h2>
+                    <h2>✅ Completed Swaps<\/h2>
                     <div style="overflow-x: auto;">
                         <table id="completedTable">
                             <thead>
-                                <tr>
-                                    <th>ID</th><th>From</th><th>Amount (CC)</th><th>Type</th><th>Receiver</th><th>XNO TxID</th><th>Status</th><th>Completed At</th>
-                                </tr>
-                            </thead>
-                            <tbody id="completedBody"><tr class="empty-row"><td colspan="8">Loading...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+                                <tr><th>ID<\/th><th>From<\/th><th>Amount (CC)<\/th><th>Type<\/th><th>Receiver<\/th><th>XNO TxID<\/th><th>Status<\/th><th>Completed At<\/th><\/tr>
+                            <\/thead>
+                            <tbody id="completedBody"><tr class="empty-row"><td colspan="8">Loading...<\/tr><\/tbody>
+                        <\/table>
+                    <\/div>
+                <\/div>
+            <\/div>
             
             <!-- Users Tab -->
             <div id="users-tab" class="tab-content">
                 <div class="card">
-                    <h2>👥 User Management</h2>
+                    <h2>👥 User Management<\/h2>
                     <div class="search-box">
                         <input type="text" id="userSearch" placeholder="Search username...">
-                        <button onclick="searchUsers()">🔍 Search</button>
-                    </div>
+                        <button onclick="searchUsers()">🔍 Search<\/button>
+                    <\/div>
                     <div style="overflow-x: auto;">
                         <table id="usersTable">
-                            <thead><tr><th>Username</th><th>Balance (CC)</th><th>Actions</th></tr></thead>
-                            <tbody id="usersBody"><tr class="empty-row"><td colspan="3">Loading...</td></tr></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+                            <thead><tr><th>Username<\/th><th>Balance (CC)<\/th><th>Actions<\/th><\/tr><\/thead>
+                            <tbody id="usersBody"><tr class="empty-row"><td colspan="3">Loading...<\/tr><\/tbody>
+                        <\/table>
+                    <\/div>
+                <\/div>
+            <\/div>
             
             <!-- Stats Tab -->
             <div id="stats-tab" class="tab-content">
                 <div class="card">
-                    <h2>📊 System Statistics</h2>
-                    <div id="statsContent">Loading...</div>
-                </div>
-            </div>
-        </div>
+                    <h2>📊 System Statistics<\/h2>
+                    <div id="statsContent">Loading...<\/div>
+                <\/div>
+            <\/div>
+        <\/div>
         
         <!-- Edit Balance Modal -->
         <div id="editModal" class="modal">
             <div class="modal-content">
-                <h3>✏️ Edit User Balance</h3>
-                <p>Username: <strong id="editUsername"></strong></p>
-                <label>Current Balance: <span id="currentBalance"></span> CC</label>
+                <h3>✏️ Edit User Balance<\/h3>
+                <p>Username: <strong id="editUsername"><\/strong><\/p>
+                <label>Current Balance: <span id="currentBalance"><\/span> CC<\/label>
                 <input type="number" id="editAmount" placeholder="Amount">
                 <div class="modal-buttons">
-                    <button class="btn-save" onclick="saveBalance('add')">➕ Add</button>
-                    <button class="btn-save" onclick="saveBalance('set')">📝 Set</button>
-                    <button class="btn-cancel" onclick="closeModal()">Cancel</button>
-                </div>
-            </div>
-        </div>
+                    <button class="btn-save" onclick="saveBalance('add')">➕ Add<\/button>
+                    <button class="btn-save" onclick="saveBalance('set')">📝 Set<\/button>
+                    <button class="btn-cancel" onclick="closeModal()">Cancel<\/button>
+                <\/div>
+            <\/div>
+        <\/div>
         
         <!-- Fulfill XNO Modal (for cc_to_xno swaps) -->
         <div id="fulfillXnoModal" class="modal">
             <div class="modal-content">
-                <h3>🟦 Complete XNO Swap</h3>
-                <p>Swap ID: <strong id="fulfillSwapId"></strong></p>
-                <p>Receiver: <strong id="fulfillReceiver"></strong></p>
-                <p>Amount XNO: <strong id="fulfillAmount"></strong></p>
-                <label>XNO Transaction Hash (optional):</label>
+                <h3>🟦 Complete XNO Swap<\/h3>
+                <p>Swap ID: <strong id="fulfillSwapId"><\/strong><\/p>
+                <p>Receiver: <strong id="fulfillReceiver"><\/strong><\/p>
+                <p>Amount XNO: <strong id="fulfillAmount"><\/strong><\/p>
+                <label>XNO Transaction Hash (optional):<\/label>
                 <input type="text" id="xnoTxid" placeholder="nano_tx_hash...">
                 <div class="modal-buttons">
-                    <button class="btn-save" onclick="confirmCompleteWithXno()">✅ Complete</button>
-                    <button class="btn-cancel" onclick="closeXnoModal()">Cancel</button>
-                </div>
-            </div>
-        </div>
+                    <button class="btn-save" onclick="confirmCompleteWithXno()">✅ Complete<\/button>
+                    <button class="btn-cancel" onclick="closeXnoModal()">Cancel<\/button>
+                <\/div>
+            <\/div>
+        <\/div>
 
         <script>
             let allSwaps = [];
@@ -607,18 +600,18 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             
             function formatSwapDetails(swap) {
                 if (swap.swap_type === 'xno_to_cc') {
-                    return \`XNO: \${swap.amount_xno?.toFixed(8) || '?'} XNO → \${swap.amount_cc} CC\`;
+                    return 'XNO: ' + (swap.amount_xno?.toFixed(8) || '?') + ' XNO → ' + swap.amount_cc + ' CC';
                 }
                 if (swap.swap_type === 'cc_to_xno') {
-                    return \`\${swap.amount_cc} CC → \${(swap.amount_cc * 0.000002).toFixed(8)} XNO\`;
+                    return swap.amount_cc + ' CC → ' + (swap.amount_cc * 0.000002).toFixed(8) + ' XNO';
                 }
                 if (swap.swap_type === 'duco') {
-                    return \`\${swap.amount_cc} CC → \${swap.amount_cc/10} DUCO\`;
+                    return swap.amount_cc + ' CC → ' + (swap.amount_cc/10) + ' DUCO';
                 }
                 if (swap.swap_type === 'duco_to_cc') {
-                    return \`\${swap.amount_duco || swap.amount_cc/10} DUCO → \${swap.amount_cc} CC\`;
+                    return (swap.amount_duco || swap.amount_cc/10) + ' DUCO → ' + swap.amount_cc + ' CC';
                 }
-                return \`\${swap.amount_cc} CC\`;
+                return swap.amount_cc + ' CC';
             }
             
             async function loadAllSwaps() {
@@ -638,7 +631,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             function renderPending(swaps) {
                 const tbody = document.getElementById('pendingBody');
                 if (swaps.length === 0) {
-                    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">✨ No pending swaps</td></tr>';
+                    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">✨ No pending swaps<\/tr>';
                     return;
                 }
                 tbody.innerHTML = '';
@@ -649,7 +642,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     row.insertCell(2).innerText = swap.amount_cc;
                     row.insertCell(3).innerHTML = getSwapTypeBadge(swap.swap_type);
                     row.insertCell(4).innerText = swap.receiver;
-                    row.insertCell(5).innerHTML = '<small>' + formatSwapDetails(swap) + '</small>';
+                    row.insertCell(5).innerHTML = '<small>' + formatSwapDetails(swap) + '<\/small>';
                     row.insertCell(6).innerHTML = '<span class="status-pending">pending</span>';
                     const actions = row.insertCell(7);
                     
@@ -677,7 +670,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             function renderCompleted(swaps) {
                 const tbody = document.getElementById('completedBody');
                 if (swaps.length === 0) {
-                    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">📭 No completed swaps yet</tr>';
+                    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">📭 No completed swaps yet<\/tr>';
                     return;
                 }
                 tbody.innerHTML = '';
@@ -688,7 +681,11 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     row.insertCell(2).innerText = swap.amount_cc;
                     row.insertCell(3).innerHTML = getSwapTypeBadge(swap.swap_type);
                     row.insertCell(4).innerText = swap.receiver;
-                    row.insertCell(5).innerHTML = swap.xno_txid ? `<span style="color:#2a6eff;font-size:0.7rem;">${swap.xno_txid.substring(0, 20)}...</span>` : '-';
+                    let xnoDisplay = '-';
+                    if (swap.xno_txid) {
+                        xnoDisplay = '<span style="color:#2a6eff;font-size:0.7rem;">' + swap.xno_txid.substring(0, 20) + '...<\/span>';
+                    }
+                    row.insertCell(5).innerHTML = xnoDisplay;
                     row.insertCell(6).innerHTML = '<span class="status-completed">completed</span>';
                     row.insertCell(7).innerText = swap.completed_at ? new Date(swap.completed_at).toLocaleString() : '-';
                 }
@@ -699,7 +696,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                 document.getElementById('fulfillSwapId').innerText = swap.id;
                 document.getElementById('fulfillReceiver').innerText = swap.receiver;
                 const xnoAmount = (swap.amount_cc * 0.000002).toFixed(8);
-                document.getElementById('fulfillAmount').innerHTML = `<span style="color:#2a6eff">${xnoAmount} XNO</span>`;
+                document.getElementById('fulfillAmount').innerHTML = '<span style="color:#2a6eff">' + xnoAmount + ' XNO</span>';
                 document.getElementById('xnoTxid').value = '';
                 document.getElementById('fulfillXnoModal').style.display = 'flex';
             }
@@ -730,7 +727,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             function renderUsers(users) {
                 const tbody = document.getElementById('usersBody');
                 if (users.length === 0) {
-                    tbody.innerHTML = '<tr class="empty-row"><td colspan="3">👻 No users found</tr>';
+                    tbody.innerHTML = '<tr class="empty-row"><td colspan="3">👻 No users found<\/tr>';
                     return;
                 }
                 tbody.innerHTML = '';
@@ -767,16 +764,15 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                         const totalUsers = usersData.users.length;
                         const totalBalance = usersData.users.reduce((sum, u) => sum + u.balance, 0);
                         
-                        document.getElementById('statsContent').innerHTML = \`
-                            <div class="stats-grid">
-                                <div class="stat-card">📊 Total Swaps<br><strong>\${totalSwaps}</strong></div>
-                                <div class="stat-card">⏳ Pending Swaps<br><strong>\${pendingSwaps}</strong></div>
-                                <div class="stat-card">✅ Completed Swaps<br><strong>\${completedSwaps}</strong></div>
-                                <div class="stat-card">🟦 XNO Swaps<br><strong>\${xnoSwaps}</strong></div>
-                                <div class="stat-card">👥 Total Users<br><strong>\${totalUsers}</strong></div>
-                                <div class="stat-card">💰 Total CC Supply<br><strong>\${totalBalance.toFixed(4)} CC</strong></div>
-                            </div>
-                        \`;
+                        document.getElementById('statsContent').innerHTML = 
+                            '<div class="stats-grid">' +
+                            '<div class="stat-card">📊 Total Swaps<br><strong>' + totalSwaps + '<\/strong><\/div>' +
+                            '<div class="stat-card">⏳ Pending Swaps<br><strong>' + pendingSwaps + '<\/strong><\/div>' +
+                            '<div class="stat-card">✅ Completed Swaps<br><strong>' + completedSwaps + '<\/strong><\/div>' +
+                            '<div class="stat-card">🟦 XNO Swaps<br><strong>' + xnoSwaps + '<\/strong><\/div>' +
+                            '<div class="stat-card">👥 Total Users<br><strong>' + totalUsers + '<\/strong><\/div>' +
+                            '<div class="stat-card">💰 Total CC Supply<br><strong>' + totalBalance.toFixed(4) + ' CC<\/strong><\/div>' +
+                            '<\/div>';
                     }
                 } catch(e) { console.error(e); }
             }
@@ -858,9 +854,9 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                 loadAllSwaps();
                 loadStats();
             }, 30000);
-        </script>
-    </body>
-    </html>
+        <\/script>
+    <\/body>
+    <\/html>
   `);
 });
 
