@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nano Dashboard - XNO Manager</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0a12;
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            color: #eee4d8;
+            min-height: 100vh;
+        }
+        .header {
+            background: rgba(20,20,35,0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255,149,0,0.2);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        .header h1 {
+            background: linear-gradient(135deg, #f58a00, #ffbf00);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+        .header .user-info {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+        .logout-btn {
+            background: #2a2a36;
+            border: 1px solid #ff4444;
+            color: #ff4444;
+            padding: 0.5rem 1.2rem;
+            border-radius: 40px;
+            text-decoration: none;
+            transition: 0.2s;
+        }
+        .logout-btn:hover {
+            background: #ff4444;
+            color: white;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 2rem;
+            border-bottom: 1px solid #2a2a36;
+            flex-wrap: wrap;
+        }
+        .tab-btn {
+            background: none;
+            border: none;
+            color: #8b8296;
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .tab-btn:hover { color: #f58a00; }
+        .tab-btn.active { color: #f58a00; border-bottom: 2px solid #f58a00; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .card {
+            background: #1e1e2a;
+            border-radius: 24px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid rgba(255,149,0,0.1);
+        }
+        .card h2 {
+            color: #f58a00;
+            margin-bottom: 1rem;
+            font-size: 1.3rem;
+        }
+        .wallet-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .wallet-card {
+            background: #2a2a36;
+            border-radius: 16px;
+            padding: 1rem;
+            cursor: pointer;
+            transition: 0.2s;
+            border: 1px solid #3a3a46;
+        }
+        .wallet-card:hover { border-color: #f58a00; transform: translateY(-2px); }
+        .wallet-card.active {
+            border-color: #f58a00;
+            background: rgba(245,138,0,0.1);
+        }
+        .wallet-card h3 { margin-bottom: 0.5rem; font-size: 1rem; }
+        .wallet-card .address {
+            font-size: 0.7rem;
+            color: #8b8296;
+            word-break: break-all;
+            font-family: monospace;
+        }
+        .wallet-card .balance {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #44ff44;
+            margin: 0.5rem 0;
+        }
+        .wallet-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        .btn-sm {
+            background: #3a3a46;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            cursor: pointer;
+            border: none;
+            color: #eee4d8;
+        }
+        .btn-sm:hover { background: #f58a00; color: #0a0a12; }
+        .btn-primary {
+            background: #f58a00;
+            color: #0a0a12;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 30px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .btn-danger {
+            background: #ff4444;
+            color: white;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background: #1e1e2a;
+            border-radius: 24px;
+            padding: 2rem;
+            width: 450px;
+            max-width: 90%;
+            border: 1px solid rgba(255,149,0,0.2);
+        }
+        .modal-content h3 { color: #f58a00; margin-bottom: 1rem; }
+        .modal-content input, .modal-content textarea {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            background: #2a2a36;
+            border: 1px solid #3a3a46;
+            border-radius: 12px;
+            color: white;
+        }
+        .modal-buttons { display: flex; gap: 1rem; margin-top: 1rem; }
+        .modal-buttons button { flex: 1; padding: 10px; border-radius: 30px; cursor: pointer; }
+        .btn-save { background: #f58a00; border: none; color: #0a0a12; font-weight: bold; }
+        .btn-cancel { background: #2a2a36; border: 1px solid #ff4444; color: #ff4444; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px 10px; text-align: left; border-bottom: 1px solid #2a2a36; font-size: 0.85rem; }
+        th { background: #2a2a36; color: #ffbf00; }
+        .status-pending { background: #ffaa4433; color: #ffaa44; padding: 4px 10px; border-radius: 40px; font-size: 0.7rem; }
+        .status-completed { background: #44ff4433; color: #44ff44; padding: 4px 10px; border-radius: 40px; font-size: 0.7rem; }
+        .badge-xno { background: #2a6eff33; color: #2a6eff; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; }
+        .badge-duco { background: #ffaa4433; color: #ffaa44; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; }
+        .refresh-btn { float: right; font-size: 0.8rem; color: #888; cursor: pointer; margin-top: 0.5rem; }
+        .refresh-btn:hover { color: #f58a00; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+        .stat-card { background: #2a2a36; padding: 1rem; border-radius: 16px; text-align: center; }
+        .stat-card strong { display: block; font-size: 1.5rem; color: #f58a00; margin-top: 0.5rem; }
+        @media (max-width: 768px) {
+            .container { padding: 1rem; }
+            th, td { font-size: 0.7rem; padding: 8px 6px; }
+        }
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #111;
+            border: 1px solid #44ff44;
+            padding: 12px 24px;
+            border-radius: 99px;
+            opacity: 0;
+            transition: 0.2s;
+            z-index: 1100;
+        }
+        .toast.show { opacity: 1; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🟦 Nano XNO Dashboard</h1>
+        <div class="user-info">
+            <span id="chocoUserDisplay">Loading...</span>
+            <a href="/logout" class="logout-btn">🚪 Logout</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="wallets">💼 Wallets</button>
+            <button class="tab-btn" data-tab="swaps">🔄 ChocoHub Swaps</button>
+            <button class="tab-btn" data-tab="send">✈️ Send XNO</button>
+            <button class="tab-btn" data-tab="history">📜 Transaction History</button>
+        </div>
+
+        <!-- Wallets Tab -->
+        <div id="wallets-tab" class="tab-content active">
+            <div class="card">
+                <h2>💼 My Wallets <span class="refresh-btn" onclick="loadWallets()">🔄 Refresh</span></h2>
+                <div id="walletsList" class="wallet-grid">Loading wallets...</div>
+                <div style="display: flex; gap: 1rem; margin-top: 1rem; flex-wrap: wrap;">
+                    <button class="btn-primary" onclick="openCreateWalletModal()">➕ Create New Wallet</button>
+                    <button class="btn-primary" onclick="openImportSeedModal()">🔑 Import Seed</button>
+                    <button class="btn-primary" onclick="openImportFileModal()">📁 Import from File</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ChocoHub Swaps Tab -->
+        <div id="swaps-tab" class="tab-content">
+            <div class="card">
+                <h2>🔄 Pending Swaps <span class="refresh-btn" onclick="loadSwaps()">🔄 Refresh</span></h2>
+                <div style="overflow-x: auto;">
+                    <table id="swapsTable">
+                        <thead><tr><th>ID</th><th>From</th><th>Amount CC</th><th>Type</th><th>Receiver</th><th>Actions</th></tr></thead>
+                        <tbody id="swapsBody"><tr><td colspan="6">Loading...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card">
+                <h2>📦 Completed Swaps</h2>
+                <div style="overflow-x: auto;">
+                    <table id="completedSwapsTable">
+                        <thead><tr><th>ID</th><th>From</th><th>Amount CC</th><th>Type</th><th>Receiver</th><th>XNO TxID</th></tr></thead>
+                        <tbody id="completedSwapsBody"><tr><td colspan="6">Loading...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Send XNO Tab -->
+        <div id="send-tab" class="tab-content">
+            <div class="card">
+                <h2>✈️ Send XNO</h2>
+                <div class="input-group">
+                    <label>Select Wallet</label>
+                    <select id="sendWalletSelect" style="width:100%; padding:12px; background:#2a2a36; border:1px solid #3a3a46; border-radius:12px; color:white;">
+                        <option value="">Loading wallets...</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label>Recipient Address (nano_...)</label>
+                    <input type="text" id="sendAddress" placeholder="nano_3k41y61xxgmre13exyk3q69k78bxxwhmrmncezt49jg1sok18xo64jeff5hk">
+                </div>
+                <div class="input-group">
+                    <label>Amount (XNO)</label>
+                    <input type="number" id="sendAmount" placeholder="0.00" step="0.000001">
+                </div>
+                <button class="btn-primary" onclick="sendXNO()" style="width:100%;">Send XNO</button>
+                <div id="sendResult" style="margin-top:1rem; font-size:0.85rem;"></div>
+            </div>
+        </div>
+
+        <!-- History Tab -->
+        <div id="history-tab" class="tab-content">
+            <div class="card">
+                <h2>📜 Transaction History <span class="refresh-btn" onclick="loadHistory()">🔄 Refresh</span></h2>
+                <div style="overflow-x: auto;">
+                    <table id="historyTable">
+                        <thead><tr><th>Type</th><th>Amount (XNO)</th><th>Account</th><th>Memo</th><th>Date</th><th>Hash</th></tr></thead>
+                        <tbody id="historyBody"><tr><td colspan="6">Select a wallet to view history</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Create Wallet -->
+    <div id="createWalletModal" class="modal">
+        <div class="modal-content">
+            <h3>➕ Create New Wallet</h3>
+            <input type="text" id="walletName" placeholder="Wallet name (optional)">
+            <div class="modal-buttons">
+                <button class="btn-save" onclick="createWallet()">Create</button>
+                <button class="btn-cancel" onclick="closeModal('createWalletModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Import Seed -->
+    <div id="importSeedModal" class="modal">
+        <div class="modal-content">
+            <h3>🔑 Import Wallet from Seed</h3>
+            <textarea id="seedInput" rows="3" placeholder="64-character hex seed"></textarea>
+            <input type="text" id="seedWalletName" placeholder="Wallet name (optional)">
+            <div class="modal-buttons">
+                <button class="btn-save" onclick="importSeed()">Import</button>
+                <button class="btn-cancel" onclick="closeModal('importSeedModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Import File -->
+    <div id="importFileModal" class="modal">
+        <div class="modal-content">
+            <h3>📁 Import Wallet from File</h3>
+            <input type="file" id="seedFile" accept=".txt,.seed">
+            <div class="modal-buttons">
+                <button class="btn-save" onclick="importFile()">Upload & Import</button>
+                <button class="btn-cancel" onclick="closeModal('importFileModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Fulfill XNO Swap -->
+    <div id="fulfillXnoModal" class="modal">
+        <div class="modal-content">
+            <h3>🟦 Complete XNO → CC Swap</h3>
+            <p>Swap ID: <strong id="fulfillSwapId"></strong></p>
+            <p>Receiver: <strong id="fulfillReceiver"></strong></p>
+            <p>CC Amount: <strong id="fulfillCcAmount"></strong> CC</p>
+            <input type="text" id="xnoTxid" placeholder="XNO Transaction Hash (optional)">
+            <div class="modal-buttons">
+                <button class="btn-save" onclick="confirmFulfill()">✅ Complete</button>
+                <button class="btn-cancel" onclick="closeModal('fulfillXnoModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+        let currentWallets = [];
+        let currentActiveWallet = null;
+        let currentSwaps = [];
+        let currentPendingSwap = null;
+
+        function showToast(msg, isError = false) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.style.borderColor = isError ? '#ff4444' : '#44ff44';
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        // Tab switching
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById(btn.dataset.tab + '-tab').classList.add('active');
+                if (btn.dataset.tab === 'wallets') loadWallets();
+                if (btn.dataset.tab === 'swaps') loadSwaps();
+                if (btn.dataset.tab === 'history') loadHistory();
+                if (btn.dataset.tab === 'send') loadSendWallets();
+            });
+        });
+
+        async function loadAdmin() {
+            try {
+                const res = await fetch('/api/admin');
+                const data = await res.json();
+                document.getElementById('chocoUserDisplay').innerHTML = `👤 ${data.chocohub_username || 'Not connected'} <span style="color:#f58a00">@ ChocoHub</span>`;
+            } catch(err) { console.error(err); }
+        }
+
+async function loadWallets() {
+            try {
+                const res = await fetch('/api/wallets');
+                const data = await res.json();
+                currentWallets = data.wallets;
+                currentActiveWallet = data.active;
+                
+                const container = document.getElementById('walletsList');
+                if (!currentWallets.length) {
+                    container.innerHTML = '<div style="text-align:center; padding:2rem; color:#888;">No wallets yet. Create or import one.</div>';
+                    return;
+                }
+                
+                container.innerHTML = '';
+                for (const wallet of currentWallets) {
+                    const div = document.createElement('div');
+                    div.className = `wallet-card ${currentActiveWallet === wallet.id ? 'active' : ''}`;
+                    div.onclick = () => setActiveWallet(wallet.id);
+                    
+                    // Fetch balance
+                    let balance = '...';
+                    try {
+                        const balanceRes = await fetch(`/api/wallet/${wallet.id}/balance`);
+                        const balanceData = await balanceRes.json();
+                        if (balanceData.success) balance = balanceData.balance.toFixed(6);
+                    } catch(e) {}
+                    
+                    div.innerHTML = `
+                        <h3>${wallet.name}</h3>
+                        <div class="address">${wallet.address.substring(0, 20)}...${wallet.address.substring(-10)}</div>
+                        <div class="balance">💰 ${balance} XNO</div>
+                        <div class="wallet-actions">
+                            <button class="btn-sm" onclick="event.stopPropagation(); exportWallet('${wallet.id}')">📤 Export Seed</button>
+                            <button class="btn-sm btn-danger" onclick="event.stopPropagation(); deleteWallet('${wallet.id}')">🗑️ Delete</button>
+                        </div>
+                    `;
+                    container.appendChild(div);
+                }
+            } catch(err) { console.error(err); }
+        }
+        
+        async function setActiveWallet(walletId) {
+            try {
+                const res = await fetch(`/api/wallet/${walletId}/activate`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Active wallet changed');
+                    loadWallets();
+                    loadHistory();
+                }
+            } catch(err) { showToast(err.message, true); }
+        }
+        
+        async function exportWallet(walletId) {
+            window.open(`/api/wallet/${walletId}/export`, '_blank');
+            showToast('Download started');
+        }
+        
+        async function deleteWallet(walletId) {
+            if (!confirm('Delete this wallet? This action cannot be undone.')) return;
+            try {
+                const res = await fetch(`/api/wallet/${walletId}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Wallet deleted');
+                    loadWallets();
+                } else {
+                    showToast(data.error, true);
+                }
+            } catch(err) { showToast(err.message, true); }
+        }
+        
+        function openCreateWalletModal() {
+            document.getElementById('createWalletModal').style.display = 'flex';
+        }
+        
+        async function createWallet() {
+            const name = document.getElementById('walletName').value;
+            try {
+                const res = await fetch('/api/wallet/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name || undefined })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Wallet created successfully');
+                    closeModal('createWalletModal');
+                    document.getElementById('walletName').value = '';
+                    loadWallets();
+                } else {
+                    showToast(data.error, true);
+                }
+            } catch(err) { showToast(err.message, true); }
+        }
+        
+        function openImportSeedModal() {
+            document.getElementById('importSeedModal').style.display = 'flex';
+        }
+        
+        async function importSeed() {
+            const seed = document.getElementById('seedInput').value.trim();
+            const name = document.getElementById('seedWalletName').value;
+            if (!seed) {
+                showToast('Please enter seed', true);
+                return;
+            }
+            try {
+                const res = await fetch('/api/wallet/import', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ seed, name: name || undefined })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Wallet imported');
+                    closeModal('importSeedModal');
+                    document.getElementById('seedInput').value = '';
+                    document.getElementById('seedWalletName').value = '';
+                    loadWallets();
+                } else {
+                    showToast(data.error, true);
+                }
+            } catch(err) { showToast(err.message, true); }
+        }
+        
+        function openImportFileModal() {
+            document.getElementById('importFileModal').style.display = 'flex';
+        }
+        
+        async function importFile() {
+            const fileInput = document.getElementById('seedFile');
+            if (!fileInput.files.length) {
+                showToast('Please select a file', true);
+                return;
+            }
+            const formData = new FormData();
+            formData.append('seedFile', fileInput.files[0]);
+            try {
+                const res = await fetch('/api/wallet/import-file', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Wallet imported from file');
+                    closeModal('importFileModal');
+                    fileInput.value = '';
+                    loadWallets();
+                } else {
+                    showToast(data.error, true);
+                }
+            } catch(err) { showToast(err.message, true); }
+        }
+        
+        async function loadSwaps() {
+            try {
+                const res = await fetch('/api/chocohub/swaps');
+                const data = await res.json();
+                if (!data.success) {
+                    document.getElementById('swapsBody').innerHTML = `<tr><td colspan="6">❌ ${data.error}</td></tr>`;
+                    return;
+                }
+                currentSwaps = data.swaps || [];
+                const pending = currentSwaps.filter(s => s.status === 'pending');
+                const completed = currentSwaps.filter(s => s.status === 'completed');
+                renderPendingSwaps(pending);
+                renderCompletedSwaps(completed);
+            } catch(err) { console.error(err); }
+        }
+        
+        function renderPendingSwaps(swaps) {
+            const tbody = document.getElementById('swapsBody');
+            if (!swaps.length) {
+                tbody.innerHTML = '<tr><td colspan="6">No pending swaps</td></tr>';
+                return;
+            }
+            tbody.innerHTML = '';
+            for (const swap of swaps) {
+                const row = tbody.insertRow();
+                row.insertCell(0).innerText = swap.id;
+                row.insertCell(1).innerText = swap.from_user;
+                row.insertCell(2).innerText = swap.amount_cc;
+                row.insertCell(3).innerHTML = swap.swap_type === 'xno_to_cc' ? '<span class="badge-xno">XNO→CC</span>' : 
+                                               (swap.swap_type === 'cc_to_xno' ? '<span class="badge-xno">CC→XNO</span>' : 
+                                               '<span class="badge-duco">DUCO</span>');
+                row.insertCell(4).innerText = swap.receiver;
+                const actions = row.insertCell(5);
+                if (swap.swap_type === 'xno_to_cc') {
+                    const btn = document.createElement('button');
+                    btn.innerText = '✅ Mark Completed';
+                    btn.className = 'btn-sm';
+                    btn.style.background = '#44ff44';
+                    btn.style.color = '#0a0a12';
+                    btn.onclick = () => openFulfillModal(swap);
+                    actions.appendChild(btn);
+                } else {
+                    actions.innerHTML = '<span style="color:#888;">Manual only</span>';
+                }
+            }
+        }
+        
+        function renderCompletedSwaps(swaps) {
+            const tbody = document.getElementById('completedSwapsBody');
+            if (!swaps.length) {
+                tbody.innerHTML = '<tr><td colspan="6">No completed swaps</td></tr>';
+                return;
+            }
+            tbody.innerHTML = '';
+            for (const swap of swaps) {
+                const row = tbody.insertRow();
+                row.insertCell(0).innerText = swap.id;
+                row.insertCell(1).innerText = swap.from_user;
+                row.insertCell(2).innerText = swap.amount_cc;
+                row.insertCell(3).innerHTML = swap.swap_type === 'xno_to_cc' ? '<span class="badge-xno">XNO→CC</span>' : 
+                                               (swap.swap_type === 'cc_to_xno' ? '<span class="badge-xno">CC→XNO</span>' : 
+                                               '<span class="badge-duco">DUCO</span>');
+                row.insertCell(4).innerText = swap.receiver;
+                row.insertCell(5).innerHTML = swap.xno_txid ? `<span style="color:#2a6eff;font-size:0.7rem;">${swap.xno_txid.substring(0,20)}...</span>` : '-';
+            }
+        }
+        
+        function openFulfillModal(swap) {
+            currentPendingSwap = swap;
+            document.getElementById('fulfillSwapId').innerText = swap.id;
+            document.getElementById('fulfillReceiver').innerText = swap.receiver;
+            document.getElementById('fulfillCcAmount').innerText = swap.amount_cc;
+            document.getElementById('xnoTxid').value = '';
+            document.getElementById('fulfillXnoModal').style.display = 'flex';
+        }
+        
+        async function confirmFulfill() {
+            if (!currentPendingSwap) return;
+            const xnoTxid = document.getElementById('xnoTxid').value.trim();
+            try {
+                const res = await fetch('/api/chocohub/fulfill', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ request_id: currentPendingSwap.id, xno_txid: xnoTxid })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Swap completed!');
+                    closeModal('fulfillXnoModal');
+                    loadSwaps();
+                } else {
+                    showToast(data.error || 'Failed', true);
+                }
+            } catch(err) { showToast(err.message, true); }
+        }
+        
+        async function loadSendWallets() {
+            try {
+                const res = await fetch('/api/wallets');
+                const data = await res.json();
+                const select = document.getElementById('sendWalletSelect');
+                select.innerHTML = '<option value="">Select wallet...</option>';
+                for (const wallet of data.wallets) {
+                    const option = document.createElement('option');
+                    option.value = wallet.id;
+                    option.textContent = `${wallet.name} - ${wallet.address.substring(0, 20)}...`;
+                    select.appendChild(option);
+                }
+            } catch(err) { console.error(err); }
+        }
+        
+        async function sendXNO() {
+            const walletId = document.getElementById('sendWalletSelect').value;
+            const toAddress = document.getElementById('sendAddress').value.trim();
+            const amount = document.getElementById('sendAmount').value;
+            
+            if (!walletId) {
+                showToast('Please select a wallet', true);
+                return;
+            }
+            if (!toAddress || !toAddress.startsWith('nano_')) {
+                showToast('Please enter a valid Nano address', true);
+                return;
+            }
+            if (!amount || parseFloat(amount) <= 0) {
+                showToast('Please enter a valid amount', true);
+                return;
+            }
+            
+            try {
+                const res = await fetch('/api/wallet/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ wallet_id: walletId, to_address: toAddress, amount: parseFloat(amount) })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Transaction sent!');
+                    document.getElementById('sendAmount').value = '';
+                } else {
+                    if (data.tx_info) {
+                        document.getElementById('sendResult').innerHTML = `
+                            <div style="background:#2a2a36; padding:1rem; border-radius:12px;">
+                                <p>📤 Please send manually from your Natrium wallet:</p>
+                                <p><strong>From:</strong> ${data.tx_info.from}</p>
+                                <p><strong>To:</strong> ${data.tx_info.to}</p>
+                                <p><strong>Amount:</strong> ${data.tx_info.amount} XNO</p>
+                            </div>
+                        `;
+                    } else {
+                        showToast(data.error || 'Send failed', true);
+                    }
+                }
+            } catch(err) { showToast(err.message, true); }
+        }
+        
+        async function loadHistory() {
+            if (!currentActiveWallet) {
+                document.getElementById('historyBody').innerHTML = '<tr><td colspan="6">No active wallet</td></tr>';
+                return;
+            }
+            try {
+                const res = await fetch(`/api/wallet/${currentActiveWallet}/history`);
+                const data = await res.json();
+                if (!data.success) {
+                    document.getElementById('historyBody').innerHTML = `<tr><td colspan="6">${data.error}</td></tr>`;
+                    return;
+                }
+                const tbody = document.getElementById('historyBody');
+                if (!data.transactions.length) {
+                    tbody.innerHTML = '<tr><td colspan="6">No transactions found</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = '';
+                for (const tx of data.transactions) {
+                    const row = tbody.insertRow();
+                    row.insertCell(0).innerHTML = tx.type === 'receive' ? '<span style="color:#44ff44">⬇️ Receive</span>' : '<span style="color:#ffaa44">⬆️ Send</span>';
+                    row.insertCell(1).innerHTML = `<span style="color:#44ff44">${tx.amount.toFixed(8)} XNO</span>`;
+                    row.insertCell(2).innerText = tx.account.substring(0, 20) + '...';
+                    row.insertCell(3).innerText = tx.memo || '-';
+                    row.insertCell(4).innerText = tx.date ? new Date(tx.date).toLocaleString() : '-';
+                    row.insertCell(5).innerHTML = `<span style="font-size:0.7rem;">${tx.hash.substring(0, 16)}...</span>`;
+                }
+            } catch(err) { console.error(err); }
+        }
+        
+        // Initialize
+        loadAdmin();
+        loadWallets();
+        loadSwaps();
+        setInterval(() => {
+            if (document.querySelector('.tab-btn.active').dataset.tab === 'wallets') loadWallets();
+            if (document.querySelector('.tab-btn.active').dataset.tab === 'swaps') loadSwaps();
+        }, 30000);
+    </script>
+</body>
+</html>
