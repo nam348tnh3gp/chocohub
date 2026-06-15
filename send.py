@@ -1,8 +1,9 @@
 import os
 import time
-import requests
 import sqlite3
 import json
+import asyncio
+import aiohttp
 from datetime import datetime
 
 # ========== CONFIG FILE ==========
@@ -51,7 +52,7 @@ def interactive_setup():
     config["DUCO_FAUCET_USERNAME"] = input("DUCO Faucet Username: ").strip()
     config["DUCO_FAUCET_PASSWORD"] = input("DUCO Faucet Password: ")
     
-    # DUCO Recipient (địa chỉ nhận DUCO khi swap DUCO→CC)
+    # DUCO Recipient
     print("\n--- DUCO Recipient Info (your wallet address) ---")
     config["DUCO_RECIPIENT"] = input("DUCO recipient username [Nam2010]: ").strip()
     if not config["DUCO_RECIPIENT"]:
@@ -96,10 +97,10 @@ balance_cache = {"balance": None, "last_updated": None, "expiry_seconds": 60}
 
 # Local database
 DB_FILE = "swap_history.db"
-DUCO_TX_FILE = "duco_processed.json"
+DUCO_TX_FILE = "duco_processed.json"  # Lưu txid đã xử lý
 LAST_CHECK_FILE = "last_check.json"
 
-# 👉 HEADERS CHO DUCO API
+# HEADERS cho DUCO API
 DUCO_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept": "application/json",
@@ -150,6 +151,7 @@ def record_processed(request_id, from_user, amount_cc, swap_type, receiver, txid
     conn.close()
 
 def load_processed_txids():
+    """Load danh sách txid đã xử lý (để tránh duplicate)"""
     if os.path.exists(DUCO_TX_FILE):
         try:
             with open(DUCO_TX_FILE, 'r') as f:
@@ -163,6 +165,19 @@ def save_processed_txids(txids):
     with open(DUCO_TX_FILE, 'w') as f:
         json.dump(list(txids), f, indent=2)
 
+def load_last_check():
+    if os.path.exists(LAST_CHECK_FILE):
+        try:
+            with open(LAST_CHECK_FILE, 'r') as f:
+                return json.load(f).get("last_timestamp", 0)
+        except:
+            pass
+    return 0
+
+def save_last_check(timestamp):
+    with open(LAST_CHECK_FILE, 'w') as f:
+        json.dump({"last_timestamp": timestamp}, f)
+
 def get_admin_token():
     global jwt_token, token_expiry
     now = time.time()
@@ -172,6 +187,8 @@ def get_admin_token():
     url = f"{RENDER_API_URL}/auth"
     payload = {"username": ADMIN_USERNAME, "pin": ADMIN_PIN}
     try:
+        # Dùng requests cho auth (sync, đơn giản)
+        import requests
         resp = requests.post(url, json=payload, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
@@ -195,12 +212,11 @@ def api_call(endpoint, method="GET", data=None):
     url = f"{RENDER_API_URL}{endpoint}"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     try:
+        import requests
         if method == "GET":
             resp = requests.get(url, headers=headers, timeout=15)
         elif method == "POST":
             resp = requests.post(url, json=data, headers=headers, timeout=15)
-        elif method == "DELETE":
-            resp = requests.delete(url, headers=headers, timeout=10)
         else:
             return None
         if resp.status_code in (200, 201):
@@ -226,8 +242,8 @@ def update_faucet_balance():
         now - balance_cache["last_updated"] < balance_cache["expiry_seconds"]):
         return balance_cache["balance"]
     try:
+        import requests
         url = f"https://server.duinocoin.com/users/{DUCO_FAUCET_USERNAME}"
-        # 👉 THÊM HEADERS
         resp = requests.get(url, headers=DUCO_HEADERS, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
@@ -242,7 +258,7 @@ def update_faucet_balance():
     return balance_cache["balance"] or 0.0
 
 def send_duco(recipient, amount_cc):
-    """Gửi DUCO đi (CC → DUCO)"""
+    """Gửi DUCO đi (CC → DUCO) - dùng requests sync"""
     amount_duco = amount_cc / 10.0
     params = {
         "username": DUCO_FAUCET_USERNAME,
@@ -252,7 +268,7 @@ def send_duco(recipient, amount_cc):
         "memo": MEMO
     }
     try:
-        # 👉 THÊM HEADERS
+        import requests
         resp = requests.get("https://server.duinocoin.com/transaction/", params=params, headers=DUCO_HEADERS, timeout=15)
         if resp.status_code == 200:
             data = resp.json()
@@ -265,94 +281,119 @@ def send_duco(recipient, amount_cc):
     except Exception as e:
         return False, str(e)
 
-def fetch_transaction_hash(amount_duco, expected_memo, sender, max_wait=30):
-    """Fetch transaction hash từ DUCO API sau khi gửi"""
+# ========== ASYNC FUNCTIONS DÙNG AIOHTTP ==========
+async def fetch_transactions_async(session, username, limit=50):
+    """Fetch transactions async bằng aiohttp"""
+    url = f"https://server.duinocoin.com/user_transactions/{username}?limit={limit}"
+    try:
+        async with session.get(url, headers=DUCO_HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if data.get("success"):
+                    return data.get("result", [])
+    except Exception as e:
+        print(f"⚠️ Async fetch error: {e}")
+    return []
+
+async def fetch_incoming_transactions_async(processed_txids):
+    """Fetch giao dịch NHẬN (DUCO → CC) bằng aiohttp"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            transactions = await fetch_transactions_async(session, DUCO_RECIPIENT, 50)
+            
+            if not transactions:
+                return []
+            
+            # Lọc giao dịch NHẬN (recipient là DUCO_RECIPIENT)
+            incoming_txs = [
+                tx for tx in transactions 
+                if tx.get("recipient") == DUCO_RECIPIENT 
+                and tx.get("hash") not in processed_txids  # Bỏ qua txid đã xử lý
+            ]
+            
+            return incoming_txs
+    except Exception as e:
+        print(f"⚠️ Error in async fetch: {e}")
+        return []
+
+async def fetch_hash_after_send_async(amount_duco, expected_memo, sender, max_wait=30):
+    """Fetch hash sau khi gửi - dùng aiohttp"""
     start_time = time.time()
     
-    while time.time() - start_time < max_wait:
-        try:
-            url = f"https://server.duinocoin.com/user_transactions/{sender}?limit=20"
-            # 👉 THÊM HEADERS
-            resp = requests.get(url, headers=DUCO_HEADERS, timeout=10)
-            
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("success"):
-                    for tx in data.get("result", []):
-                        if (tx.get("sender") == sender and 
-                            tx.get("recipient") == DUCO_RECIPIENT and
-                            abs(float(tx.get("amount", 0)) - amount_duco) <= 0.01 and
-                            tx.get("memo", "").strip() == expected_memo):
-                            return tx.get("hash")
-            
-            time.sleep(2)
-        except:
-            time.sleep(2)
+    async with aiohttp.ClientSession() as session:
+        while time.time() - start_time < max_wait:
+            try:
+                transactions = await fetch_transactions_async(session, sender, 20)
+                
+                for tx in transactions:
+                    if (tx.get("sender") == sender and 
+                        tx.get("recipient") == DUCO_RECIPIENT and
+                        abs(float(tx.get("amount", 0)) - amount_duco) <= 0.01 and
+                        tx.get("memo", "").strip() == expected_memo):
+                        return tx.get("hash")
+                
+                await asyncio.sleep(2)
+            except:
+                await asyncio.sleep(2)
     
     return None
 
+# ========== CHECK DUCO TRANSACTIONS (ASYNC) ==========
 def check_incoming_duco_transactions():
-    """Check transactions NHẬN vào DUCO_RECIPIENT (DUCO → CC)"""
+    """Check transactions NHẬN vào DUCO_RECIPIENT (DUCO → CC) - async wrapper"""
     processed_txids = load_processed_txids()
     
-    try:
-        url = f"https://server.duinocoin.com/user_transactions/{DUCO_RECIPIENT}?limit=50"
-        # 👉 THÊM HEADERS
-        resp = requests.get(url, headers=DUCO_HEADERS, timeout=15)
+    # Chạy async
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    incoming_txs = loop.run_until_complete(fetch_incoming_transactions_async(processed_txids))
+    loop.close()
+    
+    if not incoming_txs:
+        return
+    
+    pending_swaps = get_pending_swaps()
+    if not pending_swaps:
+        return
+    
+    any_fulfilled = False
+    
+    for tx in incoming_txs:
+        full_hash = tx.get("hash")
+        if not full_hash:
+            continue
         
-        if resp.status_code != 200:
-            return
+        memo = tx.get("memo", "").strip()
+        amount_duco = float(tx.get("amount", 0))
+        sender = tx.get("sender", "unknown")
         
-        data = resp.json()
-        if not data.get("success"):
-            return
-        
-        transactions = data.get("result", [])
-        
-        incoming_txs = [tx for tx in transactions if tx.get("recipient") == DUCO_RECIPIENT]
-        
-        if not incoming_txs:
-            return
-        
-        pending_swaps = get_pending_swaps()
-        if not pending_swaps:
-            return
-        
-        for tx in incoming_txs:
-            full_hash = tx.get("hash")
-            if not full_hash or full_hash in processed_txids:
+        for req in pending_swaps:
+            if req.get("status") != "pending":
+                continue
+            if req.get("swap_type") != "duco_to_cc":
                 continue
             
-            memo = tx.get("memo", "").strip()
-            amount_duco = float(tx.get("amount", 0))
-            sender = tx.get("sender", "unknown")
+            expected_duco = req.get("amount_cc", 0) / 10.0
             
-            for req in pending_swaps:
-                if req.get("status") != "pending":
-                    continue
-                if req.get("swap_type") != "duco_to_cc":
-                    continue
+            if abs(amount_duco - expected_duco) <= 0.01:
+                print(f"\n✅ Found incoming DUCO transaction!")
+                print(f"   Sender: {sender}")
+                print(f"   Amount: {amount_duco} DUCO")
+                print(f"   Memo: {memo}")
+                print(f"   Hash: {full_hash[:12]}...")
+                print(f"   Swap ID: {req['id']}")
                 
-                expected_duco = req.get("amount_cc", 0) / 10.0
-                
-                if abs(amount_duco - expected_duco) <= 0.01:
-                    print(f"\n✅ Found incoming DUCO transaction!")
-                    print(f"   Sender: {sender}")
-                    print(f"   Amount: {amount_duco} DUCO")
-                    print(f"   Memo: {memo}")
-                    print(f"   Hash: {full_hash}")
-                    print(f"   Swap ID: {req['id']}")
-                    
-                    if fulfill_swap(req["id"]):
-                        print(f"   ✅ Auto-fulfilled DUCO → CC swap for {req['from_user']}")
-                        record_processed(req["id"], req["from_user"], req["amount_cc"],
-                                        req.get("swap_type"), req["receiver"], full_hash)
-                        processed_txids.add(full_hash)
-                        save_processed_txids(processed_txids)
-                    break
-                    
-    except Exception as e:
-        print(f"⚠️ Error checking DUCO transactions: {e}")
+                if fulfill_swap(req["id"]):
+                    print(f"   ✅ Auto-fulfilled DUCO → CC swap for {req['from_user']}")
+                    record_processed(req["id"], req["from_user"], req["amount_cc"],
+                                    req.get("swap_type"), req["receiver"], full_hash)
+                    processed_txids.add(full_hash)
+                    save_processed_txids(processed_txids)
+                    any_fulfilled = True
+                break
+        
+        if any_fulfilled:
+            break
 
 def process_swap(req):
     rid = req.get("id")
@@ -380,14 +421,15 @@ def process_swap(req):
         
         success, _ = send_duco(receiver, amount_cc)
         if success:
-            print(f"   ✅ Sent {required_duco:.2f} DUCO, fetching transaction hash...")
+            print(f"   ✅ Sent {required_duco:.2f} DUCO, fetching transaction hash (async)...")
             
-            tx_hash = fetch_transaction_hash(
-                amount_duco=required_duco,
-                expected_memo=MEMO,
-                sender=DUCO_FAUCET_USERNAME,
-                max_wait=30
+            # Fetch hash async
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            tx_hash = loop.run_until_complete(
+                fetch_hash_after_send_async(required_duco, MEMO, DUCO_FAUCET_USERNAME, 30)
             )
+            loop.close()
             
             if tx_hash:
                 print(f"   ✅ Transaction hash: {truncate_hash(tx_hash)}")
@@ -410,28 +452,20 @@ def process_swap(req):
             return False
 
     elif swap_type == "ccpoc":
-        success, info = send_ccpoc(receiver, amount_cc)
-        if success:
-            print(f"   ✅ Sent CC PoC (simulated), ID: {info}")
-            record_processed(rid, from_user, amount_cc, swap_type, receiver, info)
-            if fulfill_swap(rid):
-                print(f"   ✅ Notified server: swap {rid} completed")
-            return True
-        else:
-            print(f"   ❌ CC PoC send failed: {info}")
-            return False
+        amount_poc = amount_cc * 0.75
+        print(f"   [Simulated] Sending {amount_poc} CC PoC to {receiver}")
+        txid = f"SIM_{int(time.time())}"
+        record_processed(rid, from_user, amount_cc, swap_type, receiver, txid)
+        if fulfill_swap(rid):
+            print(f"   ✅ Swap {rid} completed")
+        return True
     else:
         print(f"   ⚠️ Skipping swap type: {swap_type}")
         return False
 
-def send_ccpoc(receiver, amount_cc):
-    amount_poc = amount_cc * 0.75
-    print(f"   [Simulated] Sending {amount_poc} CC PoC to {receiver}")
-    return True, "simulated_txid"
-
 def main():
     print("\n" + "="*50)
-    print("🚀 SWAP CLIENT - ChocoHub")
+    print("🚀 SWAP CLIENT - ChocoHub (aiohttp)")
     print("="*50)
     print(f"📍 Server: {RENDER_API_URL}")
     print(f"👤 Admin: {ADMIN_USERNAME}")
