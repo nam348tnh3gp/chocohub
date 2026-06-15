@@ -8,10 +8,9 @@ const axios = require('axios');
 const crypto = require('crypto');
 const blake = require('blakejs');
 const nacl = require('tweetnacl');
-const nanoBase32 = require('nano-base32');          // ← dùng nano-base32
-
-// Import nanocurrency
+const nanoBase32 = require('nano-base32');
 const nanocurrency = require('nanocurrency');
+const nanoPow = require('nano-pow');          // ← PoW thật
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -73,14 +72,11 @@ function isValidNanoAddress(address) {
     return address && address.startsWith('nano_') && address.length >= 60;
 }
 
-// Chuyển địa chỉ nano_... thành public key (hex) dùng nano-base32
+// Chuyển địa chỉ nano_... thành public key (hex)
 function addressToPublicKey(address) {
     if (!address.startsWith('nano_')) throw new Error('Invalid Nano address');
     const encoded = address.substring(5);
-    // Giải mã base32 (nano-base32 trả về Buffer)
     const decoded = nanoBase32.decode(encoded);
-    // decoded bao gồm 32 byte public key + 5 byte checksum
-    // Lấy 32 byte đầu
     const publicKeyBytes = decoded.slice(0, 32);
     return publicKeyBytes.toString('hex');
 }
@@ -111,7 +107,7 @@ async function generateRandomSeed() {
     return seedBuffer.toString('hex');
 }
 
-// Tạo state block (send, receive, change)
+// Tạo state block (chưa có work, chưa ký)
 function createStateBlock(previous, representative, balance, link, work = '0000000000000000') {
     return {
         type: 'state',
@@ -123,8 +119,8 @@ function createStateBlock(previous, representative, balance, link, work = '00000
     };
 }
 
-// Hàm sign block với tweetnacl
-function signBlock(block, privateKeyHex) {
+// Tính hash của block (không bao gồm signature)
+function computeBlockHash(block) {
     const blockString = JSON.stringify({
         type: block.type,
         previous: block.previous,
@@ -133,7 +129,24 @@ function signBlock(block, privateKeyHex) {
         link: block.link,
         work: block.work
     });
-    const blockHash = blake.blake2bHex(blockString, null, 32);
+    return blake.blake2bHex(blockString, null, 32);
+}
+
+// Sinh PoW thật cho một block hash
+async function generateRealWork(blockHashHex, difficultyHex = 'ffffffc000000000') {
+    try {
+        // nano-pow nhận blockHash dạng Buffer hoặc hex string
+        const work = await nanoPow.generateWork(blockHashHex, difficultyHex);
+        return work; // work là hex string 16 ký tự
+    } catch (err) {
+        console.error('PoW generation failed:', err);
+        throw new Error('Failed to generate Proof of Work');
+    }
+}
+
+// Ký block (sau khi đã có work thật)
+function signBlock(block, privateKeyHex) {
+    const blockHash = computeBlockHash(block);
     const blockHashBuffer = Buffer.from(blockHash, 'hex');
     const privateKeyBuffer = Buffer.from(privateKeyHex, 'hex');
     const keyPair = nacl.sign.keyPair.fromSeed(privateKeyBuffer.slice(0, 32));
@@ -141,7 +154,7 @@ function signBlock(block, privateKeyHex) {
     return Buffer.from(signature).toString('hex');
 }
 
-// Gửi XNO (link = public key của người nhận)
+// Gửi XNO (có PoW thật)
 async function sendXNO(wallet, toAddress, amountRaw) {
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
@@ -151,11 +164,17 @@ async function sendXNO(wallet, toAddress, amountRaw) {
         const amount = BigInt(amountRaw);
         const newBalance = (balance - amount).toString();
         const representative = accountInfo.representative;
-
-        // Chuyển địa chỉ người nhận thành public key
         const linkPublicKey = addressToPublicKey(toAddress);
 
+        // 1. Tạo block với work tạm
         const block = createStateBlock(previous, representative, newBalance, linkPublicKey);
+        // 2. Tính hash của block (với work tạm)
+        const tempHash = computeBlockHash(block);
+        // 3. Sinh work thật cho hash đó
+        const realWork = await generateRealWork(tempHash);
+        // 4. Gán work thật vào block
+        block.work = realWork;
+        // 5. Ký block (hash được tính lại với work thật bên trong)
         const signature = signBlock(block, wallet.private_key);
         block.signature = signature;
 
@@ -167,7 +186,7 @@ async function sendXNO(wallet, toAddress, amountRaw) {
     }
 }
 
-// Receive XNO (link là transaction hash)
+// Receive XNO (có PoW thật)
 async function receiveXNO(wallet, transactionHash) {
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
@@ -180,6 +199,9 @@ async function receiveXNO(wallet, transactionHash) {
         const representative = accountInfo.representative;
 
         const block = createStateBlock(previous, representative, newBalance, transactionHash);
+        const tempHash = computeBlockHash(block);
+        const realWork = await generateRealWork(tempHash);
+        block.work = realWork;
         const signature = signBlock(block, wallet.private_key);
         block.signature = signature;
 
@@ -191,16 +213,21 @@ async function receiveXNO(wallet, transactionHash) {
     }
 }
 
-// Set representative (link là 64 số 0)
+// Set representative (có PoW thật)
 async function setRepresentative(wallet, representativeAddress) {
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
         if (!accountInfo.frontier) throw new Error('Account not initialized. Send a small amount first.');
         const previous = accountInfo.frontier;
         const balance = accountInfo.balance;
-        const block = createStateBlock(previous, representativeAddress, balance, '0000000000000000000000000000000000000000000000000000000000000000');
+        const linkZeros = '0000000000000000000000000000000000000000000000000000000000000000';
+        const block = createStateBlock(previous, representativeAddress, balance, linkZeros);
+        const tempHash = computeBlockHash(block);
+        const realWork = await generateRealWork(tempHash);
+        block.work = realWork;
         const signature = signBlock(block, wallet.private_key);
         block.signature = signature;
+
         const result = await nanoRpcCall('process', { block: JSON.stringify(block) });
         return { success: true, hash: result.hash };
     } catch (err) {
@@ -580,6 +607,7 @@ app.listen(PORT, () => {
     console.log('║  Default login: admin / admin       ║');
     console.log(`║  RPC Node: ${NANO_RPC_URL}          ║`);
     console.log('║  Auto Swap: Enabled (30s interval)  ║');
+    console.log('║  PoW: Real (nano-pow)               ║');
     console.log('╚══════════════════════════════════════╝');
     console.log('');
 });
