@@ -268,8 +268,8 @@
                 <h2>🔄 Pending Swaps <span class="refresh-btn" onclick="loadSwaps()">🔄 Refresh</span></h2>
                 <div style="overflow-x: auto;">
                     <table id="swapsTable">
-                        <thead><tr><th>ID</th><th>From</th><th>Amount CC</th><th>Type</th><th>Receiver</th><th>Auto</th><th>Actions</th></tr></thead>
-                        <tbody id="swapsBody"><tr><td colspan="7">Loading...</tr> </tbody>
+                        <thead><tr><th>ID</th><th>From</th><th>Amount CC</th><th>Type</th><th>Receiver</th><th>Status</th><th>Actions</th></tr></thead>
+                        <tbody id="swapsBody"><tr><td colspan="7">Loading...</tr></tbody>
                     </table>
                 </div>
             </div>
@@ -278,7 +278,7 @@
                 <div style="overflow-x: auto;">
                     <table id="completedSwapsTable">
                         <thead><tr><th>ID</th><th>From</th><th>Amount CC</th><th>Type</th><th>Receiver</th><th>XNO TxID</th></tr></thead>
-                        <tbody id="completedSwapsBody"><tr><td colspan="6">Loading...</tr> </tbody>
+                        <tbody id="completedSwapsBody"><tr><td colspan="6">Loading...</td></tbody>
                     </table>
                 </div>
             </div>
@@ -302,10 +302,6 @@
                     <label>Amount (XNO)</label>
                     <input type="number" id="sendAmount" placeholder="0.00" step="0.000001">
                 </div>
-                <div class="input-group">
-                    <label>Wallet Password</label>
-                    <input type="password" id="sendPassword" placeholder="Enter wallet password">
-                </div>
                 <button class="btn-primary" onclick="sendXNO()" style="width:100%;">Send XNO</button>
                 <div id="sendResult" style="margin-top:1rem; font-size:0.85rem;"></div>
             </div>
@@ -318,7 +314,7 @@
                 <div style="overflow-x: auto;">
                     <table id="historyTable">
                         <thead><tr><th>Type</th><th>Amount (XNO)</th><th>Account</th><th>Memo</th><th>Date</th><th>Hash</th></tr></thead>
-                        <tbody id="historyBody"><tr><td colspan="6">Select a wallet to view history</tr> </tbody>
+                        <tbody id="historyBody"><tr><td colspan="6">Select a wallet to view history</td></tr></tbody>
                     </table>
                 </div>
             </div>
@@ -338,10 +334,6 @@
                     <label>Representative Address</label>
                     <input type="text" id="repAddress" placeholder="nano_...">
                 </div>
-                <div class="input-group">
-                    <label>Wallet Password</label>
-                    <input type="password" id="repPassword" placeholder="Enter wallet password">
-                </div>
                 <button class="btn-primary" onclick="setRepresentative()">👑 Set Representative</button>
                 <div id="repResult" style="margin-top:1rem; font-size:0.85rem;"></div>
             </div>
@@ -359,7 +351,6 @@
         <div class="modal-content">
             <h3>➕ Create New Wallet</h3>
             <input type="text" id="walletName" placeholder="Wallet name (optional)">
-            <input type="password" id="walletPassword" placeholder="Encryption password">
             <div class="modal-buttons">
                 <button class="btn-save" onclick="createWallet()">Create</button>
                 <button class="btn-cancel" onclick="closeModal('createWalletModal')">Cancel</button>
@@ -373,7 +364,6 @@
             <h3>🔑 Import Wallet from Seed</h3>
             <textarea id="seedInput" rows="3" placeholder="64-character hex seed"></textarea>
             <input type="text" id="seedWalletName" placeholder="Wallet name (optional)">
-            <input type="password" id="seedPassword" placeholder="Encryption password">
             <div class="modal-buttons">
                 <button class="btn-save" onclick="importSeed()">Import</button>
                 <button class="btn-cancel" onclick="closeModal('importSeedModal')">Cancel</button>
@@ -386,7 +376,6 @@
         <div class="modal-content">
             <h3>📁 Import Wallet from File</h3>
             <input type="file" id="seedFile" accept=".txt,.seed">
-            <input type="password" id="filePassword" placeholder="Encryption password">
             <div class="modal-buttons">
                 <button class="btn-save" onclick="importFile()">Upload & Import</button>
                 <button class="btn-cancel" onclick="closeModal('importFileModal')">Cancel</button>
@@ -399,7 +388,6 @@
         <div class="modal-content">
             <h3>📤 Export Wallet Seed</h3>
             <p>Wallet: <strong id="exportWalletName"></strong></p>
-            <input type="password" id="exportPassword" placeholder="Wallet password">
             <div class="modal-buttons">
                 <button class="btn-save" onclick="confirmExport()">Export</button>
                 <button class="btn-cancel" onclick="closeModal('exportSeedModal')">Cancel</button>
@@ -488,7 +476,6 @@
                     div.className = `wallet-card ${currentActiveWallet === wallet.id ? 'active' : ''}`;
                     div.onclick = () => setActiveWallet(wallet.id);
                     
-                    // Fetch balance and representative
                     let balance = '...';
                     let rep = '';
                     try {
@@ -530,25 +517,14 @@
         function openExportModal(walletId, walletName) {
             currentExportWalletId = walletId;
             document.getElementById('exportWalletName').innerText = walletName;
-            document.getElementById('exportPassword').value = '';
             document.getElementById('exportSeedModal').style.display = 'flex';
         }
         
         async function confirmExport() {
-            const password = document.getElementById('exportPassword').value;
-            if (!password) {
-                showToast('Password required', true);
-                return;
-            }
             try {
-                const res = await fetch(`/api/wallet/${currentExportWalletId}/export`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password })
-                });
+                const res = await fetch(`/api/wallet/${currentExportWalletId}/export`);
                 const data = await res.json();
-                if (data.success) {
-                    // Create download
+                if (data.success && data.seed) {
                     const blob = new Blob([data.seed], { type: 'text/plain' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
@@ -584,23 +560,17 @@
         
         async function createWallet() {
             const name = document.getElementById('walletName').value;
-            const password = document.getElementById('walletPassword').value;
-            if (!password) {
-                showToast('Password required to encrypt wallet', true);
-                return;
-            }
             try {
                 const res = await fetch('/api/wallet/create', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: name || undefined, password })
+                    body: JSON.stringify({ name: name || undefined })
                 });
                 const data = await res.json();
                 if (data.success) {
                     showToast('Wallet created successfully');
                     closeModal('createWalletModal');
                     document.getElementById('walletName').value = '';
-                    document.getElementById('walletPassword').value = '';
                     loadWallets();
                 } else {
                     showToast(data.error, true);
@@ -615,20 +585,15 @@
         async function importSeed() {
             const seed = document.getElementById('seedInput').value.trim();
             const name = document.getElementById('seedWalletName').value;
-            const password = document.getElementById('seedPassword').value;
             if (!seed) {
                 showToast('Please enter seed', true);
-                return;
-            }
-            if (!password) {
-                showToast('Password required to encrypt wallet', true);
                 return;
             }
             try {
                 const res = await fetch('/api/wallet/import', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ seed, name: name || undefined, password })
+                    body: JSON.stringify({ seed, name: name || undefined })
                 });
                 const data = await res.json();
                 if (data.success) {
@@ -636,7 +601,6 @@
                     closeModal('importSeedModal');
                     document.getElementById('seedInput').value = '';
                     document.getElementById('seedWalletName').value = '';
-                    document.getElementById('seedPassword').value = '';
                     loadWallets();
                 } else {
                     showToast(data.error, true);
@@ -650,18 +614,12 @@
         
         async function importFile() {
             const fileInput = document.getElementById('seedFile');
-            const password = document.getElementById('filePassword').value;
             if (!fileInput.files.length) {
                 showToast('Please select a file', true);
                 return;
             }
-            if (!password) {
-                showToast('Password required to encrypt wallet', true);
-                return;
-            }
             const formData = new FormData();
             formData.append('seedFile', fileInput.files[0]);
-            formData.append('password', password);
             try {
                 const res = await fetch('/api/wallet/import-file', { method: 'POST', body: formData });
                 const data = await res.json();
@@ -669,7 +627,6 @@
                     showToast('Wallet imported from file');
                     closeModal('importFileModal');
                     fileInput.value = '';
-                    document.getElementById('filePassword').value = '';
                     loadWallets();
                 } else {
                     showToast(data.error, true);
@@ -713,7 +670,7 @@
                 const actions = row.insertCell(6);
                 if (swap.swap_type === 'xno_to_cc') {
                     const btn = document.createElement('button');
-                    btn.innerText = '✅ Auto';
+                    btn.innerText = '✅ Complete';
                     btn.className = 'btn-sm';
                     btn.style.background = '#44ff44';
                     btn.style.color = '#0a0a12';
@@ -793,7 +750,6 @@
             const walletId = document.getElementById('sendWalletSelect').value;
             const toAddress = document.getElementById('sendAddress').value.trim();
             const amount = document.getElementById('sendAmount').value;
-            const password = document.getElementById('sendPassword').value;
             
             if (!walletId) {
                 showToast('Please select a wallet', true);
@@ -807,22 +763,17 @@
                 showToast('Please enter a valid amount', true);
                 return;
             }
-            if (!password) {
-                showToast('Wallet password required', true);
-                return;
-            }
             
             try {
                 const res = await fetch('/api/wallet/send', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ wallet_id: walletId, to_address: toAddress, amount: parseFloat(amount), password })
+                    body: JSON.stringify({ wallet_id: walletId, to_address: toAddress, amount: parseFloat(amount) })
                 });
                 const data = await res.json();
                 if (data.success) {
                     showToast(`Transaction sent! Hash: ${data.hash.substring(0, 16)}...`);
                     document.getElementById('sendAmount').value = '';
-                    document.getElementById('sendPassword').value = '';
                     document.getElementById('sendResult').innerHTML = `<div style="background:#2a2a36; padding:1rem; border-radius:12px;">✅ Sent! <a href="https://nanoticker.info/block/${data.hash}" target="_blank" style="color:#2a6eff;">View transaction</a></div>`;
                 } else {
                     showToast(data.error || 'Send failed', true);
@@ -845,7 +796,7 @@
                 }
                 const tbody = document.getElementById('historyBody');
                 if (!data.transactions.length) {
-                    tbody.innerHTML = '<tr><td colspan="6">No transactions found</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="6">No transactions found</tr>';
                     return;
                 }
                 tbody.innerHTML = '';
@@ -879,7 +830,6 @@
         async function setRepresentative() {
             const walletId = document.getElementById('settingsWalletSelect').value;
             const representative = document.getElementById('repAddress').value.trim();
-            const password = document.getElementById('repPassword').value;
             
             if (!walletId) {
                 showToast('Please select a wallet', true);
@@ -889,16 +839,12 @@
                 showToast('Please enter a valid Nano representative address', true);
                 return;
             }
-            if (!password) {
-                showToast('Wallet password required', true);
-                return;
-            }
             
             try {
                 const res = await fetch(`/api/wallet/${walletId}/set-representative`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ representative, password })
+                    body: JSON.stringify({ representative })
                 });
                 const data = await res.json();
                 if (data.success) {
