@@ -247,7 +247,6 @@ def update_faucet_balance():
 def send_duco(recipient, amount_cc):
     """Gửi DUCO đi (CC → DUCO) - Dùng memo riêng để phân biệt"""
     amount_duco = amount_cc / 10.0
-    # SỬA MEMO: dùng MEMO_PREFIX_SEND để phân biệt giao dịch từ ChocoHub
     memo = f"{MEMO_PREFIX_SEND} {recipient}"
     params = {
         "username": DUCO_FAUCET_USERNAME,
@@ -295,7 +294,7 @@ async def check_raw_duco_transactions_async(processed_txids, pending_swaps):
     """
     CHECK RAW TRANSACTIONS - KHÔNG FILTER GÌ CẢ
     Lấy tất cả transactions từ API, check từng cái một
-    Dùng MEMO_PREFIX_RECEIVE để nhận diện giao dịch từ user
+    TIẾP TỤC CHECK TẤT CẢ TRANSACTIONS, KHÔNG DỪNG KHI SAI AMOUNT
     """
     async with aiohttp.ClientSession() as session:
         # Fetch RAW transactions - lấy 100 transactions để chắc chắn
@@ -343,7 +342,7 @@ async def check_raw_duco_transactions_async(processed_txids, pending_swaps):
             pending_by_memo[expected_memo] = req
             print(f"      📌 EXPECTED: Memo '{expected_memo}' for {req['amount_cc']/10} DUCO")
         
-        # Duyệt qua TỪNG transaction RAW
+        # Duyệt qua TỪNG transaction RAW - KHÔNG DỪNG SỚM
         for tx in unprocessed_txs:
             tx_hash = tx.get("hash")
             memo = tx.get("memo", "").strip()
@@ -362,21 +361,26 @@ async def check_raw_duco_transactions_async(processed_txids, pending_swaps):
             if memo not in pending_by_memo:
                 if MEMO_PREFIX_RECEIVE in memo:
                     print(f"      ⚠️ Memo contains '{MEMO_PREFIX_RECEIVE}' but not expected")
+                # TIẾP TỤC CHECK TRANSACTION TIẾP THEO
                 continue
             
             req = pending_by_memo[memo]
             expected_duco = req.get("amount_cc", 0) / 10.0
             
-            # Kiểm tra amount
+            # Kiểm tra amount - NẾU SAI THÌ LOG NHƯNG VẪN TIẾP TỤC
             if abs(amount_duco - expected_duco) > 0.01:
                 print(f"      ❌ Amount mismatch: expected {expected_duco}, got {amount_duco}")
+                print(f"      ⏭️  Skipping this transaction, continue checking others...")
+                # TIẾP TỤC CHECK TRANSACTION TIẾP THEO
                 continue
             
-            # Kiểm tra recipient (bắt buộc phải là ví của bạn)
+            # Kiểm tra recipient
             if recipient != DUCO_RECIPIENT:
                 print(f"      ❌ Recipient mismatch: expected {DUCO_RECIPIENT}, got {recipient}")
+                # TIẾP TỤC CHECK TRANSACTION TIẾP THEO
                 continue
             
+            # TÌM THẤY MATCH HỢP LỆ!
             print(f"\n   ✅✅✅ MATCH FOUND IN RAW TRANSACTIONS! ✅✅✅")
             print(f"   📝 Transaction hash: {tx_hash}")
             print(f"   👤 Sender: {sender}")
@@ -386,7 +390,8 @@ async def check_raw_duco_transactions_async(processed_txids, pending_swaps):
             
             return tx, req
         
-        print(f"\n   ⏳ No matching transaction found in {len(unprocessed_txs)} RAW transactions")
+        print(f"\n   ⏳ No VALID matching transaction found in {len(unprocessed_txs)} RAW transactions")
+        print(f"   💡 Checked all transactions but none had both correct memo AND correct amount")
         return None
 
 def check_duco_transactions_raw():
@@ -472,7 +477,7 @@ def process_swap(req):
         # DUCO → CC: User gửi DUCO cho bạn, check RAW transactions
         print(f"\n   🔍 User needs to send {amount_cc/10:.2f} DUCO to {DUCO_RECIPIENT}")
         print(f"   📝 Expected memo: '{MEMO_PREFIX_RECEIVE} {receiver}'")
-        print(f"   ⚡ Checking RAW transactions (no filter)...")
+        print(f"   ⚡ Checking ALL RAW transactions (continuing even if amount mismatch)...")
         
         # Check ngay lập tức không chờ
         success = check_duco_transactions_raw()
@@ -480,8 +485,8 @@ def process_swap(req):
         if success:
             print(f"   ✅ Swap {rid} processed and fulfilled!")
         else:
-            print(f"   ⏳ No matching transaction found yet for swap {rid}")
-            print(f"   💡 Waiting for user to send DUCO with correct memo")
+            print(f"   ⏳ No valid transaction found yet for swap {rid}")
+            print(f"   💡 Waiting for user to send DUCO with correct memo AND amount")
         
         return success
 
@@ -517,7 +522,7 @@ async def periodic_check_raw_async():
 
 def main():
     print("\n" + "="*60)
-    print("🚀 SWAP CLIENT - RAW FETCH (No Filter)")
+    print("🚀 SWAP CLIENT - RAW FETCH (Continue on mismatch)")
     print("="*60)
     print(f"📍 Server: {RENDER_API_URL}")
     print(f"👤 Admin: {ADMIN_USERNAME}")
