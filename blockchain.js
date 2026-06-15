@@ -1,4 +1,5 @@
 // blockchain.js - PoW + PoS hybrid + per-worker difficulty (FLOAT) + job assignment
+// RANDOM 100% CHO PoS
 const crypto = require('crypto');
 const db = require('./db');
 
@@ -92,41 +93,55 @@ function startAutoBounty() {
 }
 
 // ═══════════════════════════════════════════════════
-// PoS
+// PoS - RANDOM 100% (KHÔNG QUAN TÂM SỐ LƯỢNG STAKE)
 // ═══════════════════════════════════════════════════
 const POS_BLOCK_INTERVAL = 30000;
-const MIN_STAKE = 10;
+const MIN_STAKE = 10;  // Chỉ cần stake tối thiểu 10 CC là có cơ hội như nhau
 const POS_BLOCK_REWARD = 0.01;
 let currentValidator = null;
 
+/**
+ * Chọn validator hoàn toàn ngẫu nhiên
+ * Mỗi người stake >= MIN_STAKE đều có cơ hội NHƯ NHAU
+ * Không quan tâm stake nhiều hay ít
+ */
 function selectValidator() {
   const validators = db.getValidators(MIN_STAKE);
   if (validators.length === 0) return null;
-  const totalStake = validators.reduce((sum, v) => sum + v.amount, 0);
-  let random = Math.random() * totalStake;
-  for (const v of validators) {
-    random -= v.amount;
-    if (random <= 0) return v;
-  }
-  return validators[0];
+  
+  // 🎲 RANDOM 100% - ai cũng có cơ hội như nhau
+  const randomIndex = Math.floor(Math.random() * validators.length);
+  const selected = validators[randomIndex];
+  
+  console.log(`🎲 Random validator: ${selected.username} (stake: ${selected.amount} CC) - ${validators.length} candidates`);
+  return selected;
 }
 
 function mintPoSBlock() {
   const validator = selectValidator();
-  if (!validator) { console.log('🔒 No validator'); currentValidator = null; return; }
+  if (!validator) { 
+    console.log('🔒 No validator (no one has staked >= 10 CC)'); 
+    currentValidator = null; 
+    return; 
+  }
+  
   const reward = POS_BLOCK_REWARD;
   const blockId = 'pos_' + crypto.randomBytes(6).toString('hex');
-  sqlite.prepare('INSERT INTO blocks_mined (username, bounty_id, reward) VALUES (?, ?, ?)').run(validator.username, blockId, reward);
+  
+  sqlite.prepare('INSERT INTO blocks_mined (username, bounty_id, reward) VALUES (?, ?, ?)')
+    .run(validator.username, blockId, reward);
   db.addStakeReward(validator.username, reward);
+  
   currentValidator = validator.username;
-  console.log(`🏦 PoS Block forged by ${validator.username} | +${reward} CC`);
+  console.log(`🏦 PoS Block forged by ${validator.username} (stake: ${validator.amount} CC) | +${reward} CC`);
 }
 
 function getCurrentValidator() { return currentValidator; }
+
 function startPoSMinting() {
   mintPoSBlock();
   setInterval(mintPoSBlock, POS_BLOCK_INTERVAL);
-  console.log(`🏦 PoS minting started`);
+  console.log(`🏦 PoS minting started (RANDOM 100% mode - stake amount doesn't matter!)`);
 }
 
 // ═══════════════════════════════════════════════════
