@@ -5,11 +5,12 @@ const fs = require('fs-extra');
 const path = require('path');
 const multer = require('multer');
 const axios = require('axios');
-const { nanocurrency } = require('nanocurrency');
+
+// Import nanocurrency đúng cách (không dùng destructuring)
+const nanocurrency = require('nanocurrency');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 
 // Nano RPC URL (public node ổn định)
 const NANO_RPC_URL = 'https://www.nanode.co/api';
@@ -29,7 +30,6 @@ async function nanoRpcCall(action, params = {}) {
 const DATA_DIR = path.join(__dirname, 'data');
 const WALLETS_FILE = path.join(DATA_DIR, 'wallets.json');
 const ADMIN_FILE = path.join(DATA_DIR, 'admin.json');
-const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
 
 // ChocoHub API URL
 const CHOCOHUB_URL = 'https://chocohub-r011.onrender.com';
@@ -41,7 +41,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Session
 app.use(session({
-    secret: 'nano-dashboard-secret-key-change-me',
+    secret: process.env.SESSION_SECRET || 'nano-dashboard-secret-key-change-me',
     resave: false,
     saveUninitialized: false,
     cookie: { secure: false, maxAge: 86400000 }
@@ -53,7 +53,6 @@ const upload = multer({ dest: path.join(DATA_DIR, 'uploads') });
 // ========== INITIALIZE DATA ==========
 async function initData() {
     await fs.ensureDir(DATA_DIR);
-    await fs.ensureDir(SESSIONS_DIR);
     
     // Khởi tạo admin mặc định
     if (!await fs.pathExists(ADMIN_FILE)) {
@@ -63,6 +62,7 @@ async function initData() {
             password_hash: defaultHash,
             chocohub_username: null,
             chocohub_pin: null,
+            chocohub_token: null,
             first_login: true
         });
         console.log('📝 Created default admin: admin/admin');
@@ -100,6 +100,23 @@ function isValidNanoAddress(address) {
     return address && address.startsWith('nano_') && address.length >= 60;
 }
 
+// Hàm tạo địa chỉ Nano từ seed
+async function generateNanoAddressFromSeed(seedHex, index = 0) {
+    try {
+        const seedBuffer = Buffer.from(seedHex, 'hex');
+        const privateKey = await nanocurrency.derivePrivateKey(seedBuffer, index);
+        const publicKey = await nanocurrency.derivePublicKey(privateKey);
+        const address = await nanocurrency.deriveAddress(publicKey, { useNanoPrefix: true });
+        return {
+            address: address,
+            publicKey: publicKey.toString('hex')
+        };
+    } catch (err) {
+        console.error('Generate address error:', err);
+        throw err;
+    }
+}
+
 // ========== AUTH MIDDLEWARE ==========
 function requireAuth(req, res, next) {
     if (req.session.authenticated) {
@@ -109,14 +126,6 @@ function requireAuth(req, res, next) {
 }
 
 // ========== ROUTES ==========
-
-// Redirect HTTP to HTTPS (production)
-app.use((req, res, next) => {
-    if (req.headers['x-forwarded-proto'] !== 'https' && process.env.NODE_ENV === 'production') {
-        return res.redirect('https://' + req.headers.host + req.url);
-    }
-    next();
-});
 
 // Login page
 app.get('/login', (req, res) => {
@@ -171,7 +180,7 @@ app.post('/api/setup', requireAuth, async (req, res) => {
             }
             admin.chocohub_token = authRes.data.token;
         } catch (err) {
-            return res.json({ success: false, error: 'Cannot connect to ChocoHub' });
+            return res.json({ success: false, error: 'Cannot connect to ChocoHub: ' + err.message });
         }
     }
     
@@ -211,16 +220,17 @@ app.post('/api/wallet/create', requireAuth, async (req, res) => {
     try {
         // Generate random seed
         const seed = nanocurrency.generateSeed();
-        const privateKey = nanocurrency.derivePrivateKey(seed, 0);
-        const publicKey = nanocurrency.derivePublicKey(privateKey);
-        const address = nanocurrency.deriveAddress(publicKey, { useNanoPrefix: true });
+        const seedHex = seed.toString('hex');
+        
+        // Generate address
+        const { address, publicKey } = await generateNanoAddressFromSeed(seedHex, 0);
         
         const wallet = {
             id: Date.now().toString(),
             name: req.body.name || `Wallet ${new Date().toLocaleString()}`,
             address: address,
-            public_key: publicKey.toString('hex'),
-            seed: seed.toString('hex'),
+            public_key: publicKey,
+            seed: seedHex,
             index: 0,
             created_at: new Date().toISOString()
         };
@@ -251,15 +261,14 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
         const seedHex = seed.length === 64 ? seed : Buffer.from(seed).toString('hex');
         const walletIndex = index || 0;
         
-        const privateKey = nanocurrency.derivePrivateKey(Buffer.from(seedHex, 'hex'), walletIndex);
-        const publicKey = nanocurrency.derivePublicKey(privateKey);
-        const address = nanocurrency.deriveAddress(publicKey, { useNanoPrefix: true });
+        // Generate address
+        const { address, publicKey } = await generateNanoAddressFromSeed(seedHex, walletIndex);
         
         const wallet = {
             id: Date.now().toString(),
             name: name || `Imported ${new Date().toLocaleString()}`,
             address: address,
-            public_key: publicKey.toString('hex'),
+            public_key: publicKey,
             seed: seedHex,
             index: walletIndex,
             created_at: new Date().toISOString()
@@ -302,15 +311,13 @@ app.post('/api/wallet/import-file', requireAuth, upload.single('seedFile'), asyn
             return res.json({ success: false, error: 'Invalid seed file content' });
         }
         
-        const privateKey = nanocurrency.derivePrivateKey(Buffer.from(seed, 'hex'), 0);
-        const publicKey = nanocurrency.derivePublicKey(privateKey);
-        const address = nanocurrency.deriveAddress(publicKey, { useNanoPrefix: true });
+        const { address, publicKey } = await generateNanoAddressFromSeed(seed, 0);
         
         const wallet = {
             id: Date.now().toString(),
             name: `File Import ${new Date().toLocaleString()}`,
             address: address,
-            public_key: publicKey.toString('hex'),
+            public_key: publicKey,
             seed: seed,
             index: 0,
             created_at: new Date().toISOString()
@@ -377,7 +384,7 @@ app.delete('/api/wallet/:id', requireAuth, async (req, res) => {
     res.json({ success: true });
 });
 
-// Get wallet balance (using axios Nano RPC)
+// Get wallet balance
 app.get('/api/wallet/:id/balance', requireAuth, async (req, res) => {
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
@@ -403,7 +410,7 @@ app.get('/api/wallet/:id/balance', requireAuth, async (req, res) => {
     }
 });
 
-// Get transaction history (using axios Nano RPC)
+// Get transaction history
 app.get('/api/wallet/:id/history', requireAuth, async (req, res) => {
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
@@ -467,8 +474,7 @@ app.post('/api/wallet/send', requireAuth, async (req, res) => {
         return res.json({ success: false, error: 'Cannot check balance' });
     }
     
-    // For security, we'll just return the transaction info for manual sending
-    // Or you can implement actual signing if you have a node
+    // For security, return transaction info for manual sending
     res.json({
         success: false,
         error: 'Auto-send not implemented for security. Please send manually from your Natrium wallet.',
@@ -500,7 +506,7 @@ app.get('/api/chocohub/swaps', requireAuth, async (req, res) => {
     }
 });
 
-// Fulfill swap on ChocoHub (for XNO→CC)
+// Fulfill swap on ChocoHub
 app.post('/api/chocohub/fulfill', requireAuth, async (req, res) => {
     const { request_id, xno_txid } = req.body;
     const admin = await getAdmin();
