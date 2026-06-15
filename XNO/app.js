@@ -8,6 +8,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const blake = require('blakejs');
 const nacl = require('tweetnacl');
+const base32 = require('base32.js');          // ← thêm để decode địa chỉ nano
 
 // Import nanocurrency
 const nanocurrency = require('nanocurrency');
@@ -72,6 +73,17 @@ function isValidNanoAddress(address) {
     return address && address.startsWith('nano_') && address.length >= 60;
 }
 
+// Chuyển địa chỉ nano_... thành public key (hex)
+function addressToPublicKey(address) {
+    if (!address.startsWith('nano_')) throw new Error('Invalid Nano address');
+    const encoded = address.substring(5);
+    const decoder = new base32.Decoder({ type: 'rfc4648', lc: true });
+    const decoded = decoder.write(encoded).finalize();
+    // Public key nằm ở byte thứ 4 đến 36 (bỏ qua 4 byte prefix)
+    const publicKeyBytes = decoded.slice(4, 36);
+    return Buffer.from(publicKeyBytes).toString('hex');
+}
+
 // Tạo địa chỉ Nano từ seed
 async function generateNanoAddressFromSeed(seedHex, index = 0) {
     try {
@@ -128,7 +140,7 @@ function signBlock(block, privateKeyHex) {
     return Buffer.from(signature).toString('hex');
 }
 
-// Gửi XNO
+// Gửi XNO (đã sửa: link = public key của người nhận)
 async function sendXNO(wallet, toAddress, amountRaw) {
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
@@ -138,9 +150,14 @@ async function sendXNO(wallet, toAddress, amountRaw) {
         const amount = BigInt(amountRaw);
         const newBalance = (balance - amount).toString();
         const representative = accountInfo.representative;
-        const block = createStateBlock(previous, representative, newBalance, toAddress);
+
+        // Chuyển địa chỉ người nhận thành public key (bắt buộc)
+        const linkPublicKey = addressToPublicKey(toAddress);
+
+        const block = createStateBlock(previous, representative, newBalance, linkPublicKey);
         const signature = signBlock(block, wallet.private_key);
         block.signature = signature;
+
         const result = await nanoRpcCall('process', { block: JSON.stringify(block) });
         return { success: true, hash: result.hash };
     } catch (err) {
@@ -149,7 +166,7 @@ async function sendXNO(wallet, toAddress, amountRaw) {
     }
 }
 
-// Receive XNO
+// Receive XNO (link là transaction hash - đúng)
 async function receiveXNO(wallet, transactionHash) {
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
@@ -160,9 +177,11 @@ async function receiveXNO(wallet, transactionHash) {
         const amount = BigInt(pending.blocks[transactionHash].amount);
         const newBalance = (balance + amount).toString();
         const representative = accountInfo.representative;
+
         const block = createStateBlock(previous, representative, newBalance, transactionHash);
         const signature = signBlock(block, wallet.private_key);
         block.signature = signature;
+
         const result = await nanoRpcCall('process', { block: JSON.stringify(block) });
         return { success: true, hash: result.hash };
     } catch (err) {
@@ -171,7 +190,7 @@ async function receiveXNO(wallet, transactionHash) {
     }
 }
 
-// Set representative
+// Set representative (link là 64 số 0 - đúng)
 async function setRepresentative(wallet, representativeAddress) {
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
