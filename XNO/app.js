@@ -79,6 +79,13 @@ function addressToPublicKey(address) {
     return publicKeyBytes.toString('hex');
 }
 
+// Chuyển public key hex thành địa chỉ nano
+function publicKeyToAddress(publicKeyHex) {
+    const publicKeyBytes = Buffer.from(publicKeyHex, 'hex');
+    const encoded = nanoBase32.encode(publicKeyBytes);
+    return 'nano_' + encoded;
+}
+
 // Tạo địa chỉ Nano từ seed
 async function generateNanoAddressFromSeed(seedHex, index = 0) {
     try {
@@ -149,9 +156,8 @@ async function generateRealWork(blockHashHex, difficultyHex = 'ffffffc000000000'
 }
 
 // ========== NANO BLOCK BUILDING ==========
-// Tính hash của block theo đúng chuẩn Nano (không bao gồm signature)
+// Tính hash của block theo đúng chuẩn Nano
 function computeBlockHash(block) {
-    // Sắp xếp các field theo đúng thứ tự alphabet để hash đúng
     const blockData = {
         type: block.type,
         previous: block.previous,
@@ -174,17 +180,18 @@ function signBlock(block, privateKeyHex) {
     return Buffer.from(signature).toString('hex');
 }
 
-// Gửi XNO sử dụng state block
+// Gửi XNO
 async function sendXNO(wallet, toAddress, amountRaw) {
     try {
         // Lấy thông tin tài khoản
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
-        if (!accountInfo.frontier) {
+        
+        if (!accountInfo || !accountInfo.frontier) {
             throw new Error('Account not initialized. Need to receive at least 1 raw first.');
         }
         
         const previous = accountInfo.frontier;
-        const currentBalanceRaw = accountInfo.balance; // string
+        const currentBalanceRaw = accountInfo.balance;
         const amountRawBigInt = BigInt(amountRaw);
         const currentBalanceBigInt = BigInt(currentBalanceRaw);
         
@@ -193,18 +200,28 @@ async function sendXNO(wallet, toAddress, amountRaw) {
         }
         
         const newBalanceRaw = (currentBalanceBigInt - amountRawBigInt).toString();
-        const representative = accountInfo.representative;
+        
+        // Lấy representative - nếu không có thì dùng chính địa chỉ ví
+        let representative = accountInfo.representative;
+        if (!representative || representative === '0000000000000000000000000000000000000000000000000000000000000000') {
+            // Nếu chưa có representative, dùng chính public key của ví
+            representative = wallet.public_key;
+            console.log(`⚠️ No representative set, using self: ${representative.substring(0, 20)}...`);
+        }
         
         // Link là public key của người nhận
         const linkPublicKey = addressToPublicKey(toAddress);
         
-        console.log(`📤 Sending ${amountRaw} raw from ${wallet.address.substring(0, 20)}...`);
+        // Log chi tiết (an toàn với substring)
+        console.log(`📤 Sending ${amountRaw} raw`);
+        console.log(`   From: ${wallet.address.substring(0, 25)}...`);
+        console.log(`   To: ${toAddress.substring(0, 25)}...`);
         console.log(`   Previous: ${previous.substring(0, 16)}...`);
         console.log(`   Balance: ${currentBalanceRaw} -> ${newBalanceRaw}`);
         console.log(`   Representative: ${representative.substring(0, 20)}...`);
         console.log(`   Link (dest pubkey): ${linkPublicKey.substring(0, 16)}...`);
         
-        // Tạo block với work tạm
+        // Tạo block
         const block = {
             type: 'state',
             previous: previous,
@@ -214,7 +231,7 @@ async function sendXNO(wallet, toAddress, amountRaw) {
             work: '0000000000000000'
         };
         
-        // Tính hash tạm và sinh work thật
+        // Sinh work
         const tempHash = computeBlockHash(block);
         const realWork = await generateRealWork(tempHash);
         block.work = realWork;
@@ -223,7 +240,18 @@ async function sendXNO(wallet, toAddress, amountRaw) {
         const signature = signBlock(block, wallet.private_key);
         block.signature = signature;
         
-        // Gửi block lên mạng
+        // Log block trước khi gửi (debug)
+        console.log('   Block preview:', JSON.stringify({
+            type: block.type,
+            previous: block.previous.substring(0, 16) + '...',
+            representative: block.representative.substring(0, 16) + '...',
+            balance: block.balance,
+            link: block.link.substring(0, 16) + '...',
+            work: block.work,
+            signature: block.signature.substring(0, 16) + '...'
+        }));
+        
+        // Gửi block
         const result = await nanoRpcCall('process', { block: JSON.stringify(block) });
         console.log(`✅ Send successful: ${result.hash}`);
         return { success: true, hash: result.hash };
@@ -238,14 +266,13 @@ async function sendXNO(wallet, toAddress, amountRaw) {
 async function receiveXNO(wallet, transactionHash) {
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
-        if (!accountInfo.frontier) {
+        if (!accountInfo || !accountInfo.frontier) {
             throw new Error('Account not initialized');
         }
         
         const previous = accountInfo.frontier;
         const currentBalanceRaw = accountInfo.balance;
         
-        // Lấy thông tin pending transaction
         const pending = await nanoRpcCall('pending', { 
             account: wallet.address, 
             hash: transactionHash,
@@ -258,13 +285,15 @@ async function receiveXNO(wallet, transactionHash) {
         
         const amountRaw = pending.blocks[transactionHash].amount;
         const newBalanceRaw = (BigInt(currentBalanceRaw) + BigInt(amountRaw)).toString();
-        const representative = accountInfo.representative;
         
-        console.log(`📥 Receiving ${amountRaw} raw to ${wallet.address.substring(0, 20)}...`);
-        console.log(`   Pending hash: ${transactionHash}`);
+        let representative = accountInfo.representative;
+        if (!representative || representative === '0000000000000000000000000000000000000000000000000000000000000000') {
+            representative = wallet.public_key;
+        }
+        
+        console.log(`📥 Receiving ${amountRaw} raw`);
         console.log(`   Balance: ${currentBalanceRaw} -> ${newBalanceRaw}`);
         
-        // Tạo receive block (link = transaction hash)
         const block = {
             type: 'state',
             previous: previous,
@@ -295,8 +324,8 @@ async function receiveXNO(wallet, transactionHash) {
 async function setRepresentative(wallet, representativeAddress) {
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
-        if (!accountInfo.frontier) {
-            throw new Error('Account not initialized. Need to receive at least 1 raw first.');
+        if (!accountInfo || !accountInfo.frontier) {
+            throw new Error('Account not initialized');
         }
         
         const previous = accountInfo.frontier;
@@ -382,8 +411,8 @@ async function processXNOtoCC(swap, wallet, admin) {
         const expectedAmountRaw = Math.floor(parseFloat(expectedAmount) * 1e30);
         
         for (const [txHash, txInfo] of Object.entries(pending.blocks)) {
-            const amountRaw = txInfo.amount;
-            if (Math.abs(parseInt(amountRaw) - expectedAmountRaw) <= 1000) {
+            const amountRaw = parseInt(txInfo.amount);
+            if (Math.abs(amountRaw - expectedAmountRaw) <= 1000) {
                 const receiveResult = await receiveXNO(wallet, txHash);
                 if (receiveResult.success) {
                     await axios.post(`${CHOCOHUB_URL}/swap/fulfill`, 
@@ -402,7 +431,7 @@ async function processXNOtoCC(swap, wallet, admin) {
 
 async function processCCtoXNO(swap, wallet, admin) {
     try {
-        const xnoAmount = (swap.amount_cc * 0.000002);
+        const xnoAmount = swap.amount_cc * 0.000002;
         const toAddress = swap.receiver;
         
         if (!isValidNanoAddress(toAddress)) {
@@ -549,7 +578,9 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
         let representative = null;
         try { 
             const accountInfo = await nanoRpcCall('account_info', { account: address }); 
-            representative = accountInfo.representative || null; 
+            if (accountInfo && accountInfo.representative) {
+                representative = publicKeyToAddress(accountInfo.representative);
+            }
         } catch (e) {}
         
         const wallet = {
@@ -595,7 +626,9 @@ app.post('/api/wallet/import-file', requireAuth, upload.single('seedFile'), asyn
         let representative = null;
         try { 
             const accountInfo = await nanoRpcCall('account_info', { account: address }); 
-            representative = accountInfo.representative || null; 
+            if (accountInfo && accountInfo.representative) {
+                representative = publicKeyToAddress(accountInfo.representative);
+            }
         } catch (e) {}
         
         const wallet = {
@@ -661,7 +694,9 @@ app.get('/api/wallet/:id/balance', requireAuth, async (req, res) => {
         let representative = wallet.representative;
         try { 
             const accountInfo = await nanoRpcCall('account_info', { account: wallet.address }); 
-            representative = accountInfo.representative || null; 
+            if (accountInfo && accountInfo.representative) {
+                representative = publicKeyToAddress(accountInfo.representative);
+            }
         } catch(e) {}
         res.json({ success: true, balance, pending, address: wallet.address, representative });
     } catch (err) {
@@ -697,7 +732,8 @@ app.get('/api/wallet/:id/representative', requireAuth, async (req, res) => {
     if (!wallet) return res.json({ success: false, error: 'Wallet not found' });
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
-        res.json({ success: true, representative: accountInfo.representative || null, 
+        const representative = accountInfo.representative ? publicKeyToAddress(accountInfo.representative) : null;
+        res.json({ success: true, representative, 
                    weight: accountInfo.weight || '0', 
                    voting_weight: parseFloat(accountInfo.weight || '0') / 1e30 });
     } catch (err) {
