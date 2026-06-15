@@ -5,9 +5,8 @@ const fs = require('fs-extra');
 const path = require('path');
 const multer = require('multer');
 const axios = require('axios');
-const crypto = require('crypto');
 
-// Import nanocurrency đúng cách
+// Import nanocurrency (phiên bản 2.5.0)
 const nanocurrency = require('nanocurrency');
 
 const app = express();
@@ -42,7 +41,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Session
 app.use(session({
-    secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
+    secret: process.env.SESSION_SECRET || 'nano-dashboard-secret-key-change-me',
     resave: false,
     saveUninitialized: false,
     cookie: { secure: false, maxAge: 86400000 }
@@ -101,17 +100,29 @@ function isValidNanoAddress(address) {
     return address && address.startsWith('nano_') && address.length >= 60;
 }
 
-// Hàm tạo địa chỉ Nano từ seed (xử lý sync/async đúng cách)
+// Hàm tạo địa chỉ Nano từ seed (dùng nanocurrency@2.5.0)
 async function generateNanoAddressFromSeed(seedHex, index = 0) {
     try {
-        const seedBuffer = Buffer.from(seedHex, 'hex');
-        // Các hàm của nanocurrency đều là async
-        const privateKey = await nanocurrency.derivePrivateKey(seedBuffer, index);
-        const publicKey = await nanocurrency.derivePublicKey(privateKey);
-        const address = await nanocurrency.deriveAddress(publicKey, { useNanoPrefix: true });
+        // Đảm bảo seed là Buffer 32 bytes
+        let seedBuffer;
+        if (Buffer.isBuffer(seedHex)) {
+            seedBuffer = seedHex;
+        } else if (typeof seedHex === 'string') {
+            seedBuffer = Buffer.from(seedHex, 'hex');
+        } else {
+            seedBuffer = seedHex;
+        }
+        
+        // deriveKeyPairFromSeed là API đúng của nanocurrency 2.x
+        const keyPair = await nanocurrency.deriveKeyPairFromSeed(seedBuffer, index);
+        
+        // Tạo địa chỉ từ public key
+        const address = await nanocurrency.deriveAddress(keyPair.publicKey, { useNanoPrefix: true });
+        
         return {
             address: address,
-            publicKey: publicKey.toString('hex')
+            publicKey: keyPair.publicKey.toString('hex'),
+            privateKey: keyPair.privateKey.toString('hex')
         };
     } catch (err) {
         console.error('Generate address error:', err);
@@ -220,18 +231,19 @@ app.get('/api/wallets', requireAuth, async (req, res) => {
 // Create new wallet
 app.post('/api/wallet/create', requireAuth, async (req, res) => {
     try {
-        // Tạo seed ngẫu nhiên
+        // Generate random seed (32 bytes)
         const seed = nanocurrency.generateSeed();
         const seedHex = seed.toString('hex');
         
-        // Tạo địa chỉ từ seed
-        const { address, publicKey } = await generateNanoAddressFromSeed(seedHex, 0);
+        // Generate address từ seed
+        const { address, publicKey, privateKey } = await generateNanoAddressFromSeed(seed, 0);
         
         const wallet = {
             id: Date.now().toString(),
             name: req.body.name || `Wallet ${new Date().toLocaleString()}`,
             address: address,
             public_key: publicKey,
+            private_key: privateKey,
             seed: seedHex,
             index: 0,
             created_at: new Date().toISOString()
@@ -244,47 +256,35 @@ app.post('/api/wallet/create', requireAuth, async (req, res) => {
         }
         await updateWallets(data);
         
-        // Không trả seed về client
-        res.json({ success: true, wallet: { 
-            id: wallet.id,
-            name: wallet.name,
-            address: wallet.address,
-            created_at: wallet.created_at
-        } });
+        res.json({ success: true, wallet: { ...wallet, seed: undefined, private_key: undefined } });
     } catch (err) {
-        console.error('Create wallet error:', err);
+        console.error(err);
         res.json({ success: false, error: err.message });
     }
 });
 
-// Import wallet from seed
+// Import wallet from seed (64 hex chars)
 app.post('/api/wallet/import', requireAuth, async (req, res) => {
     try {
         const { seed, name, index } = req.body;
         
-        if (!seed) {
-            return res.json({ success: false, error: 'Seed is required' });
+        if (!seed || seed.length < 64) {
+            return res.json({ success: false, error: 'Invalid seed (must be 64 hex chars)' });
         }
         
-        let seedHex = seed;
-        if (seed.length !== 64) {
-            // Nếu seed không phải hex 64 ký tự, thử chuyển từ buffer
-            seedHex = Buffer.from(seed).toString('hex');
-            if (seedHex.length !== 64) {
-                return res.json({ success: false, error: 'Invalid seed format' });
-            }
-        }
-        
+        const seedHex = seed.length === 64 ? seed : Buffer.from(seed).toString('hex');
         const walletIndex = index || 0;
+        const seedBuffer = Buffer.from(seedHex, 'hex');
         
-        // Tạo địa chỉ từ seed
-        const { address, publicKey } = await generateNanoAddressFromSeed(seedHex, walletIndex);
+        // Generate address
+        const { address, publicKey, privateKey } = await generateNanoAddressFromSeed(seedBuffer, walletIndex);
         
         const wallet = {
             id: Date.now().toString(),
             name: name || `Imported ${new Date().toLocaleString()}`,
             address: address,
             public_key: publicKey,
+            private_key: privateKey,
             seed: seedHex,
             index: walletIndex,
             created_at: new Date().toISOString()
@@ -292,7 +292,7 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
         
         const data = await getWallets();
         
-        // Kiểm tra trùng lặp
+        // Check duplicate
         const existing = data.wallets.find(w => w.address === address);
         if (existing) {
             return res.json({ success: false, error: 'Wallet already exists' });
@@ -304,14 +304,9 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
         }
         await updateWallets(data);
         
-        res.json({ success: true, wallet: { 
-            id: wallet.id,
-            name: wallet.name,
-            address: wallet.address,
-            created_at: wallet.created_at
-        } });
+        res.json({ success: true, wallet: { ...wallet, seed: undefined, private_key: undefined } });
     } catch (err) {
-        console.error('Import wallet error:', err);
+        console.error(err);
         res.json({ success: false, error: err.message });
     }
 });
@@ -328,23 +323,20 @@ app.post('/api/wallet/import-file', requireAuth, upload.single('seedFile'), asyn
         
         await fs.remove(req.file.path);
         
-        if (!seed) {
-            return res.json({ success: false, error: 'Empty seed file' });
+        if (!seed || seed.length < 64) {
+            return res.json({ success: false, error: 'Invalid seed file content' });
         }
         
-        let seedHex = seed;
-        if (seed.length !== 64) {
-            seedHex = Buffer.from(seed).toString('hex');
-        }
-        
-        const { address, publicKey } = await generateNanoAddressFromSeed(seedHex, 0);
+        const seedBuffer = Buffer.from(seed, 'hex');
+        const { address, publicKey, privateKey } = await generateNanoAddressFromSeed(seedBuffer, 0);
         
         const wallet = {
             id: Date.now().toString(),
             name: `File Import ${new Date().toLocaleString()}`,
             address: address,
             public_key: publicKey,
-            seed: seedHex,
+            private_key: privateKey,
+            seed: seed,
             index: 0,
             created_at: new Date().toISOString()
         };
@@ -356,14 +348,9 @@ app.post('/api/wallet/import-file', requireAuth, upload.single('seedFile'), asyn
         }
         await updateWallets(data);
         
-        res.json({ success: true, wallet: { 
-            id: wallet.id,
-            name: wallet.name,
-            address: wallet.address,
-            created_at: wallet.created_at
-        } });
+        res.json({ success: true, wallet: { ...wallet, seed: undefined, private_key: undefined } });
     } catch (err) {
-        console.error('Import file error:', err);
+        console.error(err);
         res.json({ success: false, error: err.message });
     }
 });
@@ -469,7 +456,7 @@ app.get('/api/wallet/:id/history', requireAuth, async (req, res) => {
     }
 });
 
-// Send XNO (manual instruction)
+// Send XNO
 app.post('/api/wallet/send', requireAuth, async (req, res) => {
     const { wallet_id, to_address, amount } = req.body;
     
