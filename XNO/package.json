@@ -16,6 +16,6 @@
     "nanocurrency": "^2.5.0",
     "tweetnacl": "^1.0.3",
     "blakejs": "^1.2.1",
-    "base32.js": "^0.1.0"
+    "nano-base32": "^1.0.0"
   }
 }
