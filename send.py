@@ -4,7 +4,6 @@ import sqlite3
 import json
 import asyncio
 import aiohttp
-import requests
 from datetime import datetime
 
 # ========== CONFIG FILE ==========
@@ -64,8 +63,8 @@ def interactive_setup():
     memo = input("Memo prefix for SWAP [SWAP CC for]: ").strip()
     config["MEMO_PREFIX"] = memo if memo else "SWAP CC for"
     
-    interval = input("Check interval (seconds) [3]: ").strip()  # Giảm xuống 3s cho nhanh
-    config["SLEEP_INTERVAL"] = int(interval) if interval.isdigit() else 3
+    interval = input("Check interval (seconds) [30]: ").strip()
+    config["SLEEP_INTERVAL"] = int(interval) if interval.isdigit() else 30
     
     print("\n" + "="*50)
     print("✅ Configuration complete!")
@@ -87,7 +86,7 @@ DUCO_FAUCET_USERNAME = config.get("DUCO_FAUCET_USERNAME")
 DUCO_FAUCET_PASSWORD = config.get("DUCO_FAUCET_PASSWORD")
 DUCO_RECIPIENT = config.get("DUCO_RECIPIENT", "Nam2010")
 MEMO_PREFIX = config.get("MEMO_PREFIX", "SWAP CC for")
-SLEEP_INTERVAL = config.get("SLEEP_INTERVAL", 3)
+SLEEP_INTERVAL = config.get("SLEEP_INTERVAL", 30)
 
 # Cache JWT
 jwt_token = None
@@ -98,7 +97,7 @@ balance_cache = {"balance": None, "last_updated": None, "expiry_seconds": 60}
 
 # Local database
 DB_FILE = "swap_history.db"
-DUCO_TX_FILE = "duco_processed.json"
+DUCO_TX_FILE = "duco_processed.json"  # Lưu txid đã xử lý
 
 # HEADERS cho DUCO API
 DUCO_HEADERS = {
@@ -174,6 +173,7 @@ def get_admin_token():
     url = f"{RENDER_API_URL}/auth"
     payload = {"username": ADMIN_USERNAME, "pin": ADMIN_PIN}
     try:
+        import requests
         resp = requests.post(url, json=payload, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
@@ -197,6 +197,7 @@ def api_call(endpoint, method="GET", data=None):
     url = f"{RENDER_API_URL}{endpoint}"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     try:
+        import requests
         if method == "GET":
             resp = requests.get(url, headers=headers, timeout=15)
         elif method == "POST":
@@ -226,6 +227,7 @@ def update_faucet_balance():
         now - balance_cache["last_updated"] < balance_cache["expiry_seconds"]):
         return balance_cache["balance"]
     try:
+        import requests
         url = f"https://server.duinocoin.com/users/{DUCO_FAUCET_USERNAME}"
         resp = requests.get(url, headers=DUCO_HEADERS, timeout=10)
         if resp.status_code == 200:
@@ -251,6 +253,7 @@ def send_duco(recipient, amount_cc):
         "memo": f"{MEMO_PREFIX} {recipient}"
     }
     try:
+        import requests
         resp = requests.get("https://server.duinocoin.com/transaction/", params=params, headers=DUCO_HEADERS, timeout=15)
         if resp.status_code == 200:
             data = resp.json()
@@ -263,12 +266,12 @@ def send_duco(recipient, amount_cc):
     except Exception as e:
         return False, str(e)
 
-# ========== ASYNC FUNCTIONS DÙNG AIOHTTP CHO CẢ 2 CHIỀU ==========
+# ========== ASYNC FUNCTIONS DÙNG AIOHTTP ==========
 async def fetch_transactions_async(session, username, limit=50):
     """Fetch transactions async bằng aiohttp"""
     url = f"https://server.duinocoin.com/user_transactions/{username}?limit={limit}"
     try:
-        async with session.get(url, headers=DUCO_HEADERS, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        async with session.get(url, headers=DUCO_HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 if data.get("success"):
@@ -278,7 +281,7 @@ async def fetch_transactions_async(session, username, limit=50):
     return []
 
 async def fetch_incoming_transactions_async(processed_txids):
-    """Fetch giao dịch NHẬN (DUCO → CC) bằng aiohttp - nhanh và non-blocking"""
+    """Fetch giao dịch NHẬN (DUCO → CC) bằng aiohttp"""
     try:
         async with aiohttp.ClientSession() as session:
             transactions = await fetch_transactions_async(session, DUCO_RECIPIENT, 50)
@@ -299,7 +302,7 @@ async def fetch_incoming_transactions_async(processed_txids):
         return []
 
 async def fetch_hash_after_send_async(amount_duco, expected_memo, sender, max_wait=30):
-    """Fetch hash sau khi gửi - dùng aiohttp"""
+    """Fetch hash sau khi gửi"""
     start_time = time.time()
     
     async with aiohttp.ClientSession() as session:
@@ -314,31 +317,31 @@ async def fetch_hash_after_send_async(amount_duco, expected_memo, sender, max_wa
                         tx.get("memo", "").strip() == expected_memo):
                         return tx.get("hash")
                 
-                await asyncio.sleep(1)  # Check mỗi giây
+                await asyncio.sleep(2)
             except:
-                await asyncio.sleep(1)
+                await asyncio.sleep(2)
     
     return None
 
-# ========== CHECK INCOMING DUCO TRANSACTIONS DÙNG AIOHTTP ==========
+# ========== CHECK DUCO TRANSACTIONS (ASYNC) - FIX CHECK MEMO ==========
 def check_incoming_duco_transactions():
-    """Check transactions NHẬN vào DUCO_RECIPIENT (DUCO → CC) - dùng aiohttp"""
+    """Check transactions NHẬN vào DUCO_RECIPIENT (DUCO → CC) - check memo đúng format"""
     processed_txids = load_processed_txids()
     
-    # Chạy async để fetch transactions
+    # Chạy async
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     incoming_txs = loop.run_until_complete(fetch_incoming_transactions_async(processed_txids))
     loop.close()
     
     if not incoming_txs:
-        return False
+        return
     
     pending_swaps = get_pending_swaps()
     if not pending_swaps:
-        return False
+        return
     
-    # Tạo map memo -> swap request
+    # Tạo map memo -> swap request (dựa trên receiver username)
     pending_by_memo = {}
     for req in pending_swaps:
         if req.get("status") != "pending":
@@ -351,6 +354,8 @@ def check_incoming_duco_transactions():
         pending_by_memo[expected_memo] = req
         print(f"   📌 Waiting for memo: '{expected_memo}' (swap {req['id']})")
     
+    any_fulfilled = False
+    
     for tx in incoming_txs:
         full_hash = tx.get("hash")
         if not full_hash:
@@ -360,8 +365,9 @@ def check_incoming_duco_transactions():
         amount_duco = float(tx.get("amount", 0))
         sender = tx.get("sender", "unknown")
         
-        # Check memo
+        # 👉 CHECK MEMO TRƯỚC, không check amount nếu memo không khớp
         if memo not in pending_by_memo:
+            # Chỉ log nếu memo có chứa MEMO_PREFIX để debug
             if MEMO_PREFIX in memo:
                 print(f"   ⚠️ Memo '{memo}' not in pending list")
             continue
@@ -369,7 +375,7 @@ def check_incoming_duco_transactions():
         req = pending_by_memo[memo]
         expected_duco = req.get("amount_cc", 0) / 10.0
         
-        # Check amount
+        # Kiểm tra amount
         if abs(amount_duco - expected_duco) > 0.01:
             print(f"   ⚠️ Amount mismatch for memo '{memo}': expected {expected_duco}, got {amount_duco}")
             continue
@@ -387,12 +393,13 @@ def check_incoming_duco_transactions():
                             req.get("swap_type"), req["receiver"], full_hash)
             processed_txids.add(full_hash)
             save_processed_txids(processed_txids)
-            print(f"   📝 Stored txid: {truncate_hash(full_hash)}")
-            return True
+            print(f"   📝 Stored txid: {full_hash[:12]}...")
+            any_fulfilled = True
         else:
             print(f"   ❌ Failed to fulfill swap {req['id']}")
-    
-    return False
+        
+        if any_fulfilled:
+            break
 
 def process_swap(req):
     rid = req.get("id")
@@ -425,7 +432,7 @@ def process_swap(req):
             
             expected_memo = f"{MEMO_PREFIX} {receiver}"
             
-            # Fetch hash async - dùng aiohttp
+            # Fetch hash async
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             tx_hash = loop.run_until_complete(
@@ -467,7 +474,7 @@ def process_swap(req):
 
 def main():
     print("\n" + "="*50)
-    print("🚀 SWAP CLIENT - ChocoHub (Full Async with aiohttp)")
+    print("🚀 SWAP CLIENT - ChocoHub (aiohttp)")
     print("="*50)
     print(f"📍 Server: {RENDER_API_URL}")
     print(f"👤 Admin: {ADMIN_USERNAME}")
@@ -477,13 +484,10 @@ def main():
     print(f"⏱️  Interval: {SLEEP_INTERVAL}s")
     print("="*50 + "\n")
 
+    last_incoming_check = 0
+    
     while True:
         try:
-            # Check incoming transactions NGAY LẬP TỨC bằng aiohttp
-            print("🔍 Checking incoming DUCO transactions (aiohttp)...")
-            check_incoming_duco_transactions()
-            
-            # Get pending swaps
             swaps = get_pending_swaps()
             if swaps is None:
                 print("⚠️ Cannot fetch swap list, retrying...")
@@ -496,16 +500,21 @@ def main():
                     swap_type = req.get("swap_type")
                     if swap_type == "duco":
                         process_swap(req)
+                        time.sleep(2)
                     elif swap_type == "duco_to_cc":
-                        print(f"   🔄 DUCO→CC swap {req['id']} waiting for transaction with memo: {MEMO_PREFIX} {req.get('receiver')}")
-                        # Check ngay lập tức sau khi thấy swap duco_to_cc
-                        check_incoming_duco_transactions()
+                        print(f"   ℹ️ DUCO→CC swap {req['id']} waiting for transaction with memo: {MEMO_PREFIX} {req.get('receiver')}")
                     elif swap_type == "ccpoc":
                         process_swap(req)
+                        time.sleep(2)
                     else:
                         print(f"   ⚠️ Unknown swap type: {swap_type}")
             else:
                 print("✅ No pending swaps")
+
+            now = time.time()
+            if now - last_incoming_check > 30:
+                check_incoming_duco_transactions()
+                last_incoming_check = now
 
             print(f"\n⏳ Waiting {SLEEP_INTERVAL} seconds...")
             time.sleep(SLEEP_INTERVAL)
@@ -515,7 +524,7 @@ def main():
             break
         except Exception as e:
             print(f"❌ Loop error: {e}")
-            time.sleep(5)
+            time.sleep(30)
 
 if __name__ == "__main__":
     main()
