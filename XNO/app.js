@@ -5,8 +5,9 @@ const fs = require('fs-extra');
 const path = require('path');
 const multer = require('multer');
 const axios = require('axios');
+const crypto = require('crypto');
 
-// Import nanocurrency (phiên bản 2.5.0)
+// Import nanocurrency
 const nanocurrency = require('nanocurrency');
 
 const app = express();
@@ -54,7 +55,6 @@ const upload = multer({ dest: path.join(DATA_DIR, 'uploads') });
 async function initData() {
     await fs.ensureDir(DATA_DIR);
     
-    // Khởi tạo admin mặc định
     if (!await fs.pathExists(ADMIN_FILE)) {
         const defaultHash = await bcrypt.hash('admin', 10);
         await fs.writeJson(ADMIN_FILE, {
@@ -68,7 +68,6 @@ async function initData() {
         console.log('📝 Created default admin: admin/admin');
     }
     
-    // Khởi tạo wallets file
     if (!await fs.pathExists(WALLETS_FILE)) {
         await fs.writeJson(WALLETS_FILE, {
             wallets: [],
@@ -95,34 +94,26 @@ async function updateWallets(data) {
     await fs.writeJson(WALLETS_FILE, data);
 }
 
-// Validate Nano address
 function isValidNanoAddress(address) {
     return address && address.startsWith('nano_') && address.length >= 60;
 }
 
-// Hàm tạo địa chỉ Nano từ seed (dùng nanocurrency@2.5.0)
+// Hàm tạo địa chỉ Nano từ seed - dùng API đúng của nanocurrency 2.5.0
 async function generateNanoAddressFromSeed(seedHex, index = 0) {
     try {
-        // Đảm bảo seed là Buffer 32 bytes
-        let seedBuffer;
-        if (Buffer.isBuffer(seedHex)) {
-            seedBuffer = seedHex;
-        } else if (typeof seedHex === 'string') {
-            seedBuffer = Buffer.from(seedHex, 'hex');
-        } else {
-            seedBuffer = seedHex;
-        }
+        // Tạo key pair từ seed
+        // Trong nanocurrency 2.5.0, dùng deriveKeyPair hoặc từ seed
+        const seedBuffer = typeof seedHex === 'string' ? Buffer.from(seedHex, 'hex') : seedHex;
         
-        // deriveKeyPairFromSeed là API đúng của nanocurrency 2.x
-        const keyPair = await nanocurrency.deriveKeyPairFromSeed(seedBuffer, index);
-        
-        // Tạo địa chỉ từ public key
-        const address = await nanocurrency.deriveAddress(keyPair.publicKey, { useNanoPrefix: true });
+        // Dùng deriveSecretKey và derivePublicKey
+        const privateKey = await nanocurrency.deriveSecretKey(seedBuffer, index);
+        const publicKey = await nanocurrency.derivePublicKey(privateKey);
+        const address = await nanocurrency.deriveAddress(publicKey, { useNanoPrefix: true });
         
         return {
             address: address,
-            publicKey: keyPair.publicKey.toString('hex'),
-            privateKey: keyPair.privateKey.toString('hex')
+            publicKey: publicKey.toString('hex'),
+            privateKey: privateKey.toString('hex')
         };
     } catch (err) {
         console.error('Generate address error:', err);
@@ -140,7 +131,6 @@ function requireAuth(req, res, next) {
 
 // ========== ROUTES ==========
 
-// Login page
 app.get('/login', (req, res) => {
     if (req.session.authenticated) {
         return res.redirect('/');
@@ -148,7 +138,6 @@ app.get('/login', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
-// Login API
 app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     const admin = await getAdmin();
@@ -168,7 +157,6 @@ app.post('/api/login', async (req, res) => {
     res.json({ success: true, firstLogin: admin.first_login });
 });
 
-// Change password & set ChocoHub credentials
 app.post('/api/setup', requireAuth, async (req, res) => {
     const { new_password, chocohub_username, chocohub_pin } = req.body;
     const admin = await getAdmin();
@@ -182,7 +170,6 @@ app.post('/api/setup', requireAuth, async (req, res) => {
         admin.chocohub_pin = chocohub_pin;
         admin.first_login = false;
         
-        // Test ChocoHub authentication
         try {
             const authRes = await axios.post(`${CHOCOHUB_URL}/auth`, {
                 username: chocohub_username,
@@ -202,12 +189,10 @@ app.post('/api/setup', requireAuth, async (req, res) => {
     res.json({ success: true });
 });
 
-// Dashboard
 app.get('/', requireAuth, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Get admin info
 app.get('/api/admin', requireAuth, async (req, res) => {
     const admin = await getAdmin();
     res.json({
@@ -219,7 +204,6 @@ app.get('/api/admin', requireAuth, async (req, res) => {
 
 // ========== WALLET MANAGEMENT ==========
 
-// Get all wallets
 app.get('/api/wallets', requireAuth, async (req, res) => {
     const data = await getWallets();
     res.json({
@@ -231,11 +215,10 @@ app.get('/api/wallets', requireAuth, async (req, res) => {
 // Create new wallet
 app.post('/api/wallet/create', requireAuth, async (req, res) => {
     try {
-        // Generate random seed (32 bytes)
-        const seed = nanocurrency.generateSeed();
+        // Generate random 32-byte seed
+        const seed = crypto.randomBytes(32);
         const seedHex = seed.toString('hex');
         
-        // Generate address từ seed
         const { address, publicKey, privateKey } = await generateNanoAddressFromSeed(seed, 0);
         
         const wallet = {
@@ -263,7 +246,7 @@ app.post('/api/wallet/create', requireAuth, async (req, res) => {
     }
 });
 
-// Import wallet from seed (64 hex chars)
+// Import wallet from seed
 app.post('/api/wallet/import', requireAuth, async (req, res) => {
     try {
         const { seed, name, index } = req.body;
@@ -276,7 +259,6 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
         const walletIndex = index || 0;
         const seedBuffer = Buffer.from(seedHex, 'hex');
         
-        // Generate address
         const { address, publicKey, privateKey } = await generateNanoAddressFromSeed(seedBuffer, walletIndex);
         
         const wallet = {
@@ -292,7 +274,6 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
         
         const data = await getWallets();
         
-        // Check duplicate
         const existing = data.wallets.find(w => w.address === address);
         if (existing) {
             return res.json({ success: false, error: 'Wallet already exists' });
@@ -480,7 +461,6 @@ app.post('/api/wallet/send', requireAuth, async (req, res) => {
         return res.json({ success: false, error: 'Wallet not found' });
     }
     
-    // Check balance
     try {
         const balanceRes = await nanoRpcCall('account_balance', { account: wallet.address });
         const balance = parseFloat(balanceRes.balance || '0') / 1e30;
@@ -492,7 +472,6 @@ app.post('/api/wallet/send', requireAuth, async (req, res) => {
         return res.json({ success: false, error: 'Cannot check balance' });
     }
     
-    // For security, return transaction info for manual sending
     res.json({
         success: false,
         error: 'Auto-send not implemented for security. Please send manually from your Natrium wallet.',
