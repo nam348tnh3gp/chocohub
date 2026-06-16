@@ -33,6 +33,7 @@
             display: flex;
             gap: 1rem;
             align-items: center;
+            flex-wrap: wrap;
         }
         .logout-btn {
             background: #2a2a36;
@@ -176,7 +177,7 @@
             border: 1px solid rgba(255,149,0,0.2);
         }
         .modal-content h3 { color: #f58a00; margin-bottom: 1rem; }
-        .modal-content input, .modal-content textarea {
+        .modal-content input, .modal-content textarea, .modal-content select {
             width: 100%;
             padding: 12px;
             margin: 10px 0;
@@ -184,10 +185,16 @@
             border: 1px solid #3a3a46;
             border-radius: 12px;
             color: white;
+            font-size: 0.95rem;
+        }
+        .modal-content textarea { font-family: monospace; }
+        .modal-content input:focus, .modal-content textarea:focus {
+            outline: none;
+            border-color: #f58a00;
         }
         .modal-buttons { display: flex; gap: 1rem; margin-top: 1rem; }
-        .modal-buttons button { flex: 1; padding: 10px; border-radius: 30px; cursor: pointer; }
-        .btn-save { background: #f58a00; border: none; color: #0a0a12; font-weight: bold; }
+        .modal-buttons button { flex: 1; padding: 10px; border-radius: 30px; cursor: pointer; font-weight: bold; }
+        .btn-save { background: #f58a00; border: none; color: #0a0a12; }
         .btn-cancel { background: #2a2a36; border: 1px solid #ff4444; color: #ff4444; }
         .input-group { margin-bottom: 1rem; }
         .input-group label {
@@ -224,9 +231,22 @@
             color: #44ff44;
             margin-left: 10px;
         }
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #3a3a46;
+            border-top: 2px solid #f58a00;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .truncate { max-width: 120px; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         @media (max-width: 768px) {
             .container { padding: 1rem; }
             th, td { font-size: 0.7rem; padding: 8px 6px; }
+            .header { padding: 0.75rem 1rem; }
+            .wallet-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -300,7 +320,7 @@
                 </div>
                 <div class="input-group">
                     <label>Amount (XNO)</label>
-                    <input type="number" id="sendAmount" placeholder="0.00" step="0.000001">
+                    <input type="number" id="sendAmount" placeholder="0.00" step="0.000001" min="0.000001">
                 </div>
                 <button class="btn-primary" onclick="sendXNO()" style="width:100%;">Send XNO</button>
                 <div id="sendResult" style="margin-top:1rem; font-size:0.85rem;"></div>
@@ -332,7 +352,7 @@
                 </div>
                 <div class="input-group">
                     <label>Representative Address</label>
-                    <input type="text" id="repAddress" placeholder="nano_...">
+                    <input type="text" id="repAddress" placeholder="nano_1banexkcfuieufzxksfrxqf6xy8e57ry1zdtq9yn7jntzhpwu4pg4hajojmq">
                 </div>
                 <button class="btn-primary" onclick="setRepresentative()">👑 Set Representative</button>
                 <div id="repResult" style="margin-top:1rem; font-size:0.85rem;"></div>
@@ -459,12 +479,14 @@
 
         async function loadWallets() {
             try {
+                const container = document.getElementById('walletsList');
+                container.innerHTML = '<div class="loading-spinner"></div> Loading...';
+                
                 const res = await fetch('/api/wallets');
                 const data = await res.json();
                 currentWallets = data.wallets;
                 currentActiveWallet = data.active;
                 
-                const container = document.getElementById('walletsList');
                 if (!currentWallets.length) {
                     container.innerHTML = '<div style="text-align:center; padding:2rem; color:#888;">No wallets yet. Create or import one.</div>';
                     return;
@@ -477,7 +499,7 @@
                     div.onclick = () => setActiveWallet(wallet.id);
                     
                     let balance = '...';
-                    let rep = '';
+                    let rep = 'Not set';
                     try {
                         const balanceRes = await fetch(`/api/wallet/${wallet.id}/balance`);
                         const balanceData = await balanceRes.json();
@@ -489,7 +511,7 @@
                     
                     div.innerHTML = `
                         <h3>${wallet.name}</h3>
-                        <div class="address">${wallet.address.substring(0, 20)}...${wallet.address.substring(-10)}</div>
+                        <div class="address">${wallet.address.substring(0, 20)}...${wallet.address.substring(wallet.address.length - 10)}</div>
                         <div class="balance">💰 ${balance} XNO</div>
                         <div class="representative">🏛️ Rep: ${rep}</div>
                         <div class="wallet-actions">
@@ -499,7 +521,10 @@
                     `;
                     container.appendChild(div);
                 }
-            } catch(err) { console.error(err); }
+            } catch(err) { 
+                console.error(err);
+                document.getElementById('walletsList').innerHTML = `<div style="color:#ff4444;">❌ Error loading wallets: ${err.message}</div>`;
+            }
         }
         
         async function setActiveWallet(walletId) {
@@ -523,21 +548,21 @@
         async function confirmExport() {
             try {
                 const res = await fetch(`/api/wallet/${currentExportWalletId}/export`);
-                const data = await res.json();
-                if (data.success && data.seed) {
-                    const blob = new Blob([data.seed], { type: 'text/plain' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `wallet_seed_${currentExportWalletId}.txt`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                    showToast('Seed exported');
-                    closeModal('exportSeedModal');
-                } else {
-                    showToast(data.error || 'Export failed', true);
-                }
-            } catch(err) { showToast(err.message, true); }
+                if (!res.ok) throw new Error('Export failed');
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `wallet_seed_${currentExportWalletId}.txt`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showToast('Seed exported successfully');
+                closeModal('exportSeedModal');
+            } catch(err) { 
+                showToast(err.message, true); 
+            }
         }
         
         async function deleteWallet(walletId) {
@@ -555,11 +580,12 @@
         }
         
         function openCreateWalletModal() {
+            document.getElementById('walletName').value = '';
             document.getElementById('createWalletModal').style.display = 'flex';
         }
         
         async function createWallet() {
-            const name = document.getElementById('walletName').value;
+            const name = document.getElementById('walletName').value.trim();
             try {
                 const res = await fetch('/api/wallet/create', {
                     method: 'POST',
@@ -570,7 +596,6 @@
                 if (data.success) {
                     showToast('Wallet created successfully');
                     closeModal('createWalletModal');
-                    document.getElementById('walletName').value = '';
                     loadWallets();
                 } else {
                     showToast(data.error, true);
@@ -579,12 +604,14 @@
         }
         
         function openImportSeedModal() {
+            document.getElementById('seedInput').value = '';
+            document.getElementById('seedWalletName').value = '';
             document.getElementById('importSeedModal').style.display = 'flex';
         }
         
         async function importSeed() {
             const seed = document.getElementById('seedInput').value.trim();
-            const name = document.getElementById('seedWalletName').value;
+            const name = document.getElementById('seedWalletName').value.trim();
             if (!seed) {
                 showToast('Please enter seed', true);
                 return;
@@ -597,10 +624,8 @@
                 });
                 const data = await res.json();
                 if (data.success) {
-                    showToast('Wallet imported');
+                    showToast('Wallet imported successfully');
                     closeModal('importSeedModal');
-                    document.getElementById('seedInput').value = '';
-                    document.getElementById('seedWalletName').value = '';
                     loadWallets();
                 } else {
                     showToast(data.error, true);
@@ -609,6 +634,7 @@
         }
         
         function openImportFileModal() {
+            document.getElementById('seedFile').value = '';
             document.getElementById('importFileModal').style.display = 'flex';
         }
         
@@ -626,7 +652,6 @@
                 if (data.success) {
                     showToast('Wallet imported from file');
                     closeModal('importFileModal');
-                    fileInput.value = '';
                     loadWallets();
                 } else {
                     showToast(data.error, true);
@@ -647,7 +672,10 @@
                 const completed = currentSwaps.filter(s => s.status === 'completed');
                 renderPendingSwaps(pending);
                 renderCompletedSwaps(completed);
-            } catch(err) { console.error(err); }
+            } catch(err) { 
+                console.error(err);
+                document.getElementById('swapsBody').innerHTML = `<tr><td colspan="7">❌ Error: ${err.message}</td></tr>`;
+            }
         }
         
         function renderPendingSwaps(swaps) {
@@ -659,13 +687,13 @@
             tbody.innerHTML = '';
             for (const swap of swaps) {
                 const row = tbody.insertRow();
-                row.insertCell(0).innerText = swap.id;
-                row.insertCell(1).innerText = swap.from_user;
-                row.insertCell(2).innerText = swap.amount_cc;
+                row.insertCell(0).innerHTML = `<span class="truncate" style="max-width:80px;" title="${swap.id}">${swap.id}</span>`;
+                row.insertCell(1).innerText = swap.from_user || 'Unknown';
+                row.insertCell(2).innerText = swap.amount_cc || '0';
                 row.insertCell(3).innerHTML = swap.swap_type === 'xno_to_cc' ? '<span class="badge-xno">XNO→CC</span>' : 
                                                (swap.swap_type === 'cc_to_xno' ? '<span class="badge-xno">CC→XNO</span>' : 
                                                '<span class="badge-duco">DUCO</span>');
-                row.insertCell(4).innerText = swap.receiver;
+                row.insertCell(4).innerHTML = `<span class="truncate" style="max-width:100px;" title="${swap.receiver}">${swap.receiver || 'N/A'}</span>`;
                 row.insertCell(5).innerHTML = '<span class="status-pending">pending</span>';
                 const actions = row.insertCell(6);
                 if (swap.swap_type === 'xno_to_cc') {
@@ -691,22 +719,22 @@
             tbody.innerHTML = '';
             for (const swap of swaps) {
                 const row = tbody.insertRow();
-                row.insertCell(0).innerText = swap.id;
-                row.insertCell(1).innerText = swap.from_user;
-                row.insertCell(2).innerText = swap.amount_cc;
+                row.insertCell(0).innerHTML = `<span class="truncate" style="max-width:80px;" title="${swap.id}">${swap.id}</span>`;
+                row.insertCell(1).innerText = swap.from_user || 'Unknown';
+                row.insertCell(2).innerText = swap.amount_cc || '0';
                 row.insertCell(3).innerHTML = swap.swap_type === 'xno_to_cc' ? '<span class="badge-xno">XNO→CC</span>' : 
                                                (swap.swap_type === 'cc_to_xno' ? '<span class="badge-xno">CC→XNO</span>' : 
                                                '<span class="badge-duco">DUCO</span>');
-                row.insertCell(4).innerText = swap.receiver;
-                row.insertCell(5).innerHTML = swap.xno_txid ? `<span style="color:#2a6eff;font-size:0.7rem;">${swap.xno_txid.substring(0,20)}...</span>` : '-';
+                row.insertCell(4).innerHTML = `<span class="truncate" style="max-width:100px;" title="${swap.receiver}">${swap.receiver || 'N/A'}</span>`;
+                row.insertCell(5).innerHTML = swap.xno_txid ? `<span class="truncate" style="max-width:120px; color:#2a6eff;" title="${swap.xno_txid}">${swap.xno_txid}</span>` : '-';
             }
         }
         
         function openFulfillModal(swap) {
             currentPendingSwap = swap;
             document.getElementById('fulfillSwapId').innerText = swap.id;
-            document.getElementById('fulfillReceiver').innerText = swap.receiver;
-            document.getElementById('fulfillCcAmount').innerText = swap.amount_cc;
+            document.getElementById('fulfillReceiver').innerText = swap.receiver || 'N/A';
+            document.getElementById('fulfillCcAmount').innerText = swap.amount_cc || '0';
             document.getElementById('xnoTxid').value = '';
             document.getElementById('fulfillXnoModal').style.display = 'flex';
         }
@@ -741,6 +769,7 @@
                     const option = document.createElement('option');
                     option.value = wallet.id;
                     option.textContent = `${wallet.name} - ${wallet.address.substring(0, 20)}...`;
+                    if (wallet.id === data.active) option.selected = true;
                     select.appendChild(option);
                 }
             } catch(err) { console.error(err); }
@@ -764,6 +793,8 @@
                 return;
             }
             
+            document.getElementById('sendResult').innerHTML = '<div class="loading-spinner" style="margin:10px auto;"></div>';
+            
             try {
                 const res = await fetch('/api/wallet/send', {
                     method: 'POST',
@@ -774,12 +805,23 @@
                 if (data.success) {
                     showToast(`Transaction sent! Hash: ${data.hash.substring(0, 16)}...`);
                     document.getElementById('sendAmount').value = '';
-                    document.getElementById('sendResult').innerHTML = `<div style="background:#2a2a36; padding:1rem; border-radius:12px;">✅ Sent! <a href="https://nanoticker.info/block/${data.hash}" target="_blank" style="color:#2a6eff;">View transaction</a></div>`;
+                    document.getElementById('sendResult').innerHTML = `
+                        <div style="background:#2a2a36; padding:1rem; border-radius:12px; color:#44ff44;">
+                            ✅ Sent! 
+                            <a href="https://nanoticker.info/block/${data.hash}" target="_blank" style="color:#2a6eff; text-decoration:underline;">
+                                View transaction
+                            </a>
+                        </div>
+                    `;
+                    loadWallets();
                 } else {
                     showToast(data.error || 'Send failed', true);
                     document.getElementById('sendResult').innerHTML = `<div style="background:#2a2a36; padding:1rem; border-radius:12px; color:#ff4444;">❌ ${data.error}</div>`;
                 }
-            } catch(err) { showToast(err.message, true); }
+            } catch(err) { 
+                showToast(err.message, true);
+                document.getElementById('sendResult').innerHTML = `<div style="background:#2a2a36; padding:1rem; border-radius:12px; color:#ff4444;">❌ ${err.message}</div>`;
+            }
         }
         
         async function loadHistory() {
@@ -791,12 +833,12 @@
                 const res = await fetch(`/api/wallet/${currentActiveWallet}/history`);
                 const data = await res.json();
                 if (!data.success) {
-                    document.getElementById('historyBody').innerHTML = `<tr><td colspan="6">${data.error}</td></tr>`;
+                    document.getElementById('historyBody').innerHTML = `<tr><td colspan="6">❌ ${data.error}</td></tr>`;
                     return;
                 }
                 const tbody = document.getElementById('historyBody');
-                if (!data.transactions.length) {
-                    tbody.innerHTML = '<tr><td colspan="6">No transactions found</tr>';
+                if (!data.transactions || !data.transactions.length) {
+                    tbody.innerHTML = '<tr><td colspan="6">No transactions found</td></tr>';
                     return;
                 }
                 tbody.innerHTML = '';
@@ -804,12 +846,15 @@
                     const row = tbody.insertRow();
                     row.insertCell(0).innerHTML = tx.type === 'receive' ? '<span style="color:#44ff44">⬇️ Receive</span>' : '<span style="color:#ffaa44">⬆️ Send</span>';
                     row.insertCell(1).innerHTML = `<span style="color:#44ff44">${tx.amount.toFixed(8)} XNO</span>`;
-                    row.insertCell(2).innerText = tx.account.substring(0, 20) + '...';
+                    row.insertCell(2).innerHTML = `<span class="truncate" style="max-width:100px;" title="${tx.account}">${tx.account || 'N/A'}</span>`;
                     row.insertCell(3).innerText = tx.memo || '-';
                     row.insertCell(4).innerText = tx.date ? new Date(tx.date).toLocaleString() : '-';
-                    row.insertCell(5).innerHTML = `<span style="font-size:0.7rem;">${tx.hash.substring(0, 16)}...</span>`;
+                    row.insertCell(5).innerHTML = `<span class="truncate" style="max-width:80px; font-size:0.7rem;" title="${tx.hash}">${tx.hash}</span>`;
                 }
-            } catch(err) { console.error(err); }
+            } catch(err) { 
+                console.error(err);
+                document.getElementById('historyBody').innerHTML = `<tr><td colspan="6">❌ ${err.message}</td></tr>`;
+            }
         }
         
         async function loadSettingsWallets() {
@@ -822,7 +867,17 @@
                     const option = document.createElement('option');
                     option.value = wallet.id;
                     option.textContent = `${wallet.name} - ${wallet.address.substring(0, 20)}...`;
+                    if (wallet.id === data.active) option.selected = true;
                     select.appendChild(option);
+                }
+                if (data.active) {
+                    try {
+                        const repRes = await fetch(`/api/wallet/${data.active}/representative`);
+                        const repData = await repRes.json();
+                        if (repData.success && repData.representative) {
+                            document.getElementById('repAddress').value = repData.representative;
+                        }
+                    } catch(e) {}
                 }
             } catch(err) { console.error(err); }
         }
@@ -840,6 +895,8 @@
                 return;
             }
             
+            document.getElementById('repResult').innerHTML = '<div class="loading-spinner" style="margin:10px auto;"></div>';
+            
             try {
                 const res = await fetch(`/api/wallet/${walletId}/set-representative`, {
                     method: 'POST',
@@ -849,13 +906,23 @@
                 const data = await res.json();
                 if (data.success) {
                     showToast(`Representative set! Hash: ${data.hash.substring(0, 16)}...`);
-                    document.getElementById('repResult').innerHTML = `<div style="background:#2a2a36; padding:1rem; border-radius:12px;">✅ Representative updated! <a href="https://nanoticker.info/block/${data.hash}" target="_blank" style="color:#2a6eff;">View transaction</a></div>`;
+                    document.getElementById('repResult').innerHTML = `
+                        <div style="background:#2a2a36; padding:1rem; border-radius:12px; color:#44ff44;">
+                            ✅ Representative updated! 
+                            <a href="https://nanoticker.info/block/${data.hash}" target="_blank" style="color:#2a6eff; text-decoration:underline;">
+                                View transaction
+                            </a>
+                        </div>
+                    `;
                     loadWallets();
                 } else {
                     showToast(data.error || 'Failed', true);
                     document.getElementById('repResult').innerHTML = `<div style="background:#2a2a36; padding:1rem; border-radius:12px; color:#ff4444;">❌ ${data.error}</div>`;
                 }
-            } catch(err) { showToast(err.message, true); }
+            } catch(err) { 
+                showToast(err.message, true);
+                document.getElementById('repResult').innerHTML = `<div style="background:#2a2a36; padding:1rem; border-radius:12px; color:#ff4444;">❌ ${err.message}</div>`;
+            }
         }
         
         async function triggerSwapProcessing() {
@@ -872,14 +939,24 @@
             } catch(err) { showToast(err.message, true); }
         }
         
+        // Load all wallets on send and settings tabs
+        document.querySelector('[data-tab="send"]').addEventListener('click', loadSendWallets);
+        document.querySelector('[data-tab="settings"]').addEventListener('click', loadSettingsWallets);
+        
         // Initialize
         loadAdmin();
         loadWallets();
         loadSwaps();
+        
+        // Auto refresh every 30 seconds
         setInterval(() => {
-            if (document.querySelector('.tab-btn.active').dataset.tab === 'wallets') loadWallets();
-            if (document.querySelector('.tab-btn.active').dataset.tab === 'swaps') loadSwaps();
-            if (document.querySelector('.tab-btn.active').dataset.tab === 'history') loadHistory();
+            const activeTab = document.querySelector('.tab-btn.active');
+            if (activeTab) {
+                const tab = activeTab.dataset.tab;
+                if (tab === 'wallets') loadWallets();
+                if (tab === 'swaps') loadSwaps();
+                if (tab === 'history') loadHistory();
+            }
         }, 30000);
     </script>
 </body>
