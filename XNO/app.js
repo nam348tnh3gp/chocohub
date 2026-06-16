@@ -16,27 +16,22 @@ if (process.env.NODE_ENV === 'production') {
     app.set('trust proxy', 1);
 }
 
-// ========== NANO RPC ENDPOINTS (CẬP NHẬT THEO DANH SÁCH MỚI) ==========
-// Các node công cộng hỗ trợ đa số action (kể cả work_generate nếu có)
+// ========== NANO RPC ENDPOINTS ==========
+// Lấy API key của Nanswap từ biến môi trường (bắt buộc)
+if (!process.env.NANSWAP_API_KEY) {
+    console.error('FATAL: NANSWAP_API_KEY environment variable is not set. Exiting.');
+    process.exit(1);
+}
+const NANSWAP_API_KEY = process.env.NANSWAP_API_KEY;
+
+// Chỉ dùng 2 nguồn RPC chính
 const NANO_RPC_ENDPOINTS = [
-    'https://rpc.nano.org',               // Nano Foundation
-    'https://app.natrium.io/api/rpc',     // Natrium
-    'https://nanonode.cc/api',            // NanoNode.cc
-    'https://node.somenano.site/api',     // SomeNano
-    'https://mynano.ninja/api/node',      // MyNanoNinja
-    'https://rpc.nano.to',                // Nano.to
-    'https://rpc.nanocrawler.cc',         // Nano Crawler
-    'https://rpc.nano-gpt.com',           // NanoGPT (có giới hạn rate, vẫn thử)
-    'https://nanonode.nano.com',
-    'https://proxy.powerful.nano',
-    'https://rpc.nano.community',
-    'https://nano.kapoor.io',
-    'https://nano.ninja/rpc',
-    'https://node.nano.org.ru'
+    'https://rpc.nano.to',                                             // Nano.to (Public, free)
+    `https://nodes.nanswap.com/XNO?api_key=${NANSWAP_API_KEY}`        // Nanswap (Private, using key)
 ];
 
-// Cache work để tránh tính lại PoW cho cùng một hash
-const workCache = new Map(); // key: hash+difficulty, value: work
+// Cache work để tránh tính lại PoW cho cùng một hash (tăng tốc độ)
+const workCache = new Map();
 
 // Swap check interval (ms)
 const SWAP_CHECK_INTERVAL = 30000;
@@ -52,6 +47,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Session Security (bắt buộc có SESSION_SECRET)
 if (!process.env.SESSION_SECRET) {
     console.error('FATAL: SESSION_SECRET environment variable is not set. Exiting.');
     process.exit(1);
@@ -70,7 +66,7 @@ app.use(session(sessionConfig));
 
 const upload = multer({ dest: path.join(DATA_DIR, 'uploads') });
 
-// ========== MÃ HÓA / GIẢI MÃ ==========
+// ========== MÃ HÓA DỮ LIỆU VÍ (AES-256-GCM) ==========
 let MASTER_KEY = null;
 function initMasterKey() {
     const masterPassword = process.env.MASTER_PASSWORD;
@@ -178,7 +174,7 @@ async function generateRandomSeed() {
     return seedBuffer.toString('hex');
 }
 
-// ========== PROOF OF WORK GENERATION (MULTI-FALLBACK) ==========
+// ========== PROOF OF WORK GENERATION (VỚI 2 RPC CHÍNH) ==========
 async function generateWorkViaSingleRPC(rpcUrl, hash, difficulty) {
     try {
         const response = await axios.post(rpcUrl, {
@@ -187,24 +183,20 @@ async function generateWorkViaSingleRPC(rpcUrl, hash, difficulty) {
             difficulty: difficulty
         }, { timeout: 8000 });
         if (response.data && response.data.work) {
-            console.log(`✅ PoW via ${rpcUrl}: ${response.data.work}`);
+            console.log(`✅ PoW via ${rpcUrl.includes('nanswap') ? 'Nanswap' : 'Nano.to'}: ${response.data.work}`);
             return response.data.work;
         }
         throw new Error('No work returned');
     } catch (err) {
-        console.warn(`RPC ${rpcUrl} failed for work_generate:`, err.message);
+        console.warn(`RPC ${rpcUrl.includes('nanswap') ? 'Nanswap' : 'Nano.to'} failed for work_generate:`, err.message);
         return null;
     }
 }
 
 async function generateWorkViaMultipleRPCs(hash, difficulty) {
-    // Xáo trộn thứ tự các endpoint để tránh dồn tải
-    const shuffled = [...NANO_RPC_ENDPOINTS];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    for (const rpcUrl of shuffled) {
+    // Ưu tiên dùng Nanswap trước vì có work server riêng mạnh
+    const prioritized = [...NANO_RPC_ENDPOINTS].reverse();
+    for (const rpcUrl of prioritized) {
         const work = await generateWorkViaSingleRPC(rpcUrl, hash, difficulty);
         if (work) return work;
     }
@@ -233,7 +225,7 @@ async function generateRealWork(blockHashHex, difficultyHex = 'ffffffc000000000'
         return workCache.get(cacheKey);
     }
 
-    // 1. Thử tất cả RPC (nhiều node)
+    // 1. Thử Nanswap (có work server) và Nano.to
     let work = await generateWorkViaMultipleRPCs(blockHashHex, difficultyHex);
     if (work) {
         workCache.set(cacheKey, work);
@@ -251,13 +243,11 @@ async function generateRealWork(blockHashHex, difficultyHex = 'ffffffc000000000'
         return work;
     }
 
-    throw new Error('All PoW generation methods failed (RPC x multiple + CPU)');
+    throw new Error('All PoW generation methods failed (Nanswap + Nano.to + CPU)');
 }
 
-// ========== NANO RPC CALL VỚI FALLBACK CHO CÁC ACTION THÔNG THƯỜNG ==========
-// Gọi RPC với tự động thử lại qua các node khác nhau nếu node đầu thất bại
+// ========== NANO RPC CALL VỚI FALLBACK ==========
 async function nanoRpcCall(action, params = {}) {
-    // Lưu lại endpoint đang hoạt động để lần sau dùng trước
     if (!global._activeRpcEndpoint) {
         global._activeRpcEndpoint = NANO_RPC_ENDPOINTS[0];
     }
@@ -272,14 +262,13 @@ async function nanoRpcCall(action, params = {}) {
                 headers: { 'Content-Type': 'application/json' }
             });
             if (response.data && !response.data.error) {
-                // Cập nhật endpoint hoạt động tốt nhất
                 global._activeRpcEndpoint = rpcUrl;
                 return response.data;
             }
             throw new Error(response.data?.error || 'Unknown error');
         } catch (err) {
             lastError = err;
-            console.warn(`RPC ${rpcUrl} failed for action ${action}:`, err.message);
+            console.warn(`RPC ${rpcUrl.includes('nanswap') ? 'Nanswap' : 'Nano.to'} failed for action ${action}:`, err.message);
             continue;
         }
     }
@@ -303,7 +292,7 @@ async function enqueueTransaction(walletId, transactionFunc) {
         try {
             return await transactionFunc();
         } finally {
-            // không cần thêm
+            // No additional cleanup needed
         }
     })();
     queue.currentPromise = taskPromise;
@@ -901,7 +890,7 @@ async function startApp() {
     // Kiểm tra PoW (test với cache)
     try {
         const testHash = '0000000000000000000000000000000000000000000000000000000000000000';
-        console.log('🔍 Testing PoW generation (multi-RPC + CPU fallback)...');
+        console.log('🔍 Testing PoW generation (Nanswap + Nano.to + CPU fallback)...');
         const testWork = await generateRealWork(testHash);
         console.log(`✅ PoW test successful: ${testWork}`);
     } catch (err) {
@@ -922,14 +911,15 @@ async function startApp() {
         console.log('╠══════════════════════════════════════╣');
         console.log(`║  HTTP: http://localhost:${PORT}     ║`);
         console.log('║  Default login: admin / admin       ║');
-        console.log(`║  RPC Endpoints: ${NANO_RPC_ENDPOINTS.length} nodes ║`);
+        console.log(`║  RPC Endpoints: Nano.to + Nanswap   ║`);
         console.log('║  Auto Swap: Enabled (30s interval)  ║');
-        console.log('║  PoW: Multi-RPC (14 nodes) -> CPU (last) ║');
+        console.log('║  PoW: Nanswap -> Nano.to -> CPU     ║');
         console.log('║  Wallet data: AES-256-GCM encrypted ║');
         console.log('║  Transaction queue: per wallet      ║');
         console.log('║  Cookie Secure: ' + (process.env.NODE_ENV === 'production') + '        ║');
         console.log('╚══════════════════════════════════════╝');
         console.log('');
+        console.log('💡 Nanswap API Key is loaded. Your node is ready.');
     });
 }
 
