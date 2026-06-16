@@ -12,25 +12,30 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ========== CẤU HÌNH HTTPS & PROXY ==========
-// Trust proxy (vì Render chạy sau reverse proxy)
 if (process.env.NODE_ENV === 'production') {
     app.set('trust proxy', 1);
 }
 
-// ========== NANO RPC ENDPOINTS (cho work và các gọi khác) ==========
-const NANO_RPC_PRIMARY = 'https://rpc.nano.to';
-// Các RPC fallback cho work_generate (một số node công cộng hỗ trợ)
-const WORK_RPC_ENDPOINTS = [
-    'https://rpc.nano.to',
+// ========== NANO RPC ENDPOINTS (CẬP NHẬT THEO DANH SÁCH MỚI) ==========
+// Các node công cộng hỗ trợ đa số action (kể cả work_generate nếu có)
+const NANO_RPC_ENDPOINTS = [
+    'https://rpc.nano.org',               // Nano Foundation
+    'https://app.natrium.io/api/rpc',     // Natrium
+    'https://nanonode.cc/api',            // NanoNode.cc
+    'https://node.somenano.site/api',     // SomeNano
+    'https://mynano.ninja/api/node',      // MyNanoNinja
+    'https://rpc.nano.to',                // Nano.to
+    'https://rpc.nanocrawler.cc',         // Nano Crawler
+    'https://rpc.nano-gpt.com',           // NanoGPT (có giới hạn rate, vẫn thử)
     'https://nanonode.nano.com',
-    'https://node.somenano.com',
     'https://proxy.powerful.nano',
     'https://rpc.nano.community',
     'https://nano.kapoor.io',
     'https://nano.ninja/rpc',
     'https://node.nano.org.ru'
 ];
-// Cache work (tránh tính lại cho cùng một hash)
+
+// Cache work để tránh tính lại PoW cho cùng một hash
 const workCache = new Map(); // key: hash+difficulty, value: work
 
 // Swap check interval (ms)
@@ -47,7 +52,6 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// SESSION SECRET - bắt buộc từ env
 if (!process.env.SESSION_SECRET) {
     console.error('FATAL: SESSION_SECRET environment variable is not set. Exiting.');
     process.exit(1);
@@ -57,7 +61,7 @@ const sessionConfig = {
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: process.env.NODE_ENV === 'production', // true nếu production
+        secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
         maxAge: 86400000
     }
@@ -181,21 +185,21 @@ async function generateWorkViaSingleRPC(rpcUrl, hash, difficulty) {
             action: 'work_generate',
             hash: hash,
             difficulty: difficulty
-        }, { timeout: 8000 }); // timeout 8s cho mỗi RPC
+        }, { timeout: 8000 });
         if (response.data && response.data.work) {
             console.log(`✅ PoW via ${rpcUrl}: ${response.data.work}`);
             return response.data.work;
         }
         throw new Error('No work returned');
     } catch (err) {
-        console.warn(`RPC ${rpcUrl} failed:`, err.message);
+        console.warn(`RPC ${rpcUrl} failed for work_generate:`, err.message);
         return null;
     }
 }
 
 async function generateWorkViaMultipleRPCs(hash, difficulty) {
-    // Xáo trộn thứ tự các endpoint để tránh dồn tải vào một node
-    const shuffled = [...WORK_RPC_ENDPOINTS];
+    // Xáo trộn thứ tự các endpoint để tránh dồn tải
+    const shuffled = [...NANO_RPC_ENDPOINTS];
     for (let i = shuffled.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
@@ -225,16 +229,14 @@ async function generateWorkViaCPU(hash, difficulty) {
 async function generateRealWork(blockHashHex, difficultyHex = 'ffffffc000000000') {
     const cacheKey = `${blockHashHex}|${difficultyHex}`;
     if (workCache.has(cacheKey)) {
-        const cached = workCache.get(cacheKey);
         console.log(`♻️ Using cached PoW for ${blockHashHex.substring(0, 16)}...`);
-        return cached;
+        return workCache.get(cacheKey);
     }
 
     // 1. Thử tất cả RPC (nhiều node)
     let work = await generateWorkViaMultipleRPCs(blockHashHex, difficultyHex);
     if (work) {
         workCache.set(cacheKey, work);
-        // Giới hạn cache 100 items
         if (workCache.size > 100) {
             const firstKey = workCache.keys().next().value;
             workCache.delete(firstKey);
@@ -250,6 +252,38 @@ async function generateRealWork(blockHashHex, difficultyHex = 'ffffffc000000000'
     }
 
     throw new Error('All PoW generation methods failed (RPC x multiple + CPU)');
+}
+
+// ========== NANO RPC CALL VỚI FALLBACK CHO CÁC ACTION THÔNG THƯỜNG ==========
+// Gọi RPC với tự động thử lại qua các node khác nhau nếu node đầu thất bại
+async function nanoRpcCall(action, params = {}) {
+    // Lưu lại endpoint đang hoạt động để lần sau dùng trước
+    if (!global._activeRpcEndpoint) {
+        global._activeRpcEndpoint = NANO_RPC_ENDPOINTS[0];
+    }
+
+    const tryEndpoints = [global._activeRpcEndpoint, ...NANO_RPC_ENDPOINTS.filter(e => e !== global._activeRpcEndpoint)];
+    let lastError = null;
+
+    for (const rpcUrl of tryEndpoints) {
+        try {
+            const response = await axios.post(rpcUrl, { action, ...params }, {
+                timeout: 15000,
+                headers: { 'Content-Type': 'application/json' }
+            });
+            if (response.data && !response.data.error) {
+                // Cập nhật endpoint hoạt động tốt nhất
+                global._activeRpcEndpoint = rpcUrl;
+                return response.data;
+            }
+            throw new Error(response.data?.error || 'Unknown error');
+        } catch (err) {
+            lastError = err;
+            console.warn(`RPC ${rpcUrl} failed for action ${action}:`, err.message);
+            continue;
+        }
+    }
+    throw new Error(`All RPC endpoints failed for ${action}. Last error: ${lastError.message}`);
 }
 
 // ========== NANO TRANSACTION QUEUE (PER WALLET) ==========
@@ -269,14 +303,14 @@ async function enqueueTransaction(walletId, transactionFunc) {
         try {
             return await transactionFunc();
         } finally {
-            // Không cần làm gì thêm, currentPromise sẽ được thay thế
+            // không cần thêm
         }
     })();
     queue.currentPromise = taskPromise;
     return taskPromise;
 }
 
-// ========== NANO BLOCK BUILDING & SENDING (DÙNG NANOCURRENCY) ==========
+// ========== NANO BLOCK BUILDING & SENDING ==========
 async function buildSendBlock(wallet, toAddress, amountRawBigInt, previous, representativePubKey, currentBalanceRaw) {
     const newBalanceBigInt = BigInt(currentBalanceRaw) - amountRawBigInt;
     const linkPublicKey = addressToPublicKey(toAddress);
@@ -419,22 +453,6 @@ async function setRepresentative(wallet, representativeAddress) {
             return { success: false, error: err.message };
         }
     });
-}
-
-async function nanoRpcCall(action, params = {}) {
-    // Dùng NANO_RPC_PRIMARY cho các action không phải work_generate
-    const rpcUrl = NANO_RPC_PRIMARY;
-    try {
-        const response = await axios.post(rpcUrl, { action, ...params }, { 
-            timeout: 30000, 
-            headers: { 'Content-Type': 'application/json' } 
-        });
-        if (response.data && !response.data.error) return response.data;
-        throw new Error(response.data?.error || 'Unknown error');
-    } catch (err) {
-        console.error(`RPC error (${action}):`, err.message);
-        throw err;
-    }
 }
 
 // ========== AUTO SWAP PROCESSOR ==========
@@ -904,10 +922,9 @@ async function startApp() {
         console.log('╠══════════════════════════════════════╣');
         console.log(`║  HTTP: http://localhost:${PORT}     ║`);
         console.log('║  Default login: admin / admin       ║');
-        console.log(`║  Primary RPC: ${NANO_RPC_PRIMARY}   ║`);
-        console.log(`║  Work RPCs: ${WORK_RPC_ENDPOINTS.length} fallback nodes ║`);
+        console.log(`║  RPC Endpoints: ${NANO_RPC_ENDPOINTS.length} nodes ║`);
         console.log('║  Auto Swap: Enabled (30s interval)  ║');
-        console.log('║  PoW: Multi-RPC -> CPU (last)       ║');
+        console.log('║  PoW: Multi-RPC (14 nodes) -> CPU (last) ║');
         console.log('║  Wallet data: AES-256-GCM encrypted ║');
         console.log('║  Transaction queue: per wallet      ║');
         console.log('║  Cookie Secure: ' + (process.env.NODE_ENV === 'production') + '        ║');
