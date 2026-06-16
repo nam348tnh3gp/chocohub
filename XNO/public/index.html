@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nano Dashboard - XNO Manager</title>
     <style>
-        /* ... (giữ nguyên CSS) ... */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: #0a0a12;
@@ -267,6 +266,7 @@
             border: 1px solid #3a3a46;
             margin: 10px 0;
             color: #44ff44;
+            user-select: all;
         }
         .copy-success {
             color: #44ff44;
@@ -476,9 +476,6 @@
         let currentExportWalletId = null;
         let currentSeedText = '';
 
-        // Cache DOM elements for wallet cards to avoid flickering
-        let walletCardMap = new Map(); // id -> DOM element
-
         function showToast(msg, isError = false) {
             const toast = document.getElementById('toast');
             toast.textContent = msg;
@@ -517,16 +514,15 @@
             } catch(err) { console.error(err); }
         }
 
-        // ========== FIXED loadWallets - no flickering ==========
+        // loadWallets với cập nhật mượt mà (không flicker)
         async function loadWallets() {
             try {
                 const container = document.getElementById('walletsList');
                 
-                // Fetch fresh data
                 const res = await fetch('/api/wallets');
                 const data = await res.json();
                 
-                // Remove duplicate wallets by address
+                // Loại bỏ ví trùng theo địa chỉ
                 const seen = new Map();
                 const uniqueWallets = data.wallets.filter(w => {
                     if (seen.has(w.address)) return false;
@@ -536,21 +532,19 @@
                 
                 const newActive = data.active;
                 
-                // If no wallets, show empty state
                 if (!uniqueWallets.length) {
                     container.innerHTML = '<div style="text-align:center; padding:2rem; color:#888;">No wallets yet. Create or import one.</div>';
-                    walletCardMap.clear();
                     return;
                 }
                 
-                // Build a map of existing card elements by wallet id
+                // Lưu các thẻ hiện có theo id
                 const existingCards = new Map();
                 container.querySelectorAll('.wallet-card').forEach(el => {
                     const id = el.dataset.walletId;
                     if (id) existingCards.set(id, el);
                 });
                 
-                // Remove cards that are no longer in the list (deleted wallets)
+                // Xóa thẻ của ví đã xóa
                 for (const [id, el] of existingCards) {
                     if (!uniqueWallets.some(w => w.id === id)) {
                         el.remove();
@@ -558,11 +552,10 @@
                     }
                 }
                 
-                // Update or create cards
+                // Cập nhật hoặc tạo mới thẻ
                 for (const wallet of uniqueWallets) {
                     let card = existingCards.get(wallet.id);
                     if (!card) {
-                        // Create new card
                         card = document.createElement('div');
                         card.className = 'wallet-card';
                         card.dataset.walletId = wallet.id;
@@ -571,11 +564,10 @@
                         existingCards.set(wallet.id, card);
                     }
                     
-                    // Update card content (only if changed)
                     const isActive = (newActive === wallet.id);
                     card.className = `wallet-card${isActive ? ' active' : ''}`;
                     
-                    // Fetch balance (could be optimized with caching, but fine for now)
+                    // Lấy số dư và rep (có thể cache để giảm request)
                     let balance = '...';
                     let rep = 'Not set';
                     try {
@@ -587,7 +579,6 @@
                         }
                     } catch(e) {}
                     
-                    // Update innerHTML (this will cause re-render but only for that card, not the whole grid)
                     card.innerHTML = `
                         <h3>${wallet.name}</h3>
                         <div class="address">${wallet.address.substring(0, 20)}...${wallet.address.substring(wallet.address.length - 10)}</div>
@@ -600,7 +591,6 @@
                     `;
                 }
                 
-                // Update current state
                 currentWallets = uniqueWallets;
                 currentActiveWallet = newActive;
                 
@@ -631,18 +621,26 @@
             fetchSeed(walletId);
         }
         
+        // FIX: Xử lý response dạng text (plain text) thay vì JSON
         async function fetchSeed(walletId) {
             try {
                 const res = await fetch(`/api/wallet/${walletId}/export`);
-                if (!res.ok) throw new Error('Export failed');
-                const data = await res.json();
-                if (data.success && data.seed) {
-                    currentSeedText = data.seed;
+                if (!res.ok) {
+                    // Nếu server trả về lỗi (404, 500...)
+                    const errorText = await res.text();
+                    throw new Error(errorText || 'Export failed');
+                }
+                const text = await res.text();
+                // Kiểm tra xem có phải seed hợp lệ (64 ký tự hex) không
+                if (text.length === 64 && /^[0-9a-fA-F]+$/.test(text)) {
+                    currentSeedText = text;
                     document.getElementById('seedDisplayContainer').innerHTML = `
-                        <div class="seed-display" id="seedText">${data.seed}</div>
+                        <div class="seed-display" id="seedText">${text}</div>
                     `;
                 } else {
-                    document.getElementById('seedDisplayContainer').innerHTML = `<div style="color:#ff4444;">❌ ${data.error || 'Failed to fetch seed'}</div>`;
+                    // Có thể server trả về lỗi dạng JSON (ví dụ { error: ... }) nhưng đã set header text/plain
+                    // Nếu không phải seed thì hiển thị lỗi
+                    document.getElementById('seedDisplayContainer').innerHTML = `<div style="color:#ff4444;">❌ ${text || 'Invalid seed format'}</div>`;
                 }
             } catch(err) { 
                 document.getElementById('seedDisplayContainer').innerHTML = `<div style="color:#ff4444;">❌ ${err.message}</div>`;
@@ -661,6 +659,7 @@
                     document.getElementById('copyStatus').innerHTML = '';
                 }, 3000);
             }).catch(() => {
+                // fallback
                 const range = document.createRange();
                 range.selectNode(seedText);
                 window.getSelection().removeAllRanges();
@@ -1057,7 +1056,7 @@
         loadWallets();
         loadSwaps();
         
-        // Auto refresh every 30 seconds - now without flickering!
+        // Auto refresh every 30 seconds
         setInterval(() => {
             const activeTab = document.querySelector('.tab-btn.active');
             if (activeTab) {
