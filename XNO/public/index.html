@@ -172,9 +172,11 @@
             background: #1e1e2a;
             border-radius: 24px;
             padding: 2rem;
-            width: 450px;
-            max-width: 90%;
+            width: 500px;
+            max-width: 95%;
             border: 1px solid rgba(255,149,0,0.2);
+            max-height: 90vh;
+            overflow-y: auto;
         }
         .modal-content h3 { color: #f58a00; margin-bottom: 1rem; }
         .modal-content input, .modal-content textarea, .modal-content select {
@@ -196,6 +198,16 @@
         .modal-buttons button { flex: 1; padding: 10px; border-radius: 30px; cursor: pointer; font-weight: bold; }
         .btn-save { background: #f58a00; border: none; color: #0a0a12; }
         .btn-cancel { background: #2a2a36; border: 1px solid #ff4444; color: #ff4444; }
+        .btn-copy { 
+            background: #2a6eff; 
+            border: none; 
+            color: white; 
+            padding: 8px 16px; 
+            border-radius: 30px; 
+            cursor: pointer; 
+            font-weight: bold;
+        }
+        .btn-copy:hover { background: #1a4eff; }
         .input-group { margin-bottom: 1rem; }
         .input-group label {
             display: block;
@@ -224,6 +236,8 @@
             opacity: 0;
             transition: 0.2s;
             z-index: 1100;
+            max-width: 90%;
+            text-align: center;
         }
         .toast.show { opacity: 1; }
         .auto-status {
@@ -242,11 +256,27 @@
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .truncate { max-width: 120px; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .seed-display {
+            background: #0a0a12;
+            padding: 1rem;
+            border-radius: 12px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            word-break: break-all;
+            border: 1px solid #3a3a46;
+            margin: 10px 0;
+            color: #44ff44;
+        }
+        .copy-success {
+            color: #44ff44;
+            margin-left: 10px;
+        }
         @media (max-width: 768px) {
             .container { padding: 1rem; }
             th, td { font-size: 0.7rem; padding: 8px 6px; }
             .header { padding: 0.75rem 1rem; }
             .wallet-grid { grid-template-columns: 1fr; }
+            .modal-content { padding: 1.5rem; }
         }
     </style>
 </head>
@@ -403,15 +433,20 @@
         </div>
     </div>
 
-    <!-- Modal Export Seed -->
+    <!-- Modal Export Seed (FIXED) -->
     <div id="exportSeedModal" class="modal">
         <div class="modal-content">
-            <h3>📤 Export Wallet Seed</h3>
+            <h3>📤 Wallet Seed</h3>
             <p>Wallet: <strong id="exportWalletName"></strong></p>
-            <div class="modal-buttons">
-                <button class="btn-save" onclick="confirmExport()">Export</button>
-                <button class="btn-cancel" onclick="closeModal('exportSeedModal')">Cancel</button>
+            <p style="font-size:0.8rem; color:#8b8296; margin:5px 0;">Your seed is encrypted and stored securely. Keep it safe!</p>
+            <div id="seedDisplayContainer">
+                <div class="loading-spinner" style="margin:10px auto; display:block;"></div>
             </div>
+            <div style="display:flex; gap:1rem; margin-top:1rem;">
+                <button class="btn-copy" onclick="copySeed()" style="flex:1;">📋 Copy Seed</button>
+                <button class="btn-cancel" onclick="closeModal('exportSeedModal')" style="flex:1;">Close</button>
+            </div>
+            <div id="copyStatus" style="text-align:center; margin-top:0.5rem; font-size:0.85rem;"></div>
         </div>
     </div>
 
@@ -438,6 +473,7 @@
         let currentSwaps = [];
         let currentPendingSwap = null;
         let currentExportWalletId = null;
+        let currentSeedText = '';
 
         function showToast(msg, isError = false) {
             const toast = document.getElementById('toast');
@@ -477,6 +513,7 @@
             } catch(err) { console.error(err); }
         }
 
+        // FIX: Remove duplicate wallets by address
         async function loadWallets() {
             try {
                 const container = document.getElementById('walletsList');
@@ -484,7 +521,18 @@
                 
                 const res = await fetch('/api/wallets');
                 const data = await res.json();
-                currentWallets = data.wallets;
+                
+                // Remove duplicate wallets by address
+                const seen = new Map();
+                const uniqueWallets = data.wallets.filter(w => {
+                    if (seen.has(w.address)) {
+                        return false; // Skip duplicate
+                    }
+                    seen.set(w.address, true);
+                    return true;
+                });
+                
+                currentWallets = uniqueWallets;
                 currentActiveWallet = data.active;
                 
                 if (!currentWallets.length) {
@@ -539,30 +587,60 @@
             } catch(err) { showToast(err.message, true); }
         }
         
+        // FIX: Export shows seed in modal with copy button
         function openExportModal(walletId, walletName) {
             currentExportWalletId = walletId;
             document.getElementById('exportWalletName').innerText = walletName;
+            document.getElementById('seedDisplayContainer').innerHTML = '<div class="loading-spinner" style="margin:10px auto; display:block;"></div>';
+            document.getElementById('copyStatus').innerHTML = '';
             document.getElementById('exportSeedModal').style.display = 'flex';
+            
+            // Fetch seed
+            fetchSeed(walletId);
         }
         
-        async function confirmExport() {
+        async function fetchSeed(walletId) {
             try {
-                const res = await fetch(`/api/wallet/${currentExportWalletId}/export`);
+                const res = await fetch(`/api/wallet/${walletId}/export`);
                 if (!res.ok) throw new Error('Export failed');
-                const blob = await res.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `wallet_seed_${currentExportWalletId}.txt`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                showToast('Seed exported successfully');
-                closeModal('exportSeedModal');
+                const data = await res.json();
+                if (data.success && data.seed) {
+                    currentSeedText = data.seed;
+                    document.getElementById('seedDisplayContainer').innerHTML = `
+                        <div class="seed-display" id="seedText">${data.seed}</div>
+                    `;
+                } else {
+                    document.getElementById('seedDisplayContainer').innerHTML = `<div style="color:#ff4444;">❌ ${data.error || 'Failed to fetch seed'}</div>`;
+                }
             } catch(err) { 
-                showToast(err.message, true); 
+                document.getElementById('seedDisplayContainer').innerHTML = `<div style="color:#ff4444;">❌ ${err.message}</div>`;
             }
+        }
+        
+        function copySeed() {
+            const seedText = document.getElementById('seedText');
+            if (!seedText) {
+                showToast('No seed to copy', true);
+                return;
+            }
+            navigator.clipboard.writeText(seedText.textContent).then(() => {
+                document.getElementById('copyStatus').innerHTML = '<span style="color:#44ff44;">✅ Copied to clipboard!</span>';
+                setTimeout(() => {
+                    document.getElementById('copyStatus').innerHTML = '';
+                }, 3000);
+            }).catch(() => {
+                // Fallback
+                const range = document.createRange();
+                range.selectNode(seedText);
+                window.getSelection().removeAllRanges();
+                window.getSelection().addRange(range);
+                document.execCommand('copy');
+                window.getSelection().removeAllRanges();
+                document.getElementById('copyStatus').innerHTML = '<span style="color:#44ff44;">✅ Copied to clipboard!</span>';
+                setTimeout(() => {
+                    document.getElementById('copyStatus').innerHTML = '';
+                }, 3000);
+            });
         }
         
         async function deleteWallet(walletId) {
@@ -948,7 +1026,7 @@
         loadWallets();
         loadSwaps();
         
-        // Auto refresh every 30 seconds
+        // Auto refresh every 30 seconds (reduced to avoid flickering)
         setInterval(() => {
             const activeTab = document.querySelector('.tab-btn.active');
             if (activeTab) {
