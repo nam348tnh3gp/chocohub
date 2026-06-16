@@ -13,11 +13,19 @@ const nanocurrency = require('nanocurrency');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Nano RPC URL
+// Nano RPC URL (cho các tác vụ thông thường)
 const NANO_RPC_URL = 'https://rpc.nano.to';
+
+// Nano.to PoW Service
+const NANOTO_POW_URL = 'https://pow.nano.to';
+const NANOTO_API_KEY = process.env.NANOTO_API_KEY || null;
 
 // Swap check interval (ms)
 const SWAP_CHECK_INTERVAL = 30000;
+
+// Rate limiting cho PoW khi không có API key
+let lastPowRequestTime = 0;
+const POW_RATE_LIMIT_MS = 200; // 5 requests/giây = 1 request mỗi 200ms
 
 // ========== CONFIG ==========
 const DATA_DIR = path.join(__dirname, 'data');
@@ -113,6 +121,65 @@ async function generateRandomSeed() {
 }
 
 // ========== PROOF OF WORK GENERATION ==========
+
+// Hàm chờ rate limit (chỉ áp dụng khi không có API key)
+async function waitForRateLimit() {
+    if (NANOTO_API_KEY) return; // Có API key thì không giới hạn
+    
+    const now = Date.now();
+    const timeSinceLastRequest = now - lastPowRequestTime;
+    if (timeSinceLastRequest < POW_RATE_LIMIT_MS) {
+        const waitTime = POW_RATE_LIMIT_MS - timeSinceLastRequest;
+        console.log(`⏳ Rate limit: waiting ${waitTime}ms before next PoW request...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+    lastPowRequestTime = Date.now();
+}
+
+// Gọi PoW từ nano.to service
+async function generateWorkViaNanoTo(hash, difficulty = 'ffffffc000000000') {
+    try {
+        await waitForRateLimit();
+        
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        
+        // Nếu có API key thì thêm vào header
+        if (NANOTO_API_KEY) {
+            headers['api-key'] = NANOTO_API_KEY;
+            console.log(`🔑 Using Nano.to PoW with API key`);
+        } else {
+            console.log(`🌐 Using Nano.to PoW without API key (rate limited to 5 req/s)`);
+        }
+        
+        const response = await axios.post(NANOTO_POW_URL, {
+            action: 'work_generate',
+            hash: hash,
+            difficulty: difficulty
+        }, { 
+            timeout: 15000,
+            headers: headers
+        });
+        
+        if (response.data && response.data.work) {
+            console.log(`✅ PoW via Nano.to: ${response.data.work}`);
+            return response.data.work;
+        }
+        throw new Error('No work returned from Nano.to');
+    } catch (err) {
+        if (err.response && err.response.status === 429) {
+            console.warn(`⚠️ Rate limit exceeded on Nano.to! ${err.response.data?.message || 'Too many requests'}`);
+        } else if (err.response && err.response.data && typeof err.response.data === 'string' && err.response.data.startsWith('<')) {
+            console.warn(`⚠️ Nano.to returned HTML (may be blocked/rate limited)`);
+        } else {
+            console.warn(`⚠️ Nano.to PoW failed: ${err.message}`);
+        }
+        return null;
+    }
+}
+
+// Fallback: Gọi RPC cũ (thường bị disable trên node công cộng)
 async function generateWorkViaRPC(hash, difficulty = 'ffffffc000000000') {
     try {
         const response = await axios.post(NANO_RPC_URL, {
@@ -127,11 +194,12 @@ async function generateWorkViaRPC(hash, difficulty = 'ffffffc000000000') {
         }
         throw new Error('No work returned from RPC');
     } catch (err) {
-        console.warn('RPC work generation failed:', err.message);
+        console.warn('RPC work generation failed (likely disabled on public node):', err.message);
         return null;
     }
 }
 
+// Fallback cuối cùng: tính PoW bằng CPU
 async function generateWorkViaCPU(hash, difficulty = 'ffffffc000000000') {
     try {
         console.log(`🖥️ CPU PoW for ${hash.substring(0, 16)}... (may take 10-20s)`);
@@ -147,11 +215,20 @@ async function generateWorkViaCPU(hash, difficulty = 'ffffffc000000000') {
     }
 }
 
+// Hàm chính để sinh PoW với các fallback
 async function generateRealWork(blockHashHex, difficultyHex = 'ffffffc000000000') {
-    let work = await generateWorkViaRPC(blockHashHex, difficultyHex);
+    // 1. Ưu tiên dùng Nano.to service
+    let work = await generateWorkViaNanoTo(blockHashHex, difficultyHex);
     if (work) return work;
+    
+    // 2. Fallback sang RPC (thường sẽ fail vì bị disable)
+    work = await generateWorkViaRPC(blockHashHex, difficultyHex);
+    if (work) return work;
+    
+    // 3. Fallback cuối cùng là CPU
     work = await generateWorkViaCPU(blockHashHex, difficultyHex);
     if (work) return work;
+    
     throw new Error('All PoW generation methods failed');
 }
 
@@ -840,8 +917,9 @@ app.listen(PORT, () => {
     console.log(`║  HTTP: http://localhost:${PORT}     ║`);
     console.log('║  Default login: admin / admin       ║');
     console.log(`║  RPC Node: ${NANO_RPC_URL}          ║`);
+    console.log(`║  PoW Service: ${NANOTO_POW_URL}     ║`);
+    console.log(`║  API Key: ${NANOTO_API_KEY ? '✅ Configured' : '❌ Not set (5 req/s limit)'}`);
     console.log('║  Auto Swap: Enabled (30s interval)  ║');
-    console.log('║  PoW: RPC + CPU fallback            ║');
     console.log('╚══════════════════════════════════════╝');
     console.log('');
 });
