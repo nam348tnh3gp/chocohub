@@ -8,6 +8,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const nanocurrency = require('nanocurrency');
 const nanoBase32 = require('nano-base32');
+const NanoWallet = require('simple-nanowallet');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -275,55 +276,7 @@ async function nanoRpcCall(action, params = {}) {
     throw new Error(`All RPC endpoints failed for ${action}. Last error: ${lastError.message}`);
 }
 
-// ========== NANO BLOCK BUILDING & SENDING (DÙNG RPC) ==========
-// Tạo block gửi và gửi trực tiếp qua RPC (không tự sign local)
-async function buildAndSendBlock(wallet, blockPayload) {
-    // Lấy work từ RPC
-    const blockHash = nanocurrency.block.hash(blockPayload);
-    const work = await generateRealWork(blockHash);
-    blockPayload.work = work;
-    
-    // Gửi block payload (RPC sẽ tự ký nếu có private_key, nhưng ta gửi json_block)
-    // Cách đúng: gửi block dạng JSON và RPC sẽ tự xử lý
-    const result = await nanoRpcCall('process', { 
-        json_block: JSON.stringify(blockPayload),
-        subtype: 'send'
-    });
-    return { success: true, hash: result.hash };
-}
-
-async function buildSendBlock(wallet, toAddress, amountRawBigInt, previous, representativePubKey, currentBalanceRaw) {
-    const newBalanceBigInt = BigInt(currentBalanceRaw) - amountRawBigInt;
-    const linkPublicKey = addressToPublicKey(toAddress);
-    
-    const blockPayload = {
-        type: 'state',
-        account: wallet.address,
-        previous: previous,
-        representative: representativePubKey,
-        balance: newBalanceBigInt.toString(),
-        link: linkPublicKey,
-        work: '0000000000000000' // sẽ được thay thế
-    };
-    
-    // Gửi block qua RPC (RPC sẽ tự ký và thêm signature)
-    return await buildAndSendBlock(wallet, blockPayload);
-}
-
-async function buildReceiveBlock(wallet, transactionHash, previous, representativePubKey, currentBalanceRaw, amountRawBigInt) {
-    const newBalanceBigInt = BigInt(currentBalanceRaw) + amountRawBigInt;
-    const blockPayload = {
-        type: 'state',
-        account: wallet.address,
-        previous: previous,
-        representative: representativePubKey,
-        balance: newBalanceBigInt.toString(),
-        link: transactionHash,
-        work: '0000000000000000'
-    };
-    return await buildAndSendBlock(wallet, blockPayload);
-}
-
+// ========== NANO BLOCK BUILDING & SENDING (DÙNG simple-nanowallet) ==========
 async function sendXNO(wallet, toAddress, amountRaw) {
     try {
         const accountInfo = await nanoRpcCall('account_info', { account: wallet.address });
@@ -337,15 +290,39 @@ async function sendXNO(wallet, toAddress, amountRaw) {
         if (currentBalanceBigInt < amountRawBigInt) {
             throw new Error(`Insufficient balance: ${currentBalanceBigInt} < ${amountRawBigInt}`);
         }
-        
+
         let representative = accountInfo.representative;
         if (!representative || representative === '0000000000000000000000000000000000000000000000000000000000000000') {
             representative = wallet.public_key;
             console.log(`⚠️ No representative set, using self: ${representative.substring(0, 20)}...`);
         }
-        
-        console.log(`📤 Sending ${amountRaw} raw from ${wallet.address} to ${toAddress}`);
-        const result = await buildSendBlock(wallet, toAddress, amountRawBigInt, previous, representative, currentBalanceRaw);
+
+        const nanoWallet = new NanoWallet(wallet.seed);
+        // Tạo block tạm để lấy hash
+        const tempBlock = await nanoWallet.createSendBlock({
+            index: wallet.index,
+            toAddress: toAddress,
+            amount: amountRawBigInt.toString(),
+            representative: representative,
+            work: null
+        });
+        const blockHash = tempBlock.hash;
+        const work = await generateRealWork(blockHash);
+
+        // Tạo block chính thức với work
+        const finalBlock = await nanoWallet.createSendBlock({
+            index: wallet.index,
+            toAddress: toAddress,
+            amount: amountRawBigInt.toString(),
+            representative: representative,
+            work: work
+        });
+
+        const result = await nanoRpcCall('process', {
+            json_block: JSON.stringify(finalBlock),
+            subtype: 'send'
+        });
+
         console.log(`✅ Send successful: ${result.hash}`);
         return { success: true, hash: result.hash };
     } catch (err) {
@@ -362,24 +339,45 @@ async function receiveXNO(wallet, transactionHash) {
         }
         const previous = accountInfo.frontier;
         const currentBalanceRaw = accountInfo.balance;
-        
-        const pending = await nanoRpcCall('pending', { 
-            account: wallet.address, 
+
+        const pending = await nanoRpcCall('pending', {
+            account: wallet.address,
             hash: transactionHash,
-            source: true 
+            source: true
         });
         if (!pending.blocks || !pending.blocks[transactionHash]) {
             throw new Error(`No pending block found for hash ${transactionHash}`);
         }
         const amountRaw = pending.blocks[transactionHash].amount;
         const amountRawBigInt = BigInt(amountRaw);
-        
+
         let representative = accountInfo.representative;
         if (!representative || representative === '0000000000000000000000000000000000000000000000000000000000000000') {
             representative = wallet.public_key;
         }
-        
-        const result = await buildReceiveBlock(wallet, transactionHash, previous, representative, currentBalanceRaw, amountRawBigInt);
+
+        const nanoWallet = new NanoWallet(wallet.seed);
+        const tempBlock = await nanoWallet.createReceiveBlock({
+            index: wallet.index,
+            transactionHash: transactionHash,
+            representative: representative,
+            work: null
+        });
+        const blockHash = tempBlock.hash;
+        const work = await generateRealWork(blockHash);
+
+        const finalBlock = await nanoWallet.createReceiveBlock({
+            index: wallet.index,
+            transactionHash: transactionHash,
+            representative: representative,
+            work: work
+        });
+
+        const result = await nanoRpcCall('process', {
+            json_block: JSON.stringify(finalBlock),
+            subtype: 'receive'
+        });
+
         console.log(`✅ Receive successful: ${result.hash}`);
         return { success: true, hash: result.hash };
     } catch (err) {
@@ -397,26 +395,27 @@ async function setRepresentative(wallet, representativeAddress) {
         const previous = accountInfo.frontier;
         const balance = accountInfo.balance;
         const representativePubKey = addressToPublicKey(representativeAddress);
-        const linkZeros = '0000000000000000000000000000000000000000000000000000000000000000';
-        
-        const blockPayload = {
-            type: 'state',
-            account: wallet.address,
-            previous: previous,
+
+        const nanoWallet = new NanoWallet(wallet.seed);
+        const tempBlock = await nanoWallet.createChangeBlock({
+            index: wallet.index,
             representative: representativePubKey,
-            balance: balance,
-            link: linkZeros,
-            work: '0000000000000000'
-        };
-        
-        const blockHash = nanocurrency.block.hash(blockPayload);
+            work: null
+        });
+        const blockHash = tempBlock.hash;
         const work = await generateRealWork(blockHash);
-        blockPayload.work = work;
-        
-        const result = await nanoRpcCall('process', { 
-            json_block: JSON.stringify(blockPayload),
+
+        const finalBlock = await nanoWallet.createChangeBlock({
+            index: wallet.index,
+            representative: representativePubKey,
+            work: work
+        });
+
+        const result = await nanoRpcCall('process', {
+            json_block: JSON.stringify(finalBlock),
             subtype: 'change'
         });
+
         console.log(`✅ Representative changed: ${result.hash}`);
         return { success: true, hash: result.hash };
     } catch (err) {
@@ -483,7 +482,6 @@ async function processXNOtoCC(swap, wallet, admin) {
 
 async function processCCtoXNO(swap, wallet, admin) {
     try {
-        // 1 CC = 0.000002 XNO = 2e24 raw
         const amountRawBigInt = BigInt(Math.round(swap.amount_cc * 2e24));
         const toAddress = swap.receiver;
         
@@ -889,9 +887,9 @@ async function startApp() {
         console.log('╔══════════════════════════════════════╗');
         console.log('║   NANO XNO DASHBOARD (SECURE)       ║');
         console.log('╠══════════════════════════════════════╣');
-        console.log(`║  HTTP: http://localhost:${PORT}     ║`);
+        console.log(`║  HTTP: http://localhost:${PORT}     ║');
         console.log('║  Default login: admin / admin       ║');
-        console.log(`║  RPC Endpoints: Nanswap + Nano.to   ║`);
+        console.log(`║  RPC Endpoints: Nanswap + Nano.to   ║');
         console.log('║  Auto Swap: Enabled (30s interval)  ║');
         console.log('║  PoW: Nanswap -> Nano.to -> CPU     ║');
         console.log('║  Wallet data: AES-256-GCM encrypted ║');
