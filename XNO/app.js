@@ -139,7 +139,6 @@ let nanoWalletInstance = null;
 let accountCache = {}; // address -> { index }
 let currentSeed = null;
 
-// Đảm bảo account được cache, nếu chưa có thì tạo thêm bằng createAccounts
 function ensureAccount(seed, index, address) {
     if (!nanoWalletInstance || currentSeed !== seed) {
         throw new Error(`Wallet not initialized for seed. Please call initNanoWallet first.`);
@@ -210,7 +209,7 @@ async function getNanoWallet(seed) {
     return nanoWalletInstance;
 }
 
-// ========== NANO RPC CALL - CHỈ DÙNG CHO TÁC VỤ GIAO DỊCH (SEND/RECEIVE) ==========
+// ========== RPC CALLS - CHỈ DÙNG CHO GIAO DỊCH (SEND/RECEIVE) ==========
 async function nanoRpcCallForTx(action, params = {}, retries = 2) {
     const tryEndpoints = [NANSWAP_RPC_URL, NANO_TO_RPC_URL];
     let lastError = null;
@@ -314,6 +313,23 @@ async function getHistoryFromNanoTo(address, count = 50) {
     } catch (err) {
         console.error('Get history from Nano.to error:', err.message);
         return { success: false, error: err.message };
+    }
+}
+
+// ========== GET ACCOUNT INFO - CHỈ DÙNG RPC.NANO.TO ==========
+async function getAccountInfoFromNanoTo(address) {
+    try {
+        const response = await axios.post(NANO_TO_RPC_URL, {
+            action: 'account_info',
+            account: address
+        }, { timeout: 10000 });
+        if (response.data && response.data.error) {
+            throw new Error(response.data.error);
+        }
+        return response.data;
+    } catch (err) {
+        console.error('Get account info from Nano.to error:', err.message);
+        throw err;
     }
 }
 
@@ -458,12 +474,12 @@ async function processPendingSwaps() {
             return;
         }
         
-        try {
+        // Chỉ init nếu chưa có hoặc seed khác
+        if (!nanoWalletInstance || currentSeed !== activeWallet.seed) {
             await initNanoWallet(activeWallet.seed);
             console.log('✅ Wallet initialized for auto swap');
-        } catch (err) {
-            console.error('❌ Failed to init wallet for auto swap:', err.message);
-            return;
+        } else {
+            console.log('ℹ️ Wallet already initialized, skipping init');
         }
         
         for (const swap of swaps) {
@@ -659,9 +675,9 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
         
         let representative = null;
         try { 
-            const accountInfo = await nanoRpcCallForTx('account_info', { account: account.address }); 
+            const accountInfo = await getAccountInfoFromNanoTo(account.address); 
             if (accountInfo && accountInfo.representative) {
-                representative = null;
+                representative = accountInfo.representative;
             }
         } catch (e) {}
         
@@ -674,7 +690,7 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
             seed: seedHex, 
             index: walletIndex,
             created_at: new Date().toISOString(), 
-            representative
+            representative: representative
         };
         const data = await getWallets();
         if (data.wallets.find(w => w.address === account.address)) {
@@ -709,9 +725,9 @@ app.post('/api/wallet/import-file', requireAuth, upload.single('seedFile'), asyn
         const account = accounts[0];
         let representative = null;
         try { 
-            const accountInfo = await nanoRpcCallForTx('account_info', { account: account.address }); 
+            const accountInfo = await getAccountInfoFromNanoTo(account.address); 
             if (accountInfo && accountInfo.representative) {
-                representative = null;
+                representative = accountInfo.representative;
             }
         } catch (e) {}
         const wallet = {
@@ -723,7 +739,7 @@ app.post('/api/wallet/import-file', requireAuth, upload.single('seedFile'), asyn
             seed, 
             index: 0,
             created_at: new Date().toISOString(), 
-            representative
+            representative: representative
         };
         const data = await getWallets();
         data.wallets.push(wallet);
@@ -769,6 +785,7 @@ app.delete('/api/wallet/:id', requireAuth, async (req, res) => {
     res.json({ success: true });
 });
 
+// ========== BALANCE - KHÔNG GỌI NANSWAP ==========
 app.get('/api/wallet/:id/balance', requireAuth, async (req, res) => {
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
@@ -776,14 +793,15 @@ app.get('/api/wallet/:id/balance', requireAuth, async (req, res) => {
     try {
         const result = await getBalance(wallet);
         if (result.success) {
-            let representative = wallet.representative;
-            try { 
-                const accountInfo = await nanoRpcCallForTx('account_info', { account: wallet.address }); 
-                if (accountInfo && accountInfo.representative) {
-                    representative = null;
-                }
-            } catch(e) {}
-            res.json({ success: true, balance: result.balance, pending: result.pending, address: wallet.address, representative });
+            // Lấy representative từ wallet data (đã lưu khi set hoặc import)
+            const representative = wallet.representative || null;
+            res.json({ 
+                success: true, 
+                balance: result.balance, 
+                pending: result.pending, 
+                address: wallet.address, 
+                representative 
+            });
         } else {
             res.json({ success: false, error: result.error });
         }
@@ -814,13 +832,14 @@ app.post('/api/wallet/:id/set-representative', requireAuth, async (req, res) => 
     }
 });
 
+// ========== REPRESENTATIVE - DÙNG NANO.TO ==========
 app.get('/api/wallet/:id/representative', requireAuth, async (req, res) => {
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
     if (!wallet) return res.json({ success: false, error: 'Wallet not found' });
     try {
-        const accountInfo = await nanoRpcCallForTx('account_info', { account: wallet.address });
-        const representative = accountInfo.representative ? null : null;
+        const accountInfo = await getAccountInfoFromNanoTo(wallet.address);
+        const representative = accountInfo.representative || null;
         res.json({ success: true, representative, 
                    weight: accountInfo.weight || '0', 
                    voting_weight: parseFloat(accountInfo.weight || '0') / 1e30 });
