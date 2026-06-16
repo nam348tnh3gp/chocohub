@@ -17,6 +17,7 @@
     "tweetnacl": "^1.0.3",
     "blakejs": "^1.2.1",
     "nano-base32": "^1.0.0",
-    "nano-pow": "^5.1.15"
+    "nano-pow": "^5.1.15",
+    "simple-nanowallet": "^1.0.0"
   }
 }
