@@ -7,6 +7,7 @@ const multer = require('multer');
 const axios = require('axios');
 const crypto = require('crypto');
 const nanocurrency = require('nanocurrency');
+const nanoBase32 = require('nano-base32'); // THÊM DÒNG NÀY
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,23 +18,15 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // ========== NANO RPC ENDPOINTS ==========
-// Lấy API key của Nanswap từ biến môi trường (bắt buộc)
 if (!process.env.NANSWAP_API_KEY) {
     console.error('FATAL: NANSWAP_API_KEY environment variable is not set. Exiting.');
     process.exit(1);
 }
 const NANSWAP_API_KEY = process.env.NANSWAP_API_KEY;
+const NANSWAP_RPC_URL = `https://nodes.nanswap.com/XNO?api_key=${NANSWAP_API_KEY}`;
+const NANO_TO_RPC_URL = 'https://rpc.nano.to';
 
-// Chỉ dùng 2 nguồn RPC chính
-const NANO_RPC_ENDPOINTS = [
-    'https://rpc.nano.to',                                             // Nano.to (Public, free)
-    `https://nodes.nanswap.com/XNO?api_key=${NANSWAP_API_KEY}`        // Nanswap (Private, using key)
-];
-
-// Cache work để tránh tính lại PoW cho cùng một hash (tăng tốc độ)
 const workCache = new Map();
-
-// Swap check interval (ms)
 const SWAP_CHECK_INTERVAL = 30000;
 
 // ========== CONFIG ==========
@@ -47,7 +40,6 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Session Security (bắt buộc có SESSION_SECRET)
 if (!process.env.SESSION_SECRET) {
     console.error('FATAL: SESSION_SECRET environment variable is not set. Exiting.');
     process.exit(1);
@@ -66,7 +58,7 @@ app.use(session(sessionConfig));
 
 const upload = multer({ dest: path.join(DATA_DIR, 'uploads') });
 
-// ========== MÃ HÓA DỮ LIỆU VÍ (AES-256-GCM) ==========
+// ========== MÃ HÓA DỮ LIỆU (AES-256-GCM) ==========
 let MASTER_KEY = null;
 function initMasterKey() {
     const masterPassword = process.env.MASTER_PASSWORD;
@@ -142,12 +134,20 @@ function isValidNanoAddress(address) {
     return address && address.startsWith('nano_') && address.length >= 60;
 }
 
+// SỬA HÀM NÀY
 function addressToPublicKey(address) {
-    return nanocurrency.addressToPublicKey(address);
+    if (!address.startsWith('nano_')) throw new Error('Invalid Nano address');
+    const encoded = address.substring(5);
+    const decoded = nanoBase32.decode(encoded);
+    const publicKeyBytes = decoded.slice(0, 32);
+    return publicKeyBytes.toString('hex');
 }
 
+// SỬA HÀM NÀY
 function publicKeyToAddress(publicKeyHex) {
-    return nanocurrency.publicKeyToAddress(publicKeyHex);
+    const publicKeyBytes = Buffer.from(publicKeyHex, 'hex');
+    const encoded = nanoBase32.encode(publicKeyBytes);
+    return 'nano_' + encoded;
 }
 
 async function generateNanoAddressFromSeed(seedHex, index = 0) {
@@ -174,8 +174,8 @@ async function generateRandomSeed() {
     return seedBuffer.toString('hex');
 }
 
-// ========== PROOF OF WORK GENERATION (VỚI 2 RPC CHÍNH) ==========
-async function generateWorkViaSingleRPC(rpcUrl, hash, difficulty) {
+// ========== PROOF OF WORK (PoW) GENERATION ==========
+async function generateWorkViaRPC(rpcUrl, hash, difficulty) {
     try {
         const response = await axios.post(rpcUrl, {
             action: 'work_generate',
@@ -183,24 +183,16 @@ async function generateWorkViaSingleRPC(rpcUrl, hash, difficulty) {
             difficulty: difficulty
         }, { timeout: 8000 });
         if (response.data && response.data.work) {
-            console.log(`✅ PoW via ${rpcUrl.includes('nanswap') ? 'Nanswap' : 'Nano.to'}: ${response.data.work}`);
+            const source = rpcUrl.includes('nanswap') ? 'Nanswap' : 'Nano.to';
+            console.log(`✅ PoW via ${source}: ${response.data.work}`);
             return response.data.work;
         }
         throw new Error('No work returned');
     } catch (err) {
-        console.warn(`RPC ${rpcUrl.includes('nanswap') ? 'Nanswap' : 'Nano.to'} failed for work_generate:`, err.message);
+        const source = rpcUrl.includes('nanswap') ? 'Nanswap' : 'Nano.to';
+        console.warn(`RPC ${source} failed for work_generate:`, err.message);
         return null;
     }
-}
-
-async function generateWorkViaMultipleRPCs(hash, difficulty) {
-    // Ưu tiên dùng Nanswap trước vì có work server riêng mạnh
-    const prioritized = [...NANO_RPC_ENDPOINTS].reverse();
-    for (const rpcUrl of prioritized) {
-        const work = await generateWorkViaSingleRPC(rpcUrl, hash, difficulty);
-        if (work) return work;
-    }
-    return null;
 }
 
 async function generateWorkViaCPU(hash, difficulty) {
@@ -225,8 +217,7 @@ async function generateRealWork(blockHashHex, difficultyHex = 'ffffffc000000000'
         return workCache.get(cacheKey);
     }
 
-    // 1. Thử Nanswap (có work server) và Nano.to
-    let work = await generateWorkViaMultipleRPCs(blockHashHex, difficultyHex);
+    let work = await generateWorkViaRPC(NANSWAP_RPC_URL, blockHashHex, difficultyHex);
     if (work) {
         workCache.set(cacheKey, work);
         if (workCache.size > 100) {
@@ -236,7 +227,16 @@ async function generateRealWork(blockHashHex, difficultyHex = 'ffffffc000000000'
         return work;
     }
 
-    // 2. Fallback CPU (chỉ khi tất cả RPC đều thất bại)
+    work = await generateWorkViaRPC(NANO_TO_RPC_URL, blockHashHex, difficultyHex);
+    if (work) {
+        workCache.set(cacheKey, work);
+        if (workCache.size > 100) {
+            const firstKey = workCache.keys().next().value;
+            workCache.delete(firstKey);
+        }
+        return work;
+    }
+
     work = await generateWorkViaCPU(blockHashHex, difficultyHex);
     if (work) {
         workCache.set(cacheKey, work);
@@ -249,13 +249,14 @@ async function generateRealWork(blockHashHex, difficultyHex = 'ffffffc000000000'
 // ========== NANO RPC CALL VỚI FALLBACK ==========
 async function nanoRpcCall(action, params = {}) {
     if (!global._activeRpcEndpoint) {
-        global._activeRpcEndpoint = NANO_RPC_ENDPOINTS[0];
+        global._activeRpcEndpoint = NANSWAP_RPC_URL;
     }
 
-    const tryEndpoints = [global._activeRpcEndpoint, ...NANO_RPC_ENDPOINTS.filter(e => e !== global._activeRpcEndpoint)];
+    const tryEndpoints = [global._activeRpcEndpoint, NANSWAP_RPC_URL, NANO_TO_RPC_URL];
+    const uniqueEndpoints = [...new Set(tryEndpoints)];
     let lastError = null;
 
-    for (const rpcUrl of tryEndpoints) {
+    for (const rpcUrl of uniqueEndpoints) {
         try {
             const response = await axios.post(rpcUrl, { action, ...params }, {
                 timeout: 15000,
@@ -268,7 +269,8 @@ async function nanoRpcCall(action, params = {}) {
             throw new Error(response.data?.error || 'Unknown error');
         } catch (err) {
             lastError = err;
-            console.warn(`RPC ${rpcUrl.includes('nanswap') ? 'Nanswap' : 'Nano.to'} failed for action ${action}:`, err.message);
+            const source = rpcUrl.includes('nanswap') ? 'Nanswap' : 'Nano.to';
+            console.warn(`RPC ${source} failed for action ${action}:`, err.message);
             continue;
         }
     }
@@ -292,7 +294,7 @@ async function enqueueTransaction(walletId, transactionFunc) {
         try {
             return await transactionFunc();
         } finally {
-            // No additional cleanup needed
+            // No cleanup
         }
     })();
     queue.currentPromise = taskPromise;
@@ -500,9 +502,11 @@ async function processXNOtoCC(swap, wallet, admin) {
     }
 }
 
+// SỬA HÀM NÀY
 async function processCCtoXNO(swap, wallet, admin) {
     try {
-        const xnoAmount = swap.amount_cc * 0.000002;
+        // 1 CC = 0.000002 XNO = 2e24 raw
+        const amountRawBigInt = BigInt(Math.round(swap.amount_cc * 2e24));
         const toAddress = swap.receiver;
         
         if (!isValidNanoAddress(toAddress)) {
@@ -510,10 +514,9 @@ async function processCCtoXNO(swap, wallet, admin) {
             return;
         }
         
-        const amountRaw = Math.floor(xnoAmount * 1e30);
-        console.log(`💱 Processing CC->XNO: ${swap.amount_cc} CC = ${xnoAmount} XNO (${amountRaw} raw)`);
+        console.log(`💱 Processing CC->XNO: ${swap.amount_cc} CC = ${Number(amountRawBigInt) / 1e30} XNO (${amountRawBigInt} raw)`);
         
-        const sendResult = await sendXNO(wallet, toAddress, amountRaw);
+        const sendResult = await sendXNO(wallet, toAddress, amountRawBigInt.toString());
         if (sendResult.success) {
             await axios.post(`${CHOCOHUB_URL}/swap/fulfill`, 
                 { request_id: swap.id, xno_txid: sendResult.hash }, 
@@ -887,10 +890,9 @@ app.get('/logout', (req, res) => {
 
 // Khởi tạo và start
 async function startApp() {
-    // Kiểm tra PoW (test với cache)
     try {
         const testHash = '0000000000000000000000000000000000000000000000000000000000000000';
-        console.log('🔍 Testing PoW generation (Nanswap + Nano.to + CPU fallback)...');
+        console.log('🔍 Testing PoW generation (Nanswap -> Nano.to -> CPU)...');
         const testWork = await generateRealWork(testHash);
         console.log(`✅ PoW test successful: ${testWork}`);
     } catch (err) {
@@ -911,7 +913,7 @@ async function startApp() {
         console.log('╠══════════════════════════════════════╣');
         console.log(`║  HTTP: http://localhost:${PORT}     ║`);
         console.log('║  Default login: admin / admin       ║');
-        console.log(`║  RPC Endpoints: Nano.to + Nanswap   ║`);
+        console.log(`║  RPC Endpoints: Nanswap + Nano.to   ║`);
         console.log('║  Auto Swap: Enabled (30s interval)  ║');
         console.log('║  PoW: Nanswap -> Nano.to -> CPU     ║');
         console.log('║  Wallet data: AES-256-GCM encrypted ║');
