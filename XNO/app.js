@@ -137,11 +137,10 @@ function isValidNanoAddress(address) {
 // ========== NANO WALLET MANAGER (SỬ DỤNG SIMPLE-NANO-WALLET-JS) ==========
 let nanoWalletInstance = null;
 let accountCache = {}; // address -> { index }
-let currentSeed = null; // Lưu seed hiện tại để kiểm tra
+let currentSeed = null;
 
 // Đảm bảo account được cache, nếu chưa có thì tạo thêm bằng createAccounts
 function ensureAccount(seed, index, address) {
-    // Kiểm tra nếu seed khác thì init lại wallet
     if (!nanoWalletInstance || currentSeed !== seed) {
         throw new Error(`Wallet not initialized for seed. Please call initNanoWallet first.`);
     }
@@ -149,7 +148,6 @@ function ensureAccount(seed, index, address) {
     if (accountCache[address]) {
         return accountCache[address];
     }
-    // Nếu chưa có, tạo thêm account mới trong wallet
     const currentCount = Object.keys(accountCache).length;
     if (index >= currentCount) {
         const newAccounts = nanoWalletInstance.createAccounts(index - currentCount + 1);
@@ -165,7 +163,6 @@ function ensureAccount(seed, index, address) {
     }
 }
 
-// Reset cache (gọi khi đổi active wallet hoặc import mới)
 function resetWalletCache() {
     accountCache = {};
     nanoWalletInstance = null;
@@ -173,11 +170,9 @@ function resetWalletCache() {
     console.log('🔄 Wallet cache cleared');
 }
 
-// Khởi tạo wallet instance với seed và tạo 100 accounts ban đầu
 async function initNanoWallet(seed) {
     if (!seed) throw new Error('Seed is required to initialize wallet');
     
-    // Nếu đã có wallet với cùng seed thì không cần init lại
     if (nanoWalletInstance && currentSeed === seed) {
         return nanoWalletInstance;
     }
@@ -199,7 +194,6 @@ async function initNanoWallet(seed) {
     });
     
     currentSeed = seed;
-    // Reset cache và tạo 100 accounts
     accountCache = {};
     const accounts = nanoWalletInstance.createAccounts(100);
     accounts.forEach((addr, idx) => {
@@ -291,6 +285,38 @@ async function getBalanceFromNanoTo(address) {
     }
 }
 
+// ========== GET HISTORY - CHỈ DÙNG RPC.NANO.TO ==========
+async function getHistoryFromNanoTo(address, count = 50) {
+    try {
+        const response = await axios.post(NANO_TO_RPC_URL, {
+            action: 'account_history',
+            account: address,
+            count: count
+        }, { timeout: 10000 });
+
+        if (response.data && response.data.error) {
+            throw new Error(response.data.error);
+        }
+
+        const history = response.data.history || [];
+        const transactions = history.map(tx => ({
+            hash: tx.hash,
+            type: tx.type === 'send' ? 'send' : 'receive',
+            amount: parseFloat(tx.amount) / 1e30,
+            account: tx.account || '',
+            memo: tx.memo || '',
+            timestamp: tx.local_timestamp || 0,
+            date: tx.local_timestamp ? new Date(tx.local_timestamp * 1000).toISOString() : null,
+            balance: tx.balance ? parseFloat(tx.balance) / 1e30 : null
+        }));
+
+        return { success: true, transactions };
+    } catch (err) {
+        console.error('Get history from Nano.to error:', err.message);
+        return { success: false, error: err.message };
+    }
+}
+
 // ========== CORE NANO FUNCTIONS ==========
 
 // Lấy số dư - Dùng trực tiếp rpc.nano.to
@@ -298,16 +324,19 @@ async function getBalance(walletData) {
     return await getBalanceFromNanoTo(walletData.address);
 }
 
+// Lấy lịch sử - Dùng trực tiếp rpc.nano.to
+async function getHistory(walletData, count = 50) {
+    return await getHistoryFromNanoTo(walletData.address, count);
+}
+
 // Gửi XNO (vẫn dùng wallet.send, kiểm tra số dư bằng RPC)
 async function sendXNO(walletData, toAddress, amountRaw) {
     try {
         const sourceAddress = walletData.address;
         
-        // Đảm bảo wallet được init TRƯỚC KHI gọi ensureAccount
         await getNanoWallet(walletData.seed);
         ensureAccount(walletData.seed, walletData.index, sourceAddress);
 
-        // Kiểm tra số dư bằng rpc.nano.to
         const balanceResult = await getBalanceFromNanoTo(sourceAddress);
         if (!balanceResult.success) {
             throw new Error('Cannot fetch balance: ' + balanceResult.error);
@@ -337,7 +366,6 @@ async function receiveXNO(walletData, transactionHash) {
     try {
         const sourceAddress = walletData.address;
         
-        // Đảm bảo wallet được init TRƯỚC KHI gọi ensureAccount
         await getNanoWallet(walletData.seed);
         ensureAccount(walletData.seed, walletData.index, sourceAddress);
 
@@ -365,7 +393,6 @@ async function receiveAllXNO(walletData) {
     try {
         const sourceAddress = walletData.address;
         
-        // Đảm bảo wallet được init TRƯỚC KHI gọi ensureAccount
         await getNanoWallet(walletData.seed);
         ensureAccount(walletData.seed, walletData.index, sourceAddress);
 
@@ -388,39 +415,11 @@ async function receiveAllXNO(walletData) {
     }
 }
 
-// Lấy lịch sử giao dịch
-async function getHistory(walletData, count = 50) {
-    try {
-        const sourceAddress = walletData.address;
-        
-        // Đảm bảo wallet được init TRƯỚC KHI gọi ensureAccount
-        await getNanoWallet(walletData.seed);
-        ensureAccount(walletData.seed, walletData.index, sourceAddress);
-
-        const wallet = await getNanoWallet(walletData.seed);
-        const history = await wallet.history(sourceAddress, count);
-        const transactions = (history || []).map(tx => ({
-            hash: tx.hash,
-            type: tx.type,
-            amount: parseFloat(tx.amount || '0') / 1e30,
-            account: tx.account,
-            memo: tx.memo || '',
-            timestamp: tx.local_timestamp,
-            date: tx.local_timestamp ? new Date(tx.local_timestamp * 1000).toISOString() : null
-        }));
-        return { success: true, transactions };
-    } catch (err) {
-        console.error('Get history error:', err);
-        return { success: false, error: err.message };
-    }
-}
-
 // Set representative
 async function setRepresentative(walletData, representativeAddress) {
     try {
         const sourceAddress = walletData.address;
         
-        // Đảm bảo wallet được init TRƯỚC KHI gọi ensureAccount
         await getNanoWallet(walletData.seed);
         ensureAccount(walletData.seed, walletData.index, sourceAddress);
 
@@ -459,7 +458,6 @@ async function processPendingSwaps() {
             return;
         }
         
-        // KHỞI TẠO WALLET TRƯỚC KHI XỬ LÝ SWAP
         try {
             await initNanoWallet(activeWallet.seed);
             console.log('✅ Wallet initialized for auto swap');
@@ -928,7 +926,7 @@ async function startApp() {
         console.log('╠══════════════════════════════════════╣');
         console.log(`║  HTTP: http://localhost:${PORT}     ║`);
         console.log('║  Default login: admin / admin       ║');
-        console.log(`║  RPC: Nano.to for balance           ║`);
+        console.log(`║  RPC: Nano.to for balance/history   ║`);
         console.log(`║  TX RPC: Nanswap + Nano.to fallback ║`);
         console.log('║  Auto Swap: Enabled (30s interval)  ║');
         console.log('║  Wallet: simple-nano-wallet-js      ║');
