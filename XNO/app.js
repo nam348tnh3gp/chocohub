@@ -134,32 +134,43 @@ function isValidNanoAddress(address) {
     return address && address.startsWith('nano_') && address.length >= 60;
 }
 
-// ========== NANO WALLET MANAGER (CACHE THEO ACCOUNT) ==========
+// ========== NANO WALLET MANAGER (SỬ DỤNG SIMPLE-NANO-WALLET-JS) ==========
 let nanoWalletInstance = null;
-let accountCache = {}; // address -> { index, privateKey, publicKey }
+let accountCache = {}; // address -> { index }
 
-// Tạo account từ seed và index dùng multi-nano-web
+// Tạo account từ seed và index dùng multi-nano-web (chỉ để lấy public key nếu cần)
 function getAccountFromSeed(seed, index) {
     const accounts = walletLib.legacyAccounts(seed, index, index + 1);
     return accounts[0];
 }
 
-// Đảm bảo account được cache, nếu chưa thì tạo từ seed + index
+// Đảm bảo account được cache, nếu chưa có thì tạo thêm bằng createAccounts
 function ensureAccount(seed, index, address) {
     if (accountCache[address]) {
-        // Kiểm tra khớp (tùy chọn)
         return accountCache[address];
     }
-    const account = getAccountFromSeed(seed, index);
-    if (account.address !== address) {
-        throw new Error(`Generated address ${account.address} does not match expected ${address}`);
+    // Nếu chưa có, tạo thêm account mới trong wallet
+    if (nanoWalletInstance) {
+        // Tạo thêm account tại index (nếu chưa có)
+        // createAccounts sẽ tạo các account từ số lượng hiện tại đến index+1
+        const currentCount = Object.keys(accountCache).length;
+        if (index >= currentCount) {
+            const newAccounts = nanoWalletInstance.createAccounts(index - currentCount + 1);
+            newAccounts.forEach((addr, idx) => {
+                const actualIndex = currentCount + idx;
+                accountCache[addr] = { index: actualIndex };
+            });
+        }
+        // Kiểm tra lại
+        if (accountCache[address]) {
+            return accountCache[address];
+        } else {
+            // Nếu vẫn không có, có thể do index không khớp, tạo lại toàn bộ?
+            throw new Error(`Unable to create account for address ${address}`);
+        }
+    } else {
+        throw new Error('Wallet not initialized');
     }
-    accountCache[address] = {
-        index: index,
-        privateKey: account.privateKey,
-        publicKey: account.publicKey
-    };
-    return accountCache[address];
 }
 
 // Reset cache (gọi khi đổi active wallet hoặc import mới)
@@ -169,7 +180,7 @@ function resetWalletCache() {
     console.log('🔄 Wallet cache cleared');
 }
 
-// Khởi tạo wallet instance với seed (không tạo sẵn accounts)
+// Khởi tạo wallet instance với seed và tạo 100 accounts ban đầu
 async function initNanoWallet(seed) {
     if (!seed) throw new Error('Seed is required to initialize wallet');
     const headerAuth = {
@@ -187,7 +198,13 @@ async function initNanoWallet(seed) {
         decimal: 30,
         autoReceive: false
     });
-    console.log(`✅ Nano wallet initialized with seed (no pre-generated accounts)`);
+    
+    // Tạo 100 accounts và lưu vào cache
+    const accounts = nanoWalletInstance.createAccounts(100);
+    accounts.forEach((addr, idx) => {
+        accountCache[addr] = { index: idx };
+    });
+    console.log(`✅ Nano wallet initialized with ${accounts.length} accounts`);
     return nanoWalletInstance;
 }
 
@@ -221,7 +238,6 @@ async function nanoRpcCall(action, params = {}, retries = 2) {
                 const status = err.response?.status;
                 console.warn(`RPC ${rpcUrl} failed for action ${action} (attempt ${attempt+1}):`, err.message);
                 if (status === 429) {
-                    // Rate limit - chờ lâu hơn
                     const delay = 5000 * (attempt + 1);
                     console.log(`⏳ Rate limited, waiting ${delay}ms before retry...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
@@ -229,7 +245,6 @@ async function nanoRpcCall(action, params = {}, retries = 2) {
                 continue;
             }
         }
-        // Nếu đã thử hết endpoint mà vẫn fail, chờ trước khi thử lại vòng lặp tiếp theo
         if (attempt < retries) {
             await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
         }
@@ -237,13 +252,12 @@ async function nanoRpcCall(action, params = {}, retries = 2) {
     throw new Error(`All RPC endpoints failed for ${action}. Last error: ${lastError.message}`);
 }
 
-// ========== CORE NANO FUNCTIONS (sử dụng ensureAccount) ==========
+// ========== CORE NANO FUNCTIONS ==========
 
 // Gửi XNO
 async function sendXNO(walletData, toAddress, amountRaw) {
     try {
         const sourceAddress = walletData.address;
-        // Đảm bảo account được cache
         ensureAccount(walletData.seed, walletData.index, sourceAddress);
 
         const wallet = await getNanoWallet(walletData.seed);
@@ -556,7 +570,7 @@ app.post('/api/wallet/create', requireAuth, async (req, res) => {
         data.wallets.push(wallet);
         if (!data.active_wallet) data.active_wallet = wallet.id;
         await updateWallets(data);
-        resetWalletCache(); // clear cache vì có wallet mới
+        resetWalletCache();
         res.json({ success: true, wallet: { id: wallet.id, name: wallet.name, address: wallet.address } });
     } catch (err) {
         console.error('Create wallet error:', err);
@@ -585,7 +599,7 @@ app.post('/api/wallet/import', requireAuth, async (req, res) => {
         try { 
             const accountInfo = await nanoRpcCall('account_info', { account: account.address }); 
             if (accountInfo && accountInfo.representative) {
-                representative = null; // có thể convert sau
+                representative = null;
             }
         } catch (e) {}
         
@@ -676,7 +690,7 @@ app.post('/api/wallet/:id/activate', requireAuth, async (req, res) => {
     if (!wallet) return res.json({ success: false, error: 'Wallet not found' });
     data.active_wallet = wallet.id;
     await updateWallets(data);
-    resetWalletCache(); // Xóa cache và wallet instance để dùng seed mới
+    resetWalletCache();
     res.json({ success: true });
 });
 
