@@ -375,11 +375,32 @@ async function sendXNO(walletData, toAddress, amountRaw) {
 
         const wallet = await getNanoWallet(walletData.seed);
         console.log(`📤 Sending ${amountRaw.toString()} raw from ${sourceAddress} to ${toAddress}`);
-        const hash = await wallet.send({
+        
+        // Gửi và nhận kết quả
+        const sendResult = await wallet.send({
             source: sourceAddress,
             destination: toAddress,
-            amount: amountRaw.toString()   // wallet.send yêu cầu string
+            amount: amountRaw.toString()
         });
+
+        // Lấy hash từ kết quả (có thể là object có trường hash hoặc block)
+        let hash = null;
+        if (sendResult && typeof sendResult === 'object') {
+            hash = sendResult.hash || sendResult.block || sendResult;
+            if (typeof hash === 'object') {
+                // Nếu vẫn là object, thử lấy hash từ block (có thể sendResult.block là object chứa hash)
+                if (sendResult.block && sendResult.block.hash) {
+                    hash = sendResult.block.hash;
+                } else {
+                    // fallback: nếu không có hash, lấy toàn bộ object convert sang JSON (dùng để debug)
+                    console.warn('⚠️ Unexpected send result format:', JSON.stringify(sendResult));
+                    hash = sendResult.toString();
+                }
+            }
+        } else {
+            hash = sendResult; // nếu là string
+        }
+
         console.log(`✅ Send successful: ${hash}`);
         return { success: true, hash };
     } catch (err) {
@@ -403,10 +424,12 @@ async function receiveXNO(walletData, transactionHash) {
         }
 
         console.log(`📥 Receiving ${pendingResult.blocks[transactionHash].amount} raw`);
-        const hash = await wallet.receive({
+        const receiveResult = await wallet.receive({
             account: sourceAddress,
             hash: transactionHash
         });
+        // Tương tự, lấy hash từ kết quả
+        let hash = receiveResult.hash || receiveResult.block || receiveResult;
         console.log(`✅ Receive successful: ${hash}`);
         return { success: true, hash };
     } catch (err) {
@@ -455,10 +478,11 @@ async function setRepresentative(walletData, representativeAddress) {
         }
 
         const wallet = await getNanoWallet(walletData.seed);
-        const hash = await wallet.change({
+        const result = await wallet.change({
             account: sourceAddress,
             representative: representativeAddress
         });
+        let hash = result.hash || result.block || result;
         console.log(`✅ Representative changed: ${hash}`);
         return { success: true, hash };
     } catch (err) {
@@ -545,7 +569,7 @@ async function processCCtoXNO(swap, wallet, admin) {
 
         console.log(`💱 Processing CC->XNO: ${swap.amount_cc} CC = ${Number(amountRawBigInt) / 1e30} XNO (${amountRawBigInt} raw)`);
 
-        const sendResult = await sendXNO(wallet, toAddress, amountRawBigInt); // truyền BigInt
+        const sendResult = await sendXNO(wallet, toAddress, amountRawBigInt);
         if (sendResult.success) {
             await axios.post(`${CHOCOHUB_URL}/swap/fulfill`,
                 { request_id: swap.id, xno_txid: sendResult.hash },
@@ -890,7 +914,6 @@ app.post('/api/wallet/send', requireAuth, async (req, res) => {
     const wallet = data.wallets.find(w => w.id === wallet_id);
     if (!wallet) return res.json({ success: false, error: 'Wallet not found' });
     try {
-        // Chuyển amount (chuỗi) sang BigInt raw
         const amountRaw = xnoToRaw(amount);
         const result = await sendXNO(wallet, to_address, amountRaw);
         if (result.success) {
