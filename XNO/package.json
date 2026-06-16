@@ -1,10 +1,11 @@
 {
   "name": "nano-dashboard",
   "version": "1.0.0",
-  "description": "Nano XNO Dashboard for ChocoHub",
+  "description": "Nano XNO Dashboard for ChocoHub with Nanswap integration",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js"
+    "start": "node app.js",
+    "dev": "nodemon app.js"
   },
   "dependencies": {
     "express": "^4.18.2",
@@ -13,11 +14,23 @@
     "axios": "^1.6.0",
     "fs-extra": "^11.1.1",
     "multer": "^1.4.5-lts.1",
-    "nanocurrency": "^2.5.0",
-    "tweetnacl": "^1.0.3",
-    "blakejs": "^1.2.1",
-    "nano-base32": "^1.0.0",
-    "nano-pow": "^5.1.15",
-    "simple-nanowallet": "^1.0.0"
-  }
+    "simple-nano-wallet-js": "^2.0.0",
+    "multi-nano-web": "^1.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=21.0.0"
+  },
+  "keywords": [
+    "nano",
+    "xno",
+    "cryptocurrency",
+    "wallet",
+    "dashboard",
+    "nanswap"
+  ],
+  "author": "",
+  "license": "MIT"
 }
