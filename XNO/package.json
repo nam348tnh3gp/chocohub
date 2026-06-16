@@ -14,8 +14,8 @@
     "axios": "^1.6.0",
     "fs-extra": "^11.1.1",
     "multer": "^1.4.5-lts.1",
-    "simple-nano-wallet-js": "^2.0.0",
-    "multi-nano-web": "^1.0.0"
+    "simple-nano-wallet-js": "^0.1.4",
+    "multi-nano-web": "^1.8.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
