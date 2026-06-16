@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nano Dashboard - XNO Manager</title>
     <style>
+        /* ... (giữ nguyên CSS) ... */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: #0a0a12;
@@ -433,7 +434,7 @@
         </div>
     </div>
 
-    <!-- Modal Export Seed (FIXED) -->
+    <!-- Modal Export Seed -->
     <div id="exportSeedModal" class="modal">
         <div class="modal-content">
             <h3>📤 Wallet Seed</h3>
@@ -475,6 +476,9 @@
         let currentExportWalletId = null;
         let currentSeedText = '';
 
+        // Cache DOM elements for wallet cards to avoid flickering
+        let walletCardMap = new Map(); // id -> DOM element
+
         function showToast(msg, isError = false) {
             const toast = document.getElementById('toast');
             toast.textContent = msg;
@@ -513,39 +517,65 @@
             } catch(err) { console.error(err); }
         }
 
-        // FIX: Remove duplicate wallets by address
+        // ========== FIXED loadWallets - no flickering ==========
         async function loadWallets() {
             try {
                 const container = document.getElementById('walletsList');
-                container.innerHTML = '<div class="loading-spinner"></div> Loading...';
                 
+                // Fetch fresh data
                 const res = await fetch('/api/wallets');
                 const data = await res.json();
                 
                 // Remove duplicate wallets by address
                 const seen = new Map();
                 const uniqueWallets = data.wallets.filter(w => {
-                    if (seen.has(w.address)) {
-                        return false; // Skip duplicate
-                    }
+                    if (seen.has(w.address)) return false;
                     seen.set(w.address, true);
                     return true;
                 });
                 
-                currentWallets = uniqueWallets;
-                currentActiveWallet = data.active;
+                const newActive = data.active;
                 
-                if (!currentWallets.length) {
+                // If no wallets, show empty state
+                if (!uniqueWallets.length) {
                     container.innerHTML = '<div style="text-align:center; padding:2rem; color:#888;">No wallets yet. Create or import one.</div>';
+                    walletCardMap.clear();
                     return;
                 }
                 
-                container.innerHTML = '';
-                for (const wallet of currentWallets) {
-                    const div = document.createElement('div');
-                    div.className = `wallet-card ${currentActiveWallet === wallet.id ? 'active' : ''}`;
-                    div.onclick = () => setActiveWallet(wallet.id);
+                // Build a map of existing card elements by wallet id
+                const existingCards = new Map();
+                container.querySelectorAll('.wallet-card').forEach(el => {
+                    const id = el.dataset.walletId;
+                    if (id) existingCards.set(id, el);
+                });
+                
+                // Remove cards that are no longer in the list (deleted wallets)
+                for (const [id, el] of existingCards) {
+                    if (!uniqueWallets.some(w => w.id === id)) {
+                        el.remove();
+                        existingCards.delete(id);
+                    }
+                }
+                
+                // Update or create cards
+                for (const wallet of uniqueWallets) {
+                    let card = existingCards.get(wallet.id);
+                    if (!card) {
+                        // Create new card
+                        card = document.createElement('div');
+                        card.className = 'wallet-card';
+                        card.dataset.walletId = wallet.id;
+                        card.onclick = () => setActiveWallet(wallet.id);
+                        container.appendChild(card);
+                        existingCards.set(wallet.id, card);
+                    }
                     
+                    // Update card content (only if changed)
+                    const isActive = (newActive === wallet.id);
+                    card.className = `wallet-card${isActive ? ' active' : ''}`;
+                    
+                    // Fetch balance (could be optimized with caching, but fine for now)
                     let balance = '...';
                     let rep = 'Not set';
                     try {
@@ -557,7 +587,8 @@
                         }
                     } catch(e) {}
                     
-                    div.innerHTML = `
+                    // Update innerHTML (this will cause re-render but only for that card, not the whole grid)
+                    card.innerHTML = `
                         <h3>${wallet.name}</h3>
                         <div class="address">${wallet.address.substring(0, 20)}...${wallet.address.substring(wallet.address.length - 10)}</div>
                         <div class="balance">💰 ${balance} XNO</div>
@@ -567,8 +598,12 @@
                             <button class="btn-sm btn-danger" onclick="event.stopPropagation(); deleteWallet('${wallet.id}')">🗑️ Delete</button>
                         </div>
                     `;
-                    container.appendChild(div);
                 }
+                
+                // Update current state
+                currentWallets = uniqueWallets;
+                currentActiveWallet = newActive;
+                
             } catch(err) { 
                 console.error(err);
                 document.getElementById('walletsList').innerHTML = `<div style="color:#ff4444;">❌ Error loading wallets: ${err.message}</div>`;
@@ -587,15 +622,12 @@
             } catch(err) { showToast(err.message, true); }
         }
         
-        // FIX: Export shows seed in modal with copy button
         function openExportModal(walletId, walletName) {
             currentExportWalletId = walletId;
             document.getElementById('exportWalletName').innerText = walletName;
             document.getElementById('seedDisplayContainer').innerHTML = '<div class="loading-spinner" style="margin:10px auto; display:block;"></div>';
             document.getElementById('copyStatus').innerHTML = '';
             document.getElementById('exportSeedModal').style.display = 'flex';
-            
-            // Fetch seed
             fetchSeed(walletId);
         }
         
@@ -629,7 +661,6 @@
                     document.getElementById('copyStatus').innerHTML = '';
                 }, 3000);
             }).catch(() => {
-                // Fallback
                 const range = document.createRange();
                 range.selectNode(seedText);
                 window.getSelection().removeAllRanges();
@@ -1026,7 +1057,7 @@
         loadWallets();
         loadSwaps();
         
-        // Auto refresh every 30 seconds (reduced to avoid flickering)
+        // Auto refresh every 30 seconds - now without flickering!
         setInterval(() => {
             const activeTab = document.querySelector('.tab-btn.active');
             if (activeTab) {
