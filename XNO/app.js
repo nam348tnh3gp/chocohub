@@ -515,11 +515,10 @@ async function setRepresentative(walletData, representativeAddress) {
         const blockForHash = { ...blockObj };
         delete blockForHash.work; // xóa work nếu có
 
-        // 4. Tính hash của block (không work) dùng tools.hashBlock
-        if (typeof tools.hashBlock !== 'function') {
-            throw new Error('tools.hashBlock is not available in multi-nano-web. Please update the library.');
-        }
-        const blockHash = tools.hashBlock(blockForHash);
+        // 4. Tính hash của block (không work) dùng tools.hash (thay vì tools.hashBlock)
+        // Chuyển block object thành JSON string trước khi băm
+        const blockJson = JSON.stringify(blockForHash);
+        const blockHash = tools.hash(blockJson);
         console.log(`🔑 Block hash (không work): ${blockHash}`);
 
         // 5. Generate work từ Nanswap dựa trên hash thật
@@ -531,9 +530,9 @@ async function setRepresentative(walletData, representativeAddress) {
         blockObj.work = work;
 
         // 7. Gửi block đã có work qua RPC process
-        const blockJson = JSON.stringify(blockObj);
+        const blockJsonFinal = JSON.stringify(blockObj);
         const result = await nanoRpcCallForTx('process', {
-            block: blockJson,
+            block: blockJsonFinal,
             json_block: 'true'
         });
 
