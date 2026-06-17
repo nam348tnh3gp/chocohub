@@ -7,7 +7,7 @@ const multer = require('multer');
 const axios = require('axios');
 const crypto = require('crypto');
 const { Wallet } = require('simple-nano-wallet-js');
-const { wallet: walletLib } = require('multi-nano-web');
+const { wallet: walletLib, block, tools } = require('multi-nano-web');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -136,7 +136,6 @@ function isValidNanoAddress(address) {
 
 // ========== CHUYỂN ĐỔI XNO → RAW (CHÍNH XÁC) ==========
 function xnoToRaw(amount) {
-    // amount có thể là số hoặc chuỗi
     const amountStr = typeof amount === 'string' ? amount : amount.toString();
     const parts = amountStr.split('.');
     let intPart = parts[0] || '0';
@@ -285,7 +284,7 @@ async function getBalanceFromNanoTo(address) {
             success: true,
             balance: parseFloat(balanceResponse.data.balance) / 1e30,
             pending: parseFloat(pending) / 1e30,
-            balanceRaw: balanceResponse.data.balance,   // string raw
+            balanceRaw: balanceResponse.data.balance,
             pendingRaw: pending,
             address: address
         };
@@ -346,17 +345,14 @@ async function getAccountInfoFromNanoTo(address) {
 
 // ========== CORE NANO FUNCTIONS ==========
 
-// Lấy số dư - Dùng trực tiếp rpc.nano.to
 async function getBalance(walletData) {
     return await getBalanceFromNanoTo(walletData.address);
 }
 
-// Lấy lịch sử - Dùng trực tiếp rpc.nano.to
 async function getHistory(walletData, count = 50) {
     return await getHistoryFromNanoTo(walletData.address, count);
 }
 
-// Gửi XNO - nhận amountRaw là BigInt
 async function sendXNO(walletData, toAddress, amountRaw) {
     try {
         const sourceAddress = walletData.address;
@@ -376,29 +372,25 @@ async function sendXNO(walletData, toAddress, amountRaw) {
         const wallet = await getNanoWallet(walletData.seed);
         console.log(`📤 Sending ${amountRaw.toString()} raw from ${sourceAddress} to ${toAddress}`);
         
-        // Gửi và nhận kết quả
         const sendResult = await wallet.send({
             source: sourceAddress,
             destination: toAddress,
             amount: amountRaw.toString()
         });
 
-        // Lấy hash từ kết quả (có thể là object có trường hash hoặc block)
         let hash = null;
         if (sendResult && typeof sendResult === 'object') {
             hash = sendResult.hash || sendResult.block || sendResult;
             if (typeof hash === 'object') {
-                // Nếu vẫn là object, thử lấy hash từ block (có thể sendResult.block là object chứa hash)
                 if (sendResult.block && sendResult.block.hash) {
                     hash = sendResult.block.hash;
                 } else {
-                    // fallback: nếu không có hash, lấy toàn bộ object convert sang JSON (dùng để debug)
                     console.warn('⚠️ Unexpected send result format:', JSON.stringify(sendResult));
                     hash = sendResult.toString();
                 }
             }
         } else {
-            hash = sendResult; // nếu là string
+            hash = sendResult;
         }
 
         console.log(`✅ Send successful: ${hash}`);
@@ -409,7 +401,6 @@ async function sendXNO(walletData, toAddress, amountRaw) {
     }
 }
 
-// Receive một pending block
 async function receiveXNO(walletData, transactionHash) {
     try {
         const sourceAddress = walletData.address;
@@ -428,7 +419,6 @@ async function receiveXNO(walletData, transactionHash) {
             account: sourceAddress,
             hash: transactionHash
         });
-        // Tương tự, lấy hash từ kết quả
         let hash = receiveResult.hash || receiveResult.block || receiveResult;
         console.log(`✅ Receive successful: ${hash}`);
         return { success: true, hash };
@@ -438,7 +428,6 @@ async function receiveXNO(walletData, transactionHash) {
     }
 }
 
-// Receive tất cả pending
 async function receiveAllXNO(walletData) {
     try {
         const sourceAddress = walletData.address;
@@ -465,31 +454,53 @@ async function receiveAllXNO(walletData) {
     }
 }
 
-// Set representative
+// ==================== FIX: HÀM SET REPRESENTATIVE MỚI ====================
 async function setRepresentative(walletData, representativeAddress) {
     try {
         const sourceAddress = walletData.address;
 
-        await getNanoWallet(walletData.seed);
-        ensureAccount(walletData.seed, walletData.index, sourceAddress);
-
-        if (!isValidNanoAddress(representativeAddress)) {
-            throw new Error('Invalid representative address');
+        // 1. Lấy private key từ walletData (đã có sẵn)
+        const privateKey = walletData.private_key;
+        if (!privateKey) {
+            throw new Error('Private key not found for wallet');
         }
 
-        const wallet = await getNanoWallet(walletData.seed);
-        const result = await wallet.change({
-            account: sourceAddress,
-            representative: representativeAddress
+        // 2. Lấy thông tin account hiện tại (balance, frontier, representative)
+        const accountInfo = await getAccountInfoFromNanoTo(sourceAddress);
+        if (!accountInfo || accountInfo.error) {
+            throw new Error('Cannot fetch account info: ' + (accountInfo?.error || 'unknown error'));
+        }
+
+        // 3. Tạo block change (representative) sử dụng multi-nano-web
+        const changeData = {
+            walletBalanceRaw: accountInfo.balance,           // số dư hiện tại (raw)
+            address: sourceAddress,                          // địa chỉ ví
+            representativeAddress: representativeAddress,    // đại diện mới
+            frontier: accountInfo.frontier,                 // block hash cuối cùng
+            work: '0000000000000000'                        // work (có thể để trống, node sẽ tự tính)
+        };
+
+        // Ký block
+        const signedBlock = block.representative(changeData, privateKey);
+
+        // 4. Gửi block đã ký lên network qua RPC
+        const result = await nanoRpcCallForTx('process', {
+            block: signedBlock,
+            json_block: 'true'
         });
-        let hash = result.hash || result.block || result;
-        console.log(`✅ Representative changed: ${hash}`);
-        return { success: true, hash };
+
+        if (result && result.hash) {
+            console.log(`✅ Representative changed: ${result.hash}`);
+            return { success: true, hash: result.hash };
+        } else {
+            throw new Error('Failed to process change block: ' + JSON.stringify(result));
+        }
     } catch (err) {
         console.error('Set representative error:', err);
         return { success: false, error: err.message };
     }
 }
+// ========================================================================
 
 // ========== AUTO SWAP PROCESSOR ==========
 let swapProcessorInterval = null;
@@ -819,7 +830,7 @@ app.delete('/api/wallet/:id', requireAuth, async (req, res) => {
     res.json({ success: true });
 });
 
-// ========== BALANCE - KHÔNG GỌI NANSWAP ==========
+// ========== BALANCE ==========
 app.get('/api/wallet/:id/balance', requireAuth, async (req, res) => {
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
@@ -843,6 +854,7 @@ app.get('/api/wallet/:id/balance', requireAuth, async (req, res) => {
     }
 });
 
+// ========== SET REPRESENTATIVE - ROUTE SỬ DỤNG HÀM MỚI ==========
 app.post('/api/wallet/:id/set-representative', requireAuth, async (req, res) => {
     const { representative } = req.body;
     const data = await getWallets();
@@ -852,6 +864,7 @@ app.post('/api/wallet/:id/set-representative', requireAuth, async (req, res) => 
         return res.json({ success: false, error: 'Invalid representative address' });
     }
     try {
+        // Gọi hàm setRepresentative mới (đã được fix)
         const result = await setRepresentative(wallet, representative);
         if (result.success) {
             wallet.representative = representative;
@@ -897,7 +910,7 @@ app.get('/api/wallet/:id/history', requireAuth, async (req, res) => {
     }
 });
 
-// ========== SEND XNO - SỬ DỤNG xnoToRaw ==========
+// ========== SEND XNO ==========
 app.post('/api/wallet/send', requireAuth, async (req, res) => {
     const { wallet_id, to_address, amount } = req.body;
     if (!wallet_id || !to_address || !amount) {
