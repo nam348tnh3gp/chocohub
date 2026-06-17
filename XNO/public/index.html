@@ -124,6 +124,7 @@
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            max-width: 220px; /* đảm bảo không tràn */
         }
         .wallet-card .balance {
             font-size: 1.2rem;
@@ -299,6 +300,7 @@
             .header { padding: 0.75rem 1rem; }
             .wallet-grid { grid-template-columns: 1fr; }
             .modal-content { padding: 1.5rem; }
+            .wallet-card .address span { max-width: 140px; }
         }
     </style>
 </head>
@@ -490,6 +492,15 @@
     <div id="toast" class="toast"></div>
 
     <script>
+        // ===== HÀM RÚT GỌN ĐỊA CHỈ =====
+        function shortenAddress(address, len = 10) {
+            if (!address) return '';
+            if (address.length <= len * 2 + 3) return address; // nếu ngắn thì giữ nguyên
+            const start = address.substring(0, len);
+            const end = address.substring(address.length - len);
+            return start + '...' + end;
+        }
+
         let currentWallets = [];
         let currentActiveWallet = null;
         let currentSwaps = [];
@@ -540,7 +551,6 @@
             navigator.clipboard.writeText(address).then(() => {
                 showToast('Address copied to clipboard!');
             }).catch(() => {
-                // fallback
                 const textArea = document.createElement('textarea');
                 textArea.value = address;
                 document.body.appendChild(textArea);
@@ -551,7 +561,7 @@
             });
         }
 
-        // loadWallets - hiển thị tất cả ví, không lọc trùng, địa chỉ đầy đủ và nút copy
+        // loadWallets - hiển thị ví với địa chỉ rút gọn
         async function loadWallets() {
             try {
                 const container = document.getElementById('walletsList');
@@ -559,7 +569,6 @@
                 const res = await fetch('/api/wallets');
                 const data = await res.json();
                 
-                // Giữ nguyên danh sách ví từ server (không lọc trùng)
                 const wallets = data.wallets;
                 const newActive = data.active;
                 
@@ -568,14 +577,12 @@
                     return;
                 }
                 
-                // Lưu các thẻ hiện có theo id
                 const existingCards = new Map();
                 container.querySelectorAll('.wallet-card').forEach(el => {
                     const id = el.dataset.walletId;
                     if (id) existingCards.set(id, el);
                 });
                 
-                // Xóa thẻ của ví đã xóa
                 for (const [id, el] of existingCards) {
                     if (!wallets.some(w => w.id === id)) {
                         el.remove();
@@ -583,7 +590,6 @@
                     }
                 }
                 
-                // Cập nhật hoặc tạo mới thẻ
                 for (const wallet of wallets) {
                     let card = existingCards.get(wallet.id);
                     if (!card) {
@@ -598,7 +604,6 @@
                     const isActive = (newActive === wallet.id);
                     card.className = `wallet-card${isActive ? ' active' : ''}`;
                     
-                    // Lấy số dư và rep
                     let balance = '...';
                     let rep = 'Not set';
                     try {
@@ -606,14 +611,16 @@
                         const balanceData = await balanceRes.json();
                         if (balanceData.success) {
                             balance = balanceData.balance.toFixed(6);
-                            rep = balanceData.representative ? balanceData.representative.substring(0, 20) + '...' : 'Not set';
+                            rep = balanceData.representative ? shortenAddress(balanceData.representative, 8) : 'Not set';
                         }
                     } catch(e) {}
                     
+                    // Hiển thị địa chỉ rút gọn, vẫn giữ đầy đủ trong title
+                    const shortAddr = shortenAddress(wallet.address, 10);
                     card.innerHTML = `
                         <h3>${wallet.name}</h3>
                         <div class="address">
-                            <span title="${wallet.address}">${wallet.address}</span>
+                            <span title="${wallet.address}">${shortAddr}</span>
                             <button class="btn-sm btn-copy-address" onclick="event.stopPropagation(); copyAddress('${wallet.address}')" style="flex-shrink:0;">📋 Copy</button>
                         </div>
                         <div class="balance">💰 ${balance} XNO</div>
@@ -904,7 +911,8 @@
                 for (const wallet of data.wallets) {
                     const option = document.createElement('option');
                     option.value = wallet.id;
-                    option.textContent = `${wallet.name} - ${wallet.address.substring(0, 20)}...`;
+                    const shortAddr = shortenAddress(wallet.address, 10);
+                    option.textContent = `${wallet.name} - ${shortAddr}`;
                     if (wallet.id === data.active) option.selected = true;
                     select.appendChild(option);
                 }
@@ -982,7 +990,8 @@
                     const row = tbody.insertRow();
                     row.insertCell(0).innerHTML = tx.type === 'receive' ? '<span style="color:#44ff44">⬇️ Receive</span>' : '<span style="color:#ffaa44">⬆️ Send</span>';
                     row.insertCell(1).innerHTML = `<span style="color:#44ff44">${tx.amount.toFixed(8)} XNO</span>`;
-                    row.insertCell(2).innerHTML = `<span class="truncate" style="max-width:100px;" title="${tx.account}">${tx.account || 'N/A'}</span>`;
+                    const shortAccount = shortenAddress(tx.account, 8);
+                    row.insertCell(2).innerHTML = `<span class="truncate" style="max-width:120px;" title="${tx.account}">${shortAccount}</span>`;
                     row.insertCell(3).innerText = tx.memo || '-';
                     row.insertCell(4).innerText = tx.date ? new Date(tx.date).toLocaleString() : '-';
                     row.insertCell(5).innerHTML = `<span class="truncate" style="max-width:80px; font-size:0.7rem;" title="${tx.hash}">${tx.hash}</span>`;
@@ -1002,7 +1011,8 @@
                 for (const wallet of data.wallets) {
                     const option = document.createElement('option');
                     option.value = wallet.id;
-                    option.textContent = `${wallet.name} - ${wallet.address.substring(0, 20)}...`;
+                    const shortAddr = shortenAddress(wallet.address, 10);
+                    option.textContent = `${wallet.name} - ${shortAddr}`;
                     if (wallet.id === data.active) option.selected = true;
                     select.appendChild(option);
                 }
