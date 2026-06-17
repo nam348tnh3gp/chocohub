@@ -7,7 +7,7 @@ const multer = require('multer');
 const axios = require('axios');
 const crypto = require('crypto');
 const { Wallet } = require('simple-nano-wallet-js');
-const { wallet: walletLib, block, tools } = require('multi-nano-web');
+const { wallet: walletLib, block } = require('multi-nano-web'); // Đã xóa tools
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,6 +26,7 @@ const NANSWAP_API_KEY = process.env.NANSWAP_API_KEY;
 const NANSWAP_RPC_URL = `https://nodes.nanswap.com/XNO?api_key=${NANSWAP_API_KEY}`;
 const NANSWAP_WS_URL = `wss://nodes.nanswap.com/ws/?ticker=XNO&api_key=${NANSWAP_API_KEY}`;
 const NANO_TO_RPC_URL = 'https://rpc.nano.to';
+const POW_NANO_TO_URL = 'https://pow.nano.to/work';
 
 const SWAP_CHECK_INTERVAL = 30000;
 
@@ -254,12 +255,13 @@ async function nanoRpcCallForTx(action, params = {}, retries = 2) {
     throw new Error(`All RPC endpoints failed for ${action}. Last error: ${lastError.message}`);
 }
 
-// ========== GENERATE WORK (CHỈ QUA NANSWAP) ==========
-async function generateWork(hash) {
+// ========== GENERATE WORK (NANSWAP + FALLBACK POW.NANO.TO) ==========
+async function generateWorkForBlock(blockJson) {
+    // Thử Nanswap trước
     try {
         const response = await axios.post(NANSWAP_RPC_URL, {
             action: 'work_generate',
-            hash: hash
+            block: blockJson
         }, {
             headers: {
                 'Content-Type': 'application/json',
@@ -270,10 +272,25 @@ async function generateWork(hash) {
         if (response.data && !response.data.error) {
             return response.data.work;
         }
-        throw new Error(response.data?.error || 'Unknown error');
+        throw new Error(response.data?.error || 'Nanswap error');
     } catch (err) {
-        console.error('Generate work error:', err.message);
-        throw err;
+        console.warn('⚠️ Nanswap work generate failed, trying pow.nano.to...');
+        // Fallback sang pow.nano.to
+        try {
+            const response = await axios.post(POW_NANO_TO_URL, {
+                block: blockJson
+            }, {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 15000
+            });
+            if (response.data && response.data.work) {
+                return response.data.work;
+            }
+            throw new Error(response.data?.error || 'pow.nano.to error');
+        } catch (fallbackErr) {
+            console.error('❌ pow.nano.to work generate failed:', fallbackErr.message);
+            throw fallbackErr;
+        }
     }
 }
 
@@ -493,16 +510,16 @@ async function setRepresentative(walletData, representativeAddress) {
             throw new Error('Cannot fetch account info: ' + (accountInfo?.error || 'unknown error'));
         }
 
-        // 1. Tạo block change (chưa có work) - truyền work: null để block không có work
+        // 1. Tạo block change (chưa có work) - truyền work: null
         const changeData = {
             walletBalanceRaw: accountInfo.balance,
             address: sourceAddress,
             representativeAddress: representativeAddress,
             frontier: accountInfo.frontier,
-            work: null // không có work
+            work: null
         };
 
-        // 2. Ký block (trả về object hoặc string JSON)
+        // 2. Ký block
         const signedBlock = block.representative(changeData, privateKey);
 
         // Chuyển sang object
@@ -511,25 +528,20 @@ async function setRepresentative(walletData, representativeAddress) {
             blockObj = JSON.parse(signedBlock);
         }
 
-        // 3. Tạo bản sao không có work để tính hash (work không nằm trong hash)
-        const blockForHash = { ...blockObj };
-        delete blockForHash.work; // xóa work nếu có
+        // 3. Tạo bản sao không có work để gửi sinh work
+        const blockForWork = { ...blockObj };
+        delete blockForWork.work;
+        const blockJson = JSON.stringify(blockForWork);
 
-        // 4. Tính hash của block (không work) dùng tools.hash (thay vì tools.hashBlock)
-        // Chuyển block object thành JSON string trước khi băm
-        const blockJson = JSON.stringify(blockForHash);
-        const blockHash = tools.hash(blockJson);
-        console.log(`🔑 Block hash (không work): ${blockHash}`);
-
-        // 5. Generate work từ Nanswap dựa trên hash thật
-        console.log(`⏳ Generating work for hash ${blockHash}...`);
-        const work = await generateWork(blockHash);
+        // 4. Generate work (có fallback)
+        console.log(`⏳ Generating work for block...`);
+        const work = await generateWorkForBlock(blockJson);
         console.log(`✅ Work generated: ${work}`);
 
-        // 6. Cập nhật work vào block
+        // 5. Cập nhật work vào block
         blockObj.work = work;
 
-        // 7. Gửi block đã có work qua RPC process
+        // 6. Gửi block đã có work qua RPC process
         const blockJsonFinal = JSON.stringify(blockObj);
         const result = await nanoRpcCallForTx('process', {
             block: blockJsonFinal,
@@ -1033,6 +1045,7 @@ async function startApp() {
         console.log('║  Default login: admin / admin       ║');
         console.log(`║  RPC: Nano.to for balance/history   ║`);
         console.log(`║  TX RPC: Nanswap + Nano.to fallback ║`);
+        console.log(`║  POW: Nanswap + pow.nano.to fallback║`);
         console.log('║  Auto Swap: Enabled (30s interval)  ║');
         console.log('║  Wallet: simple-nano-wallet-js      ║');
         console.log('║  Wallet data: AES-256-GCM encrypted ║');
