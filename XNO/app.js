@@ -8,7 +8,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const { Wallet } = require('simple-nano-wallet-js');
 const { wallet: walletLib, block, tools } = require('multi-nano-web');
-const nanoJson = require('nano-json'); // <--- thêm để tính hash block
+const { Block } = require('nano-json'); // <--- SỬA: import đúng cách
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -504,7 +504,7 @@ async function setRepresentative(walletData, representativeAddress) {
         delete blockObj.work;
 
         // 5. Dùng nano-json để tính hash chính xác
-        const nanoBlock = nanoJson.Block.fromObject(blockObj);
+        const nanoBlock = Block.fromObject(blockObj); // <--- SỬA: dùng Block đã import
         const blockHash = nanoBlock.hash();
         console.log(`🔑 Block hash (không work): ${blockHash}`);
 
