@@ -511,8 +511,12 @@ async function setRepresentative(walletData, representativeAddress) {
             blockObj = JSON.parse(signedBlock);
         }
 
-        // 4. Tính hash của block (dùng multi-nano-web)
-        const blockHash = block.hash(blockObj);
+        // 4. Tính hash của block (dùng tools.hashBlock thay vì block.hash)
+        if (!tools || typeof tools.hashBlock !== 'function') {
+            throw new Error('tools.hashBlock is not available in multi-nano-web');
+        }
+        const blockHash = tools.hashBlock(blockObj);
+        console.log(`🔑 Block hash: ${blockHash}`);
 
         // 5. Generate work từ Nanswap
         console.log(`⏳ Generating work for hash ${blockHash}...`);
