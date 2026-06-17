@@ -211,7 +211,7 @@ async function getNanoWallet(seed) {
     return nanoWalletInstance;
 }
 
-// ========== RPC CALLS - RETRY + TIMEOUT ==========
+// ========== RPC CALLS - RETRY + TIMEOUT + BACKOFF ==========
 async function nanoRpcCallForTx(action, params = {}, retries = 3) {
     const tryEndpoints = [NANSWAP_RPC_URL, NANO_TO_RPC_URL];
     let lastError = null;
@@ -234,41 +234,35 @@ async function nanoRpcCallForTx(action, params = {}, retries = 3) {
                 const status = err.response?.status;
                 console.warn(`RPC ${rpcUrl} failed for action ${action} (attempt ${attempt+1}):`, err.message);
                 if (status === 429) {
-                    const delay = 5000 * (attempt + 1);
-                    console.log(`⏳ Rate limited, waiting ${delay}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
+                    // Lấy retry-after từ header (giây) hoặc mặc định 60s
+                    let retryAfter = parseInt(err.response?.headers?.['retry-after']) || 60;
+                    // Giới hạn tối đa 300s để tránh treo quá lâu
+                    if (retryAfter > 300) retryAfter = 300;
+                    console.log(`⏳ Rate limited, waiting ${retryAfter}s before retry...`);
+                    await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+                    // Không tăng attempt để retry sau khi hết hạn
+                    attempt--;
+                    break; // thoát khỏi vòng lặp endpoint, chuyển sang attempt tiếp theo
                 }
                 continue;
             }
         }
-        if (attempt < retries) {
+        // Nếu không phải 429, chờ một khoảng thời gian nhỏ trước khi retry
+        if (attempt < retries && !lastError?.response?.status === 429) {
             await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
         }
     }
     throw new Error(`All RPC endpoints failed for ${action}. Last error: ${lastError.message}`);
 }
 
-// ========== GENERATE WORK ==========
+// ========== GENERATE WORK (SỬ DỤNG nanoRpcCallForTx) ==========
 async function generateWork(hash) {
-    try {
-        const response = await axios.post(NANSWAP_RPC_URL, {
-            action: 'work_generate',
-            hash: hash
-        }, {
-            headers: {
-                'Content-Type': 'application/json',
-                'nodes-api-key': process.env.NANSWAP_API_KEY
-            },
-            timeout: 15000
-        });
-        if (response.data && !response.data.error) {
-            return response.data.work;
-        }
-        throw new Error(response.data?.error || 'Unknown error');
-    } catch (err) {
-        console.error('Generate work error:', err.message);
-        throw err;
+    // Chỉ retry 2 lần, vì work_generate có thể tốn kém
+    const result = await nanoRpcCallForTx('work_generate', { hash }, 2);
+    if (result && result.work) {
+        return result.work;
     }
+    throw new Error('Failed to generate work: ' + JSON.stringify(result));
 }
 
 // ========== GET BALANCE (NANO.TO) ==========
@@ -483,8 +477,15 @@ async function receiveAllXNO(walletData) {
     }
 }
 
-// ==================== SET REPRESENTATIVE (FIXED, DÙNG crypto) ====================
+// ==================== SET REPRESENTATIVE (FIXED, DÙNG crypto, CÓ CỜ CHỐNG SPAM) ====================
+let isSettingRepresentative = false; // cờ ngăn gọi đồng thời
+
 async function setRepresentative(walletData, representativeAddress) {
+    if (isSettingRepresentative) {
+        console.warn('⚠️ Already setting representative, please wait.');
+        return { success: false, error: 'Another representative change is in progress' };
+    }
+    isSettingRepresentative = true;
     try {
         const sourceAddress = walletData.address;
         const privateKey = walletData.private_key;
@@ -518,7 +519,7 @@ async function setRepresentative(walletData, representativeAddress) {
         const blockHash = hashBlock(blockObj);
         console.log(`🔑 Block hash (không work): ${blockHash}`);
 
-        // 6. Generate work từ Nanswap
+        // 6. Generate work từ Nanswap (có retry và backoff)
         console.log(`⏳ Generating work for hash ${blockHash}...`);
         const work = await generateWork(blockHash);
         console.log(`✅ Work generated: ${work}`);
@@ -542,6 +543,8 @@ async function setRepresentative(walletData, representativeAddress) {
     } catch (err) {
         console.error('Set representative error:', err);
         return { success: false, error: err.message };
+    } finally {
+        isSettingRepresentative = false;
     }
 }
 // ========================================================================
