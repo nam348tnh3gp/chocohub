@@ -8,6 +8,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const { Wallet } = require('simple-nano-wallet-js');
 const { wallet: walletLib, block, tools } = require('multi-nano-web');
+const nanoJson = require('nano-json'); // <--- thêm để tính hash block
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -134,7 +135,7 @@ function isValidNanoAddress(address) {
     return address && address.startsWith('nano_') && address.length >= 60;
 }
 
-// ========== CHUYỂN ĐỔI XNO → RAW (CHÍNH XÁC) ==========
+// ========== CHUYỂN ĐỔI XNO → RAW ==========
 function xnoToRaw(amount) {
     const amountStr = typeof amount === 'string' ? amount : amount.toString();
     const parts = amountStr.split('.');
@@ -146,32 +147,10 @@ function xnoToRaw(amount) {
     return BigInt(rawStr);
 }
 
-// ========== NANO WALLET MANAGER (SỬ DỤNG SIMPLE-NANO-WALLET-JS) ==========
+// ========== NANO WALLET MANAGER (CACHED) ==========
 let nanoWalletInstance = null;
 let accountCache = {};
 let currentSeed = null;
-
-function ensureAccount(seed, index, address) {
-    if (!nanoWalletInstance || currentSeed !== seed) {
-        throw new Error(`Wallet not initialized for seed. Please call initNanoWallet first.`);
-    }
-    if (accountCache[address]) {
-        return accountCache[address];
-    }
-    const currentCount = Object.keys(accountCache).length;
-    if (index >= currentCount) {
-        const newAccounts = nanoWalletInstance.createAccounts(index - currentCount + 1);
-        newAccounts.forEach((addr, idx) => {
-            const actualIndex = currentCount + idx;
-            accountCache[addr] = { index: actualIndex };
-        });
-    }
-    if (accountCache[address]) {
-        return accountCache[address];
-    } else {
-        throw new Error(`Unable to create account for address ${address}`);
-    }
-}
 
 function resetWalletCache() {
     accountCache = {};
@@ -217,8 +196,8 @@ async function getNanoWallet(seed) {
     return nanoWalletInstance;
 }
 
-// ========== RPC CALLS - CHỈ DÙNG CHO GIAO DỊCH (SEND/RECEIVE) ==========
-async function nanoRpcCallForTx(action, params = {}, retries = 2) {
+// ========== RPC CALLS - RETRY + TIMEOUT ==========
+async function nanoRpcCallForTx(action, params = {}, retries = 3) {
     const tryEndpoints = [NANSWAP_RPC_URL, NANO_TO_RPC_URL];
     let lastError = null;
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -241,7 +220,7 @@ async function nanoRpcCallForTx(action, params = {}, retries = 2) {
                 console.warn(`RPC ${rpcUrl} failed for action ${action} (attempt ${attempt+1}):`, err.message);
                 if (status === 429) {
                     const delay = 5000 * (attempt + 1);
-                    console.log(`⏳ Rate limited, waiting ${delay}ms before retry...`);
+                    console.log(`⏳ Rate limited, waiting ${delay}ms...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
                 continue;
@@ -254,7 +233,7 @@ async function nanoRpcCallForTx(action, params = {}, retries = 2) {
     throw new Error(`All RPC endpoints failed for ${action}. Last error: ${lastError.message}`);
 }
 
-// ========== GENERATE WORK (CHỈ QUA NANSWAP) ==========
+// ========== GENERATE WORK ==========
 async function generateWork(hash) {
     try {
         const response = await axios.post(NANSWAP_RPC_URL, {
@@ -277,7 +256,7 @@ async function generateWork(hash) {
     }
 }
 
-// ========== GET BALANCE - CHỈ DÙNG RPC.NANO.TO (TRẢ CẢ RAW) ==========
+// ========== GET BALANCE (NANO.TO) ==========
 async function getBalanceFromNanoTo(address) {
     try {
         const balanceResponse = await axios.post(NANO_TO_RPC_URL, {
@@ -317,7 +296,7 @@ async function getBalanceFromNanoTo(address) {
     }
 }
 
-// ========== GET HISTORY - CHỈ DÙNG RPC.NANO.TO ==========
+// ========== GET HISTORY (NANO.TO) ==========
 async function getHistoryFromNanoTo(address, count = 50) {
     try {
         const response = await axios.post(NANO_TO_RPC_URL, {
@@ -349,7 +328,7 @@ async function getHistoryFromNanoTo(address, count = 50) {
     }
 }
 
-// ========== GET ACCOUNT INFO - CHỈ DÙNG RPC.NANO.TO ==========
+// ========== GET ACCOUNT INFO (NANO.TO) ==========
 async function getAccountInfoFromNanoTo(address) {
     try {
         const response = await axios.post(NANO_TO_RPC_URL, {
@@ -379,9 +358,16 @@ async function getHistory(walletData, count = 50) {
 async function sendXNO(walletData, toAddress, amountRaw) {
     try {
         const sourceAddress = walletData.address;
-
         await getNanoWallet(walletData.seed);
-        ensureAccount(walletData.seed, walletData.index, sourceAddress);
+        // ensureAccount được dùng để đảm bảo account có trong cache (không thực sự cần thiết vì simple-wallet tự quản lý)
+        // nhưng ta vẫn gọi để đảm bảo
+        if (!accountCache[sourceAddress]) {
+            // Nếu chưa có, tìm index của address trong wallet
+            const accounts = nanoWalletInstance.createAccounts(100);
+            const idx = accounts.indexOf(sourceAddress);
+            if (idx === -1) throw new Error('Source address not found in wallet');
+            accountCache[sourceAddress] = { index: idx };
+        }
 
         const balanceResult = await getBalanceFromNanoTo(sourceAddress);
         if (!balanceResult.success) {
@@ -427,11 +413,16 @@ async function sendXNO(walletData, toAddress, amountRaw) {
 async function receiveXNO(walletData, transactionHash) {
     try {
         const sourceAddress = walletData.address;
-
         await getNanoWallet(walletData.seed);
-        ensureAccount(walletData.seed, walletData.index, sourceAddress);
+        if (!accountCache[sourceAddress]) {
+            const accounts = nanoWalletInstance.createAccounts(100);
+            const idx = accounts.indexOf(sourceAddress);
+            if (idx === -1) throw new Error('Source address not found in wallet');
+            accountCache[sourceAddress] = { index: idx };
+        }
 
         const wallet = await getNanoWallet(walletData.seed);
+        // Kiểm tra pending
         const pendingResult = await nanoRpcCallForTx('pending', { account: sourceAddress, source: true });
         if (!pendingResult.blocks || !pendingResult.blocks[transactionHash]) {
             throw new Error(`No pending block found for hash ${transactionHash}`);
@@ -454,9 +445,13 @@ async function receiveXNO(walletData, transactionHash) {
 async function receiveAllXNO(walletData) {
     try {
         const sourceAddress = walletData.address;
-
         await getNanoWallet(walletData.seed);
-        ensureAccount(walletData.seed, walletData.index, sourceAddress);
+        if (!accountCache[sourceAddress]) {
+            const accounts = nanoWalletInstance.createAccounts(100);
+            const idx = accounts.indexOf(sourceAddress);
+            if (idx === -1) throw new Error('Source address not found in wallet');
+            accountCache[sourceAddress] = { index: idx };
+        }
 
         const wallet = await getNanoWallet(walletData.seed);
         const pendingResult = await nanoRpcCallForTx('pending', { account: sourceAddress, source: true });
@@ -477,23 +472,22 @@ async function receiveAllXNO(walletData) {
     }
 }
 
-// ==================== HÀM SET REPRESENTATIVE (FIXED - SỬ DỤNG HASH TỪ BLOCK) ====================
+// ==================== SET REPRESENTATIVE (FIXED) ====================
 async function setRepresentative(walletData, representativeAddress) {
     try {
         const sourceAddress = walletData.address;
         const privateKey = walletData.private_key;
-        
         if (!privateKey) {
             throw new Error('Private key not found for wallet');
         }
 
-        // Lấy thông tin account (frontier, balance)
+        // 1. Lấy account info (frontier, balance)
         const accountInfo = await getAccountInfoFromNanoTo(sourceAddress);
         if (!accountInfo || accountInfo.error) {
             throw new Error('Cannot fetch account info: ' + (accountInfo?.error || 'unknown error'));
         }
 
-        // 1. Tạo block change KHÔNG work để lấy hash
+        // 2. Tạo block change với work = null (chưa có work)
         const changeData = {
             walletBalanceRaw: accountInfo.balance,
             address: sourceAddress,
@@ -502,38 +496,30 @@ async function setRepresentative(walletData, representativeAddress) {
             work: null
         };
 
-        // 2. Ký block để lấy hash
-        const signedBlock = block.representative(changeData, privateKey);
+        // 3. Ký block (trả về object hoặc JSON string)
+        let signedBlock = block.representative(changeData, privateKey);
         let blockObj = typeof signedBlock === 'string' ? JSON.parse(signedBlock) : signedBlock;
-        
-        // 3. LẤY HASH TỪ BLOCK (đã được tính bởi thư viện)
-        const blockHash = blockObj.hash;
-        if (!blockHash) {
-            throw new Error('Failed to get block hash');
-        }
-        console.log(`🔑 Block hash: ${blockHash}`);
 
-        // 4. Generate work từ Nanswap dựa trên hash
+        // 4. Xoá work nếu có (đảm bảo không có work để tính hash)
+        delete blockObj.work;
+
+        // 5. Dùng nano-json để tính hash chính xác
+        const nanoBlock = nanoJson.Block.fromObject(blockObj);
+        const blockHash = nanoBlock.hash();
+        console.log(`🔑 Block hash (không work): ${blockHash}`);
+
+        // 6. Generate work từ Nanswap
         console.log(`⏳ Generating work for hash ${blockHash}...`);
         const work = await generateWork(blockHash);
         console.log(`✅ Work generated: ${work}`);
 
-        // 5. Tạo lại block VỚI work
-        const changeDataWithWork = {
-            walletBalanceRaw: accountInfo.balance,
-            address: sourceAddress,
-            representativeAddress: representativeAddress,
-            frontier: accountInfo.frontier,
-            work: work
-        };
+        // 7. Gán work vào block
+        blockObj.work = work;
 
-        // 6. Ký lại block với work
-        const finalBlock = block.representative(changeDataWithWork, privateKey);
-        let finalBlockObj = typeof finalBlock === 'string' ? JSON.parse(finalBlock) : finalBlock;
-
-        // 7. Gửi block lên mạng
+        // 8. Gửi block qua RPC process
+        const blockJson = JSON.stringify(blockObj);
         const result = await nanoRpcCallForTx('process', {
-            block: JSON.stringify(finalBlockObj),
+            block: blockJson,
             json_block: 'true'
         });
 
@@ -543,7 +529,6 @@ async function setRepresentative(walletData, representativeAddress) {
         } else {
             throw new Error('Failed to process change block: ' + JSON.stringify(result));
         }
-        
     } catch (err) {
         console.error('Set representative error:', err);
         return { success: false, error: err.message };
@@ -572,8 +557,6 @@ async function processPendingSwaps() {
         if (!nanoWalletInstance || currentSeed !== activeWallet.seed) {
             await initNanoWallet(activeWallet.seed);
             console.log('✅ Wallet initialized for auto swap');
-        } else {
-            console.log('ℹ️ Wallet already initialized, skipping init');
         }
 
         for (const swap of swaps) {
@@ -903,7 +886,7 @@ app.get('/api/wallet/:id/balance', requireAuth, async (req, res) => {
     }
 });
 
-// ========== SET REPRESENTATIVE ==========
+// ========== SET REPRESENTATIVE ROUTE ==========
 app.post('/api/wallet/:id/set-representative', requireAuth, async (req, res) => {
     const { representative } = req.body;
     const data = await getWallets();
@@ -926,7 +909,7 @@ app.post('/api/wallet/:id/set-representative', requireAuth, async (req, res) => 
     }
 });
 
-// ========== REPRESENTATIVE - DÙNG NANO.TO ==========
+// ========== REPRESENTATIVE INFO ==========
 app.get('/api/wallet/:id/representative', requireAuth, async (req, res) => {
     const data = await getWallets();
     const wallet = data.wallets.find(w => w.id === req.params.id);
