@@ -254,6 +254,29 @@ async function nanoRpcCallForTx(action, params = {}, retries = 2) {
     throw new Error(`All RPC endpoints failed for ${action}. Last error: ${lastError.message}`);
 }
 
+// ========== GENERATE WORK (CHỈ QUA NANSWAP) ==========
+async function generateWork(hash) {
+    try {
+        const response = await axios.post(NANSWAP_RPC_URL, {
+            action: 'work_generate',
+            hash: hash
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'nodes-api-key': process.env.NANSWAP_API_KEY
+            },
+            timeout: 15000
+        });
+        if (response.data && !response.data.error) {
+            return response.data.work;
+        }
+        throw new Error(response.data?.error || 'Unknown error');
+    } catch (err) {
+        console.error('Generate work error:', err.message);
+        throw err;
+    }
+}
+
 // ========== GET BALANCE - CHỈ DÙNG RPC.NANO.TO (TRẢ CẢ RAW) ==========
 async function getBalanceFromNanoTo(address) {
     try {
@@ -454,38 +477,55 @@ async function receiveAllXNO(walletData) {
     }
 }
 
-// ==================== FIX: HÀM SET REPRESENTATIVE MỚI ====================
+// ==================== FIX: HÀM SET REPRESENTATIVE VỚI WORK GENERATION ====================
 async function setRepresentative(walletData, representativeAddress) {
     try {
         const sourceAddress = walletData.address;
 
-        // 1. Lấy private key từ walletData (đã có sẵn)
         const privateKey = walletData.private_key;
         if (!privateKey) {
             throw new Error('Private key not found for wallet');
         }
 
-        // 2. Lấy thông tin account hiện tại (balance, frontier, representative)
+        // Lấy thông tin account (frontier, balance)
         const accountInfo = await getAccountInfoFromNanoTo(sourceAddress);
         if (!accountInfo || accountInfo.error) {
             throw new Error('Cannot fetch account info: ' + (accountInfo?.error || 'unknown error'));
         }
 
-        // 3. Tạo block change (representative) sử dụng multi-nano-web
+        // 1. Tạo block change (chưa có work)
         const changeData = {
-            walletBalanceRaw: accountInfo.balance,           // số dư hiện tại (raw)
-            address: sourceAddress,                          // địa chỉ ví
-            representativeAddress: representativeAddress,    // đại diện mới
-            frontier: accountInfo.frontier,                 // block hash cuối cùng
-            work: '0000000000000000'                        // work (có thể để trống, node sẽ tự tính)
+            walletBalanceRaw: accountInfo.balance,
+            address: sourceAddress,
+            representativeAddress: representativeAddress,
+            frontier: accountInfo.frontier,
+            work: '0000000000000000' // placeholder
         };
 
-        // Ký block
+        // 2. Ký block (trả về object hoặc string JSON)
         const signedBlock = block.representative(changeData, privateKey);
 
-        // 4. Gửi block đã ký lên network qua RPC
+        // 3. Chuyển về object để tính hash và thêm work
+        let blockObj = signedBlock;
+        if (typeof signedBlock === 'string') {
+            blockObj = JSON.parse(signedBlock);
+        }
+
+        // 4. Tính hash của block (dùng multi-nano-web)
+        const blockHash = block.hash(blockObj);
+
+        // 5. Generate work từ Nanswap
+        console.log(`⏳ Generating work for hash ${blockHash}...`);
+        const work = await generateWork(blockHash);
+        console.log(`✅ Work generated: ${work}`);
+
+        // 6. Cập nhật work vào block
+        blockObj.work = work;
+
+        // 7. Gửi block đã có work qua RPC process
+        const blockJson = JSON.stringify(blockObj);
         const result = await nanoRpcCallForTx('process', {
-            block: signedBlock,
+            block: blockJson,
             json_block: 'true'
         });
 
@@ -864,7 +904,6 @@ app.post('/api/wallet/:id/set-representative', requireAuth, async (req, res) => 
         return res.json({ success: false, error: 'Invalid representative address' });
     }
     try {
-        // Gọi hàm setRepresentative mới (đã được fix)
         const result = await setRepresentative(wallet, representative);
         if (result.success) {
             wallet.representative = representative;
