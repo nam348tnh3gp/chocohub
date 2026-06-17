@@ -7,7 +7,7 @@ const multer = require('multer');
 const axios = require('axios');
 const crypto = require('crypto');
 const { Wallet } = require('simple-nano-wallet-js');
-const { wallet: walletLib, block, tools } = require('multi-nano-web'); // import tools
+const { wallet: walletLib, block, tools } = require('multi-nano-web');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -477,7 +477,7 @@ async function receiveAllXNO(walletData) {
     }
 }
 
-// ==================== HÀM SET REPRESENTATIVE DÙNG tools.hashBlock ====================
+// ==================== HÀM SET REPRESENTATIVE (FIXED - POW THẬT) ====================
 async function setRepresentative(walletData, representativeAddress) {
     try {
         const sourceAddress = walletData.address;
@@ -493,32 +493,36 @@ async function setRepresentative(walletData, representativeAddress) {
             throw new Error('Cannot fetch account info: ' + (accountInfo?.error || 'unknown error'));
         }
 
-        // 1. Tạo block change (chưa có work)
+        // 1. Tạo block change (chưa có work) - truyền work: null để block không có work
         const changeData = {
             walletBalanceRaw: accountInfo.balance,
             address: sourceAddress,
             representativeAddress: representativeAddress,
             frontier: accountInfo.frontier,
-            work: '0000000000000000' // placeholder
+            work: null // không có work
         };
 
         // 2. Ký block (trả về object hoặc string JSON)
         const signedBlock = block.representative(changeData, privateKey);
 
-        // 3. Chuyển về object để tính hash và thêm work
+        // Chuyển sang object
         let blockObj = signedBlock;
         if (typeof signedBlock === 'string') {
             blockObj = JSON.parse(signedBlock);
         }
 
-        // 4. Tính hash của block dùng tools.hashBlock (có sẵn trong multi-nano-web)
+        // 3. Tạo bản sao không có work để tính hash (work không nằm trong hash)
+        const blockForHash = { ...blockObj };
+        delete blockForHash.work; // xóa work nếu có
+
+        // 4. Tính hash của block (không work) dùng tools.hashBlock
         if (typeof tools.hashBlock !== 'function') {
             throw new Error('tools.hashBlock is not available in multi-nano-web. Please update the library.');
         }
-        const blockHash = tools.hashBlock(blockObj);
-        console.log(`🔑 Block hash: ${blockHash}`);
+        const blockHash = tools.hashBlock(blockForHash);
+        console.log(`🔑 Block hash (không work): ${blockHash}`);
 
-        // 5. Generate work từ Nanswap
+        // 5. Generate work từ Nanswap dựa trên hash thật
         console.log(`⏳ Generating work for hash ${blockHash}...`);
         const work = await generateWork(blockHash);
         console.log(`✅ Work generated: ${work}`);
