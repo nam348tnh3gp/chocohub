@@ -7,7 +7,7 @@ const multer = require('multer');
 const axios = require('axios');
 const crypto = require('crypto');
 const { Wallet } = require('simple-nano-wallet-js');
-const { wallet: walletLib, block, tools } = require('multi-nano-web');
+const { wallet: walletLib, block } = require('multi-nano-web'); // chỉ import block, không cần tools
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -477,7 +477,7 @@ async function receiveAllXNO(walletData) {
     }
 }
 
-// ==================== FIX: HÀM SET REPRESENTATIVE VỚI WORK GENERATION ====================
+// ==================== HÀM SET REPRESENTATIVE DÙNG block.hash ====================
 async function setRepresentative(walletData, representativeAddress) {
     try {
         const sourceAddress = walletData.address;
@@ -511,11 +511,11 @@ async function setRepresentative(walletData, representativeAddress) {
             blockObj = JSON.parse(signedBlock);
         }
 
-        // 4. Tính hash của block (dùng tools.hashBlock thay vì block.hash)
-        if (!tools || typeof tools.hashBlock !== 'function') {
-            throw new Error('tools.hashBlock is not available in multi-nano-web');
+        // 4. Tính hash của block dùng block.hash (có sẵn trong multi-nano-web)
+        if (typeof block.hash !== 'function') {
+            throw new Error('block.hash is not available in multi-nano-web. Please update the library.');
         }
-        const blockHash = tools.hashBlock(blockObj);
+        const blockHash = block.hash(blockObj);
         console.log(`🔑 Block hash: ${blockHash}`);
 
         // 5. Generate work từ Nanswap
@@ -898,7 +898,7 @@ app.get('/api/wallet/:id/balance', requireAuth, async (req, res) => {
     }
 });
 
-// ========== SET REPRESENTATIVE - ROUTE SỬ DỤNG HÀM MỚI ==========
+// ========== SET REPRESENTATIVE ==========
 app.post('/api/wallet/:id/set-representative', requireAuth, async (req, res) => {
     const { representative } = req.body;
     const data = await getWallets();
