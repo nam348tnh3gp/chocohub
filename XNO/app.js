@@ -7,7 +7,7 @@ const multer = require('multer');
 const axios = require('axios');
 const crypto = require('crypto');
 const { Wallet } = require('simple-nano-wallet-js');
-const { wallet: walletLib, block } = require('multi-nano-web'); // Đã xóa tools
+const { wallet: walletLib, block, tools } = require('multi-nano-web');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,7 +26,6 @@ const NANSWAP_API_KEY = process.env.NANSWAP_API_KEY;
 const NANSWAP_RPC_URL = `https://nodes.nanswap.com/XNO?api_key=${NANSWAP_API_KEY}`;
 const NANSWAP_WS_URL = `wss://nodes.nanswap.com/ws/?ticker=XNO&api_key=${NANSWAP_API_KEY}`;
 const NANO_TO_RPC_URL = 'https://rpc.nano.to';
-const POW_NANO_TO_URL = 'https://pow.nano.to/work';
 
 const SWAP_CHECK_INTERVAL = 30000;
 
@@ -255,13 +254,12 @@ async function nanoRpcCallForTx(action, params = {}, retries = 2) {
     throw new Error(`All RPC endpoints failed for ${action}. Last error: ${lastError.message}`);
 }
 
-// ========== GENERATE WORK (NANSWAP + FALLBACK POW.NANO.TO) ==========
-async function generateWorkForBlock(blockJson) {
-    // Thử Nanswap trước
+// ========== GENERATE WORK (CHỈ QUA NANSWAP) ==========
+async function generateWork(hash) {
     try {
         const response = await axios.post(NANSWAP_RPC_URL, {
             action: 'work_generate',
-            block: blockJson
+            hash: hash
         }, {
             headers: {
                 'Content-Type': 'application/json',
@@ -272,25 +270,10 @@ async function generateWorkForBlock(blockJson) {
         if (response.data && !response.data.error) {
             return response.data.work;
         }
-        throw new Error(response.data?.error || 'Nanswap error');
+        throw new Error(response.data?.error || 'Unknown error');
     } catch (err) {
-        console.warn('⚠️ Nanswap work generate failed, trying pow.nano.to...');
-        // Fallback sang pow.nano.to
-        try {
-            const response = await axios.post(POW_NANO_TO_URL, {
-                block: blockJson
-            }, {
-                headers: { 'Content-Type': 'application/json' },
-                timeout: 15000
-            });
-            if (response.data && response.data.work) {
-                return response.data.work;
-            }
-            throw new Error(response.data?.error || 'pow.nano.to error');
-        } catch (fallbackErr) {
-            console.error('❌ pow.nano.to work generate failed:', fallbackErr.message);
-            throw fallbackErr;
-        }
+        console.error('Generate work error:', err.message);
+        throw err;
     }
 }
 
@@ -494,12 +477,12 @@ async function receiveAllXNO(walletData) {
     }
 }
 
-// ==================== HÀM SET REPRESENTATIVE (FIXED - POW THẬT) ====================
+// ==================== HÀM SET REPRESENTATIVE (FIXED - SỬ DỤNG HASH TỪ BLOCK) ====================
 async function setRepresentative(walletData, representativeAddress) {
     try {
         const sourceAddress = walletData.address;
-
         const privateKey = walletData.private_key;
+        
         if (!privateKey) {
             throw new Error('Private key not found for wallet');
         }
@@ -510,7 +493,7 @@ async function setRepresentative(walletData, representativeAddress) {
             throw new Error('Cannot fetch account info: ' + (accountInfo?.error || 'unknown error'));
         }
 
-        // 1. Tạo block change (chưa có work) - truyền work: null
+        // 1. Tạo block change KHÔNG work để lấy hash
         const changeData = {
             walletBalanceRaw: accountInfo.balance,
             address: sourceAddress,
@@ -519,32 +502,38 @@ async function setRepresentative(walletData, representativeAddress) {
             work: null
         };
 
-        // 2. Ký block
+        // 2. Ký block để lấy hash
         const signedBlock = block.representative(changeData, privateKey);
-
-        // Chuyển sang object
-        let blockObj = signedBlock;
-        if (typeof signedBlock === 'string') {
-            blockObj = JSON.parse(signedBlock);
+        let blockObj = typeof signedBlock === 'string' ? JSON.parse(signedBlock) : signedBlock;
+        
+        // 3. LẤY HASH TỪ BLOCK (đã được tính bởi thư viện)
+        const blockHash = blockObj.hash;
+        if (!blockHash) {
+            throw new Error('Failed to get block hash');
         }
+        console.log(`🔑 Block hash: ${blockHash}`);
 
-        // 3. Tạo bản sao không có work để gửi sinh work
-        const blockForWork = { ...blockObj };
-        delete blockForWork.work;
-        const blockJson = JSON.stringify(blockForWork);
-
-        // 4. Generate work (có fallback)
-        console.log(`⏳ Generating work for block...`);
-        const work = await generateWorkForBlock(blockJson);
+        // 4. Generate work từ Nanswap dựa trên hash
+        console.log(`⏳ Generating work for hash ${blockHash}...`);
+        const work = await generateWork(blockHash);
         console.log(`✅ Work generated: ${work}`);
 
-        // 5. Cập nhật work vào block
-        blockObj.work = work;
+        // 5. Tạo lại block VỚI work
+        const changeDataWithWork = {
+            walletBalanceRaw: accountInfo.balance,
+            address: sourceAddress,
+            representativeAddress: representativeAddress,
+            frontier: accountInfo.frontier,
+            work: work
+        };
 
-        // 6. Gửi block đã có work qua RPC process
-        const blockJsonFinal = JSON.stringify(blockObj);
+        // 6. Ký lại block với work
+        const finalBlock = block.representative(changeDataWithWork, privateKey);
+        let finalBlockObj = typeof finalBlock === 'string' ? JSON.parse(finalBlock) : finalBlock;
+
+        // 7. Gửi block lên mạng
         const result = await nanoRpcCallForTx('process', {
-            block: blockJsonFinal,
+            block: JSON.stringify(finalBlockObj),
             json_block: 'true'
         });
 
@@ -554,6 +543,7 @@ async function setRepresentative(walletData, representativeAddress) {
         } else {
             throw new Error('Failed to process change block: ' + JSON.stringify(result));
         }
+        
     } catch (err) {
         console.error('Set representative error:', err);
         return { success: false, error: err.message };
@@ -1045,7 +1035,6 @@ async function startApp() {
         console.log('║  Default login: admin / admin       ║');
         console.log(`║  RPC: Nano.to for balance/history   ║`);
         console.log(`║  TX RPC: Nanswap + Nano.to fallback ║`);
-        console.log(`║  POW: Nanswap + pow.nano.to fallback║`);
         console.log('║  Auto Swap: Enabled (30s interval)  ║');
         console.log('║  Wallet: simple-nano-wallet-js      ║');
         console.log('║  Wallet data: AES-256-GCM encrypted ║');
