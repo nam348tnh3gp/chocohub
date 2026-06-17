@@ -8,7 +8,6 @@ const axios = require('axios');
 const crypto = require('crypto');
 const { Wallet } = require('simple-nano-wallet-js');
 const { wallet: walletLib, block, tools } = require('multi-nano-web');
-const { Block } = require('nano-json'); // <--- SỬA: import đúng cách
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -146,6 +145,22 @@ function xnoToRaw(amount) {
     rawStr = rawStr.replace(/^0+/, '') || '0';
     return BigInt(rawStr);
 }
+
+// ========== HÀM TÍNH HASH BLOCK (KHÔNG DÙNG nano-json) ==========
+function hashBlock(blockObj) {
+    // Loại bỏ 'work' và 'signature' nếu có
+    const { work, signature, ...blockForHash } = blockObj;
+
+    // Sắp xếp các key theo thứ tự alphabet (đúng spec Nano)
+    const keys = Object.keys(blockForHash).sort();
+
+    // Chuyển thành JSON compact (không khoảng trắng)
+    const compactJson = JSON.stringify(blockForHash, keys, 0);
+
+    // Băm bằng Blake2b-512
+    return crypto.createHash('blake2b512').update(compactJson).digest('hex');
+}
+// =========================================================
 
 // ========== NANO WALLET MANAGER (CACHED) ==========
 let nanoWalletInstance = null;
@@ -359,10 +374,7 @@ async function sendXNO(walletData, toAddress, amountRaw) {
     try {
         const sourceAddress = walletData.address;
         await getNanoWallet(walletData.seed);
-        // ensureAccount được dùng để đảm bảo account có trong cache (không thực sự cần thiết vì simple-wallet tự quản lý)
-        // nhưng ta vẫn gọi để đảm bảo
         if (!accountCache[sourceAddress]) {
-            // Nếu chưa có, tìm index của address trong wallet
             const accounts = nanoWalletInstance.createAccounts(100);
             const idx = accounts.indexOf(sourceAddress);
             if (idx === -1) throw new Error('Source address not found in wallet');
@@ -422,7 +434,6 @@ async function receiveXNO(walletData, transactionHash) {
         }
 
         const wallet = await getNanoWallet(walletData.seed);
-        // Kiểm tra pending
         const pendingResult = await nanoRpcCallForTx('pending', { account: sourceAddress, source: true });
         if (!pendingResult.blocks || !pendingResult.blocks[transactionHash]) {
             throw new Error(`No pending block found for hash ${transactionHash}`);
@@ -472,7 +483,7 @@ async function receiveAllXNO(walletData) {
     }
 }
 
-// ==================== SET REPRESENTATIVE (FIXED) ====================
+// ==================== SET REPRESENTATIVE (FIXED, DÙNG crypto) ====================
 async function setRepresentative(walletData, representativeAddress) {
     try {
         const sourceAddress = walletData.address;
@@ -500,12 +511,11 @@ async function setRepresentative(walletData, representativeAddress) {
         let signedBlock = block.representative(changeData, privateKey);
         let blockObj = typeof signedBlock === 'string' ? JSON.parse(signedBlock) : signedBlock;
 
-        // 4. Xoá work nếu có (đảm bảo không có work để tính hash)
+        // 4. Xoá work (đảm bảo không có work để tính hash)
         delete blockObj.work;
 
-        // 5. Dùng nano-json để tính hash chính xác
-        const nanoBlock = Block.fromObject(blockObj); // <--- SỬA: dùng Block đã import
-        const blockHash = nanoBlock.hash();
+        // 5. Tính hash block bằng hàm hashBlock (dùng crypto)
+        const blockHash = hashBlock(blockObj);
         console.log(`🔑 Block hash (không work): ${blockHash}`);
 
         // 6. Generate work từ Nanswap
