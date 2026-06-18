@@ -21,26 +21,26 @@
             padding: 2rem 1rem;
         }
 
-        /* Layout */
         .miner-container {
             max-width: 680px;
             margin: 0 auto;
         }
 
-        /* Header */
         .header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             flex-wrap: wrap;
             gap: 12px;
-            margin-bottom: 2rem;
+            margin-bottom: 1.5rem;
         }
+
         .logo-area {
             display: flex;
             align-items: center;
             gap: 10px;
         }
+
         .logo-area h1 {
             font-size: 1.8rem;
             font-weight: 800;
@@ -49,6 +49,7 @@
             background-clip: text;
             color: transparent;
         }
+
         .back-link {
             background: rgba(255,255,255,0.03);
             border: 1px solid rgba(245, 138, 0, 0.25);
@@ -59,18 +60,43 @@
             font-weight: 500;
             transition: 0.2s;
         }
+
         .back-link:hover {
             border-color: #F58A00;
             color: #F58A00;
         }
 
-        /* Stats cards */
+        .ad-banner-wrapper {
+            width: 100%;
+            margin: 0 auto 1.5rem auto;
+            position: relative;
+            z-index: 1;
+            background: rgba(18, 16, 15, 0.6);
+            border-radius: 20px;
+            border: 1px solid rgba(245, 138, 0, 0.15);
+            padding: 8px;
+            text-align: center;
+            overflow: hidden;
+        }
+
+        .ad-banner-wrapper iframe {
+            border: 0;
+            padding: 0;
+            width: 100%;
+            height: auto;
+            overflow: hidden;
+            display: block;
+            margin: auto;
+            border-radius: 14px;
+        }
+
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 16px;
             margin-bottom: 28px;
         }
+
         .stat-card {
             background: rgba(18, 16, 15, 0.7);
             backdrop-filter: blur(8px);
@@ -80,6 +106,7 @@
             text-align: center;
             transition: 0.2s;
         }
+
         .stat-value {
             font-family: 'Space Mono', monospace;
             font-size: 1.5rem;
@@ -87,6 +114,7 @@
             color: #F58A00;
             margin-bottom: 6px;
         }
+
         .stat-label {
             font-size: 0.7rem;
             text-transform: uppercase;
@@ -94,7 +122,6 @@
             color: #8B8296;
         }
 
-        /* Current job card */
         .job-card {
             background: rgba(18, 16, 15, 0.85);
             backdrop-filter: blur(12px);
@@ -104,10 +131,12 @@
             margin-bottom: 1.5rem;
             transition: all 0.2s;
         }
+
         .job-card.mining {
             border-color: #F58A00;
             box-shadow: 0 0 18px rgba(245,138,0,0.2);
         }
+
         .job-header {
             display: flex;
             justify-content: space-between;
@@ -116,6 +145,7 @@
             flex-wrap: wrap;
             gap: 8px;
         }
+
         .job-id {
             font-family: 'Space Mono', monospace;
             font-size: 0.8rem;
@@ -124,6 +154,7 @@
             border-radius: 40px;
             color: #F58A00;
         }
+
         .reward-badge {
             background: rgba(80,250,123,0.1);
             color: #7FE0A0;
@@ -132,6 +163,7 @@
             font-size: 0.75rem;
             font-weight: 600;
         }
+
         .difficulty-row {
             display: flex;
             justify-content: space-between;
@@ -139,6 +171,7 @@
             color: #B0A89A;
             margin-bottom: 1rem;
         }
+
         .progress-bar-bg {
             height: 6px;
             background: #2A2522;
@@ -146,6 +179,7 @@
             overflow: hidden;
             margin: 1rem 0;
         }
+
         .progress-fill {
             height: 100%;
             background: linear-gradient(90deg, #F58A00, #FFB347);
@@ -154,7 +188,6 @@
             border-radius: 10px;
         }
 
-        /* Control panel */
         .control-panel {
             background: rgba(18, 16, 15, 0.85);
             backdrop-filter: blur(8px);
@@ -163,11 +196,13 @@
             padding: 1.5rem;
             margin-bottom: 1.5rem;
         }
+
         .button-group {
             display: flex;
             gap: 12px;
             margin-bottom: 1rem;
         }
+
         .btn {
             flex: 1;
             padding: 14px;
@@ -179,30 +214,34 @@
             border: none;
             font-family: inherit;
         }
+
         .btn-primary {
             background: linear-gradient(135deg, #F58A00, #FFB347);
             color: #0D0B0A;
             box-shadow: 0 4px 12px rgba(245,138,0,0.3);
         }
+
         .btn-primary:hover:not(:disabled) {
             transform: translateY(-2px);
             filter: brightness(1.05);
         }
+
         .btn-secondary {
             background: rgba(255,85,85,0.1);
             border: 1px solid #FF5555;
             color: #FF8888;
         }
+
         .btn-secondary:hover:not(:disabled) {
             background: rgba(255,85,85,0.2);
         }
+
         .btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
             transform: none;
         }
 
-        /* Console log */
         .console {
             background: #0A0A0A;
             border-radius: 20px;
@@ -213,17 +252,18 @@
             font-size: 0.7rem;
             border: 1px solid rgba(245,138,0,0.15);
         }
+
         .log-line {
             padding: 4px 0;
             border-bottom: 1px solid rgba(255,255,255,0.02);
             color: #7FE0A0;
         }
+
         .log-info { color: #6BE5FF; }
         .log-warn { color: #F5A623; }
         .log-err  { color: #FF8888; }
         .log-win  { color: #7FE0A0; font-weight: 600; }
 
-        /* Toast */
         .toast {
             position: fixed;
             bottom: 20px;
@@ -241,108 +281,21 @@
             transition: opacity 0.2s;
             pointer-events: none;
         }
+
         .toast.show { opacity: 1; }
         .toast.success { border-color: #40C057; color: #40C057; }
         .toast.error { border-color: #FA5252; color: #FA5252; }
-
-        /* Ad unit copied from snake.html */
-        .ad-sidebar {
-            position: fixed;
-            top: 50%;
-            right: 8px;
-            transform: translateY(-50%);
-            z-index: 9998;
-            width: 150px;
-            text-align: center;
-            font-size: 0;
-        }
-        .ad-sidebar input[type="checkbox"] {
-            position: absolute;
-            opacity: 0;
-            pointer-events: none;
-        }
-        .ad-sidebar .ad-inner {
-            width: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        .ad-sidebar .close-btn {
-            position: absolute;
-            bottom: -24px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(248, 248, 249, 0.7);
-            border-radius: 4px;
-            padding: 4px;
-            cursor: pointer;
-            z-index: 99999;
-            line-height: 0;
-        }
-        .ad-sidebar .close-btn svg {
-            display: block;
-            width: 16px;
-            height: 16px;
-            fill: #000;
-        }
-        #aadsstickymqfltshv:checked ~ .ad-inner,
-        #aadsstickymqfltshv:checked ~ .close-btn {
-            display: none;
-        }
-        .ad-frame-link {
-            display: inline-block;
-            font-size: 13px;
-            color: #263238;
-            padding: 4px 10px;
-            background: #F8F8F9;
-            text-decoration: none;
-            border-radius: 4px 4px 0 0;
-        }
-        .ad-iframe {
-            border: 0;
-            padding: 0;
-            width: 100%;
-            height: 200px;
-            overflow: hidden;
-            margin: 0 auto;
-        }
-        @media (max-width: 768px) {
-            .ad-sidebar {
-                display: none;
-            }
-        }
 
         @media (max-width: 560px) {
             .stats-grid { gap: 8px; }
             .stat-value { font-size: 1.2rem; }
             .job-header { flex-direction: column; align-items: flex-start; }
+            .ad-banner-wrapper { padding: 4px; border-radius: 14px; }
+            .ad-banner-wrapper iframe { border-radius: 10px; }
         }
     </style>
 </head>
 <body>
-<!-- BEGIN AADS AD UNIT 2444206 -->
-<div class="ad-sidebar">
-    <input autocomplete="off" type="checkbox" id="aadsstickymqfltshv" hidden />
-    <div class="ad-inner">
-        <div style="width:100%;text-align:center;">
-            <a class="ad-frame-link"
-               target="_blank"
-               href="https://aads.com/campaigns/new?source_id=2444206&source_type=ad_unit&partner=2444206">
-                Advertise here
-            </a>
-        </div>
-        <iframe class="ad-iframe"
-                data-aa="2444206"
-                src="//acceptable.a-ads.com/2444206/?size=Adaptive">
-        </iframe>
-    </div>
-    <label for="aadsstickymqfltshv" class="close-btn" title="Fechar anúncio">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 490 490">
-            <polygon points="456.851,0 245,212.564 33.149,0 0.708,32.337 212.669,245.004 0.708,457.678 33.149,490 245,277.443 456.851,490 489.292,457.678 277.331,245.004 489.292,32.337"/>
-        </svg>
-    </label>
-</div>
-<!-- END AADS AD UNIT 2444206 -->
 
 <div class="miner-container">
     <div class="header">
@@ -353,7 +306,15 @@
         <a href="/" class="back-link">← Dashboard</a>
     </div>
 
-    <!-- Stats -->
+    <!-- BEGIN AADS AD UNIT 2444734 -->
+    <div class="ad-banner-wrapper">
+        <div id="frame" style="width: 100%;margin: auto;position: relative; z-index: 1;">
+            <iframe data-aa='2444734' src='//acceptable.a-ads.com/2444734/?size=Adaptive&background_color=000000&link_color=00e3ff'
+                    style='border:0; padding:0; width:100%; height:auto; overflow:hidden;display: block;margin: auto'></iframe>
+        </div>
+    </div>
+    <!-- END AADS AD UNIT 2444734 -->
+
     <div class="stats-grid">
         <div class="stat-card">
             <div class="stat-value" id="hashrateValue">0 H/s</div>
@@ -369,7 +330,6 @@
         </div>
     </div>
 
-    <!-- Current job -->
     <div class="job-card" id="jobCard">
         <div class="job-header">
             <span class="job-id" id="jobId">No active job</span>
@@ -384,7 +344,6 @@
         </div>
     </div>
 
-    <!-- Controls -->
     <div class="control-panel">
         <div class="button-group">
             <button class="btn btn-primary" id="startBtn">▶ Start Mining</button>
@@ -400,7 +359,6 @@
 
 <script>
     (function() {
-        // ---------- Auth ----------
         const workerName = localStorage.getItem('choco_user');
         if (!workerName) {
             console.warn('Please log in first.');
@@ -408,7 +366,6 @@
             return;
         }
 
-        // ---------- DOM elements ----------
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const hashrateSpan = document.getElementById('hashrateValue');
@@ -420,7 +377,6 @@
         const progressFill = document.getElementById('progressFill');
         const consoleDiv = document.getElementById('console');
 
-        // ---------- State ----------
         let miningActive = false;
         let autoMineEnabled = false;
         let currentJob = null;
@@ -430,11 +386,8 @@
         let currentHashCount = 0;
         let lastTimestamp = Date.now();
         let currentHashrate = 0;
-
-        // Web Worker (mining core)
         let worker = null;
 
-        // ---------- Helper functions ----------
         function log(msg, type = 'info') {
             const line = document.createElement('div');
             line.className = `log-line log-${type}`;
@@ -475,7 +428,6 @@
             }
         }
 
-        // Hashrate tracker
         function startHashrateTracker() {
             if (hashrateInterval) clearInterval(hashrateInterval);
             currentHashCount = 0;
@@ -492,7 +444,6 @@
             }, 1000);
         }
 
-        // ---------- Job handling ----------
         async function fetchNewJob() {
             try {
                 const res = await fetch('/get_job', {
@@ -514,7 +465,6 @@
             if (!job) return false;
             currentJob = job;
 
-            // Update UI
             jobIdSpan.textContent = job.bounty_id.substring(0, 12) + '...';
             const reward = (job.reward !== undefined && job.reward !== null) ? job.reward.toFixed(4) : '?';
             rewardSpan.textContent = `${reward} CC`;
@@ -522,7 +472,6 @@
             document.getElementById('jobCard').classList.add('mining');
             progressFill.style.width = '0%';
 
-            // Send to worker
             if (!worker) {
                 worker = new Worker('/static/js/cpu.js');
                 worker.onmessage = handleWorkerMessage;
@@ -567,7 +516,6 @@
             updateUI();
         }
 
-        // Handle worker messages
         function handleWorkerMessage(e) {
             const data = e.data;
             switch (data.type) {
@@ -579,7 +527,6 @@
                     totalHashes += newHashes;
                     currentHashCount += newHashes;
                     updateUI();
-                    // Progress bar: approximate based on difficulty (just visual)
                     const targetTotal = currentJob?.difficulty ? parseInt(currentJob.difficulty) : 50000;
                     const percent = Math.min(95, (totalHashes / targetTotal) * 100);
                     progressFill.style.width = percent + '%';
@@ -592,14 +539,12 @@
                     submitSolution(data.bounty_id, data.nonce, workerName);
                     break;
                 case 'pong':
-                    // heartbeat, ignore
                     break;
                 default:
                     break;
             }
         }
 
-        // Submit solution
         async function submitSolution(bountyId, nonce, wName) {
             log(`Submitting solution for #${bountyId.substring(0,8)}...`, 'info');
             try {
@@ -618,7 +563,6 @@
                     const reward = result.reward || '?';
                     log(`✅ BLOCK SOLVED! +${reward} CC`, 'win');
                     showToast(`+${reward} CC earned!`, false);
-                    // Auto-fetch next job if auto mode is on
                     if (autoMineEnabled) {
                         setTimeout(() => startMiningLoop(), 2000);
                     } else {
@@ -641,7 +585,6 @@
             }
         }
 
-        // Main mining loop
         async function startMiningLoop() {
             if (!autoMineEnabled) return;
             stopMiningProcess(true);
@@ -660,17 +603,14 @@
             }
         }
 
-        // ---------- UI actions ----------
         function onStart() {
             if (miningActive) {
-                // Pause
                 autoMineEnabled = false;
                 stopMiningProcess(true);
                 startBtn.textContent = '▶ Start Mining';
                 stopBtn.disabled = true;
                 log('Mining paused.', 'info');
             } else {
-                // Start/resume
                 autoMineEnabled = true;
                 startBtn.textContent = '⏸ Pause';
                 stopBtn.disabled = false;
@@ -687,12 +627,10 @@
             log('Miner stopped completely.', 'warn');
         }
 
-        // ---------- Initialize ----------
         function init() {
             startBtn.addEventListener('click', onStart);
             stopBtn.addEventListener('click', onStop);
             log(`Logged in as: ${workerName}`, 'info');
-            // Auto-start after 1 second
             setTimeout(() => {
                 autoMineEnabled = true;
                 startMiningLoop();
