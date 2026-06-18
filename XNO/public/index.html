@@ -124,7 +124,7 @@
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            max-width: 220px; /* đảm bảo không tràn */
+            max-width: 220px;
         }
         .wallet-card .balance {
             font-size: 1.2rem;
@@ -495,10 +495,22 @@
         // ===== HÀM RÚT GỌN ĐỊA CHỈ =====
         function shortenAddress(address, len = 10) {
             if (!address) return '';
-            if (address.length <= len * 2 + 3) return address; // nếu ngắn thì giữ nguyên
+            if (address.length <= len * 2 + 3) return address;
             const start = address.substring(0, len);
             const end = address.substring(address.length - len);
             return start + '...' + end;
+        }
+
+        // ===== XỬ LÝ SEED (BOM, khoảng trắng, xuống dòng) =====
+        function sanitizeSeed(seed) {
+            if (!seed) return '';
+            // Xóa BOM (UTF-8 BOM)
+            if (seed.startsWith('\uFEFF')) {
+                seed = seed.substring(1);
+            }
+            // Loại bỏ tất cả khoảng trắng, tab, xuống dòng
+            seed = seed.replace(/\s+/g, '');
+            return seed;
         }
 
         let currentWallets = [];
@@ -615,7 +627,6 @@
                         }
                     } catch(e) {}
                     
-                    // Hiển thị địa chỉ rút gọn, vẫn giữ đầy đủ trong title
                     const shortAddr = shortenAddress(wallet.address, 10);
                     card.innerHTML = `
                         <h3>${wallet.name}</h3>
@@ -752,11 +763,17 @@
             document.getElementById('importSeedModal').style.display = 'flex';
         }
         
+        // SỬA: import seed với sanitize
         async function importSeed() {
-            const seed = document.getElementById('seedInput').value.trim();
+            let seed = document.getElementById('seedInput').value;
+            seed = sanitizeSeed(seed);
             const name = document.getElementById('seedWalletName').value.trim();
             if (!seed) {
                 showToast('Please enter seed', true);
+                return;
+            }
+            if (seed.length !== 64 || !/^[0-9a-fA-F]+$/.test(seed)) {
+                showToast('Invalid seed: must be 64 hex characters', true);
                 return;
             }
             try {
@@ -781,25 +798,45 @@
             document.getElementById('importFileModal').style.display = 'flex';
         }
         
+        // SỬA: đọc file, xử lý seed và gọi API import (không upload file)
         async function importFile() {
             const fileInput = document.getElementById('seedFile');
             if (!fileInput.files.length) {
                 showToast('Please select a file', true);
                 return;
             }
-            const formData = new FormData();
-            formData.append('seedFile', fileInput.files[0]);
-            try {
-                const res = await fetch('/api/wallet/import-file', { method: 'POST', body: formData });
-                const data = await res.json();
-                if (data.success) {
-                    showToast('Wallet imported from file');
-                    closeModal('importFileModal');
-                    loadWallets();
-                } else {
-                    showToast(data.error, true);
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                let content = e.target.result;
+                // Xử lý seed từ nội dung file
+                let seed = sanitizeSeed(content);
+                if (!seed) {
+                    showToast('File is empty or contains only whitespace', true);
+                    return;
                 }
-            } catch(err) { showToast(err.message, true); }
+                if (seed.length !== 64 || !/^[0-9a-fA-F]+$/.test(seed)) {
+                    showToast('Invalid seed in file: must be 64 hex characters', true);
+                    return;
+                }
+                // Gửi import với seed đã sạch
+                try {
+                    const res = await fetch('/api/wallet/import', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ seed, name: `File Import ${new Date().toLocaleString()}` })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        showToast('Wallet imported from file');
+                        closeModal('importFileModal');
+                        loadWallets();
+                    } else {
+                        showToast(data.error, true);
+                    }
+                } catch(err) { showToast(err.message, true); }
+            };
+            reader.readAsText(file);
         }
         
         async function loadSwaps() {
