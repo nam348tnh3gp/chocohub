@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "postinstall": "python -m pip install --disable-pip-version-check -r requirements.txt",
     "init-db": "node -e \"require('./db')\"",
     "backup": "node backup.js",
     "build-backup": "pkg backup.js --targets node18-win-x64 --options expose-gc --output dist/chocohub-backup.exe",
