@@ -79,7 +79,7 @@ def build_config():
     config = {
         "RENDER_API_URL": env_first("RENDER_API_URL", "MAIN_SERVER_URL", default=file_config.get("RENDER_API_URL", DEFAULT_SERVER_URL)),
         "ADMIN_USERNAME": env_first("ADMIN_USERNAME", default=file_config.get("ADMIN_USERNAME", "chocoetom")),
-        "ADMIN_PIN": env_first("ADMIN_PIN", default=file_config.get("ADMIN_PIN")),
+        "ADMIN_PIN": env_first("ADMIN_PIN", "ADMIN_PASSWORD", "PIN", "USER_PIN", default=file_config.get("ADMIN_PIN") or file_config.get("ADMIN_PASSWORD") or file_config.get("PIN") or file_config.get("USER_PIN")),
         "DUCO_FAUCET_USERNAME": env_first("DUCO_USERNAME", "DUCO_FAUCET_USERNAME", default=file_config.get("DUCO_FAUCET_USERNAME")),
         "DUCO_FAUCET_PASSWORD": env_first("DUCO_PASSWORD", "DUCO_FAUCET_PASSWORD", default=file_config.get("DUCO_FAUCET_PASSWORD")),
         "DUCO_RECIPIENT": env_first("DUCO_RECIPIENT", "DUCO_USERNAME", "DUCO_FAUCET_USERNAME", default=file_config.get("DUCO_RECIPIENT")),
@@ -105,7 +105,7 @@ if not all([config["RENDER_API_URL"], config["ADMIN_USERNAME"], config["ADMIN_PI
         config["RENDER_API_URL"] = input(f"Server URL [{DEFAULT_SERVER_URL}]: ").strip() or DEFAULT_SERVER_URL
         print("\n--- Admin Info (authenticate with ChocoHub) ---")
         config["ADMIN_USERNAME"] = input("Admin username [chocoetom]: ").strip() or "chocoetom"
-        config["ADMIN_PIN"] = input("Admin PIN: ")
+        config["ADMIN_PIN"] = input("PIN: ")
         print("\n--- DUCO Faucet Info (to send coins) ---")
         config["DUCO_FAUCET_USERNAME"] = input("DUCO Faucet Username: ").strip()
         config["DUCO_FAUCET_PASSWORD"] = input("DUCO Faucet Password: ")
