@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const http2 = require('http2');
+const { spawn } = require('child_process');
 const selfsigned = require('selfsigned');
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
@@ -142,8 +143,9 @@ function getDbHash() {
   try {
     const users = db.getAllUsers ? db.getAllUsers() : [];
     const stakes = db.getAllStakes ? db.getAllStakes() : [];
+    const posRewardPool = db.getPosRewardPool ? db.getPosRewardPool() : {};
     const blocks = db.getRecentBlocks(50);
-    const dataStr = JSON.stringify({ users, stakes, blocks });
+    const dataStr = JSON.stringify({ users, stakes, blocks, posRewardPool });
     return crypto.createHash('sha256').update(dataStr).digest('hex').substring(0, 16);
   } catch (e) {
     return 'unknown';
@@ -167,6 +169,55 @@ async function sendMinerWebhook(worker, bountyId, device) {
     });
   } catch (err) {
     console.error('⚠️ quiet error on webhook:', err.message);
+  }
+}
+
+const DUCO_WORKER_COMMANDS = ['python', 'python3', 'py'];
+let ducoWorkerProcess = null;
+let ducoWorkerRestartTimer = null;
+let ducoWorkerShouldRestart = true;
+
+function startDucoSwapWorker(commandIndex = 0) {
+  if (!process.env.DUCO_USERNAME && !process.env.DUCO_FAUCET_USERNAME) {
+    console.log('ℹ️ DUCO auto swap worker not started: missing DUCO credentials in env');
+    return;
+  }
+
+  const workerPath = path.join(__dirname, 'send.py');
+  const command = DUCO_WORKER_COMMANDS[commandIndex];
+  if (!command) {
+    console.error('❌ DUCO auto swap worker could not start: no Python command was available');
+    return;
+  }
+
+  console.log(`🔄 Starting DUCO auto swap worker with ${command}...`);
+  ducoWorkerProcess = spawn(command, [workerPath], {
+    cwd: __dirname,
+    env: process.env,
+    stdio: 'inherit',
+  });
+
+  ducoWorkerProcess.on('error', (err) => {
+    console.error(`⚠️ Failed to start DUCO worker with ${command}: ${err.message}`);
+    if (commandIndex + 1 < DUCO_WORKER_COMMANDS.length) {
+      startDucoSwapWorker(commandIndex + 1);
+    }
+  });
+
+  ducoWorkerProcess.on('exit', (code, signal) => {
+    ducoWorkerProcess = null;
+    console.log(`🔄 DUCO worker exited (${signal || code}).`);
+    if (!ducoWorkerShouldRestart) return;
+    if (ducoWorkerRestartTimer) clearTimeout(ducoWorkerRestartTimer);
+    ducoWorkerRestartTimer = setTimeout(() => startDucoSwapWorker(0), 15000);
+  });
+}
+
+function stopDucoSwapWorker() {
+  ducoWorkerShouldRestart = false;
+  if (ducoWorkerRestartTimer) clearTimeout(ducoWorkerRestartTimer);
+  if (ducoWorkerProcess && !ducoWorkerProcess.killed) {
+    ducoWorkerProcess.kill();
   }
 }
 
@@ -989,7 +1040,8 @@ app.get('/network_status', (req, res) => {
   try {
     const recent = db.getRecentBlocks(10);
     const validators = db.getValidators(10).map(v => ({ username: v.username, stake: v.amount }));
-    res.json({ recent_blocks: recent, active_validators: validators });
+    const posRewardPool = db.getPosRewardPool ? db.getPosRewardPool() : { balance: 0, total_fees: 0 };
+    res.json({ recent_blocks: recent, active_validators: validators, pos_reward_pool: posRewardPool });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
   }
@@ -1027,7 +1079,8 @@ app.get('/pos/info', (req, res) => {
     const staked = Number(stake.amount) || 0;
     const pending = Number(stake.pending_reward) || 0;
     const currentVal = blockchain.getCurrentValidator();
-    res.json({ status: 'success', balance, staked, is_validator: username === currentVal, pending_reward: pending, current_validator: currentVal || null });
+    const posRewardPool = db.getPosRewardPool ? db.getPosRewardPool() : { balance: 0, total_fees: 0 };
+    res.json({ status: 'success', balance, staked, is_validator: username === currentVal, pending_reward: pending, current_validator: currentVal || null, reward_pool: posRewardPool });
   } catch (e) {
     console.error('/pos/info error:', e);
     res.status(500).json({ status: 'error', message: e.message });
@@ -1249,8 +1302,19 @@ app.use((err, req, res, next) => {
   res.status(500).json({ status: 'error', message: 'Internal server error' });
 });
 
+process.on('SIGINT', () => {
+  stopDucoSwapWorker();
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  stopDucoSwapWorker();
+  process.exit(0);
+});
+
 blockchain.startAutoBounty();
 blockchain.startPoSMinting();
+startDucoSwapWorker();
 
 app.listen(PORT, () => {
   console.log('');

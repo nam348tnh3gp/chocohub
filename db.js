@@ -62,11 +62,18 @@ db.exec(`
     pending_reward REAL NOT NULL DEFAULT 0,
     last_reward_block INTEGER DEFAULT 0
   );
+  CREATE TABLE IF NOT EXISTS pos_reward_pool (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    balance REAL NOT NULL DEFAULT 0,
+    total_fees REAL NOT NULL DEFAULT 0,
+    last_distribution_at TEXT DEFAULT (datetime('now'))
+  );
   CREATE TABLE IF NOT EXISTS sync_seq (
     id INTEGER PRIMARY KEY CHECK(id = 1),
     seq INTEGER NOT NULL DEFAULT 0
   );
   INSERT OR IGNORE INTO sync_seq (id, seq) VALUES (1, 0);
+  INSERT OR IGNORE INTO pos_reward_pool (id, balance, total_fees, last_distribution_at) VALUES (1, 0, 0, datetime('now'));
 
   -- Bảng lưu lịch sử gửi/nhận CC
   CREATE TABLE IF NOT EXISTS transactions (
@@ -185,6 +192,78 @@ function addStakeReward(username, reward) {
   db.prepare('UPDATE stakes SET pending_reward = pending_reward + ? WHERE username = ?').run(reward, username.trim());
 }
 
+function getPosRewardPool() {
+  const row = db.prepare('SELECT balance, total_fees, last_distribution_at FROM pos_reward_pool WHERE id = 1').get();
+  return row || { balance: 0, total_fees: 0, last_distribution_at: null };
+}
+
+function addPosRewardPool(amount) {
+  const fee = Number(amount) || 0;
+  if (fee <= 0) return getPosRewardPool();
+  db.prepare(`
+    UPDATE pos_reward_pool
+    SET balance = balance + ?,
+        total_fees = total_fees + ?,
+        last_distribution_at = datetime('now')
+    WHERE id = 1
+  `).run(fee, fee);
+  return getPosRewardPool();
+}
+
+function consumePosRewardPool(amount) {
+  const fee = Number(amount) || 0;
+  if (fee <= 0) return getPosRewardPool();
+  db.prepare(`
+    UPDATE pos_reward_pool
+    SET balance = CASE WHEN balance - ? < 0 THEN 0 ELSE balance - ? END,
+        last_distribution_at = datetime('now')
+    WHERE id = 1
+  `).run(fee, fee);
+  return getPosRewardPool();
+}
+
+function distributePosRewards(minStake = 10) {
+  const pool = getPosRewardPool();
+  const available = Number(pool.balance) || 0;
+  if (available <= 0) {
+    return { distributed: 0, recipients: 0, totalStake: 0, balance: 0 };
+  }
+
+  const validators = getValidators(minStake);
+  if (!validators.length) {
+    return { distributed: 0, recipients: 0, totalStake: 0, balance: available };
+  }
+
+  const totalStake = validators.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+  if (totalStake <= 0) {
+    return { distributed: 0, recipients: 0, totalStake: 0, balance: available };
+  }
+
+  let remaining = Number(available.toFixed(8));
+  validators.forEach((row, index) => {
+    let reward;
+    if (index === validators.length - 1) {
+      reward = Number(remaining.toFixed(8));
+    } else {
+      reward = Number(((available * (Number(row.amount) || 0)) / totalStake).toFixed(8));
+      if (reward > remaining) reward = Number(remaining.toFixed(8));
+    }
+
+    remaining = Number((remaining - reward).toFixed(8));
+    if (reward > 0) {
+      addStakeReward(row.username, reward);
+    }
+  });
+
+  consumePosRewardPool(available);
+  return {
+    distributed: Number(available.toFixed(8)),
+    recipients: validators.length,
+    totalStake,
+    balance: getPosRewardPool().balance
+  };
+}
+
 // ─── Snake claim ─────────────────────────────────
 function getLastSnakeClaim(username) {
   const row = db.prepare('SELECT claimed_at FROM snake_claims WHERE username=? ORDER BY claimed_at DESC LIMIT 1').get(username.trim());
@@ -228,6 +307,10 @@ function getAllStakes() {
   return db.prepare('SELECT username, amount, pending_reward FROM stakes').all();
 }
 
+function getPosRewardPoolSnapshot() {
+  return getPosRewardPool();
+}
+
 // 🆕 Dọn dẹp bounty cũ (giữ 100 bounty active gần nhất)
 function cleanupOldBounties() {
   const count = db.prepare('SELECT COUNT(*) as count FROM bounties WHERE status = ?').get('active');
@@ -249,6 +332,7 @@ function cleanupOldBounties() {
 function exportFullState() {
   const users = db.prepare('SELECT username, pin_hash, balance FROM users').all();
   const stakes = db.prepare('SELECT username, amount, pending_reward FROM stakes').all();
+  const posRewardPool = getPosRewardPool();
   
   const blocks = db.prepare(
     'SELECT username, bounty_id, reward, mined_at FROM blocks_mined ORDER BY mined_at DESC LIMIT 10'
@@ -265,6 +349,7 @@ function exportFullState() {
   return {
     users,
     stakes,
+    pos_reward_pool: posRewardPool,
     blocks_mined: blocks,
     snake_claims: claims,
     bounties
@@ -277,6 +362,7 @@ function importFullState(state) {
   const transaction = db.transaction(() => {
     db.exec('DELETE FROM users');
     db.exec('DELETE FROM stakes');
+    db.exec('DELETE FROM pos_reward_pool');
     db.exec('DELETE FROM blocks_mined');
     db.exec('DELETE FROM snake_claims');
     db.exec('DELETE FROM bounties');
@@ -291,6 +377,10 @@ function importFullState(state) {
     (state.stakes || []).forEach(s => {
       insertStake.run(s.username, s.amount, s.pending_reward);
     });
+
+    const insertPool = db.prepare('INSERT INTO pos_reward_pool (id, balance, total_fees, last_distribution_at) VALUES (1, ?, ?, ?)');
+    const poolState = state.pos_reward_pool || {};
+    insertPool.run(poolState.balance || 0, poolState.total_fees || 0, poolState.last_distribution_at || new Date().toISOString());
 
     const insertBlock = db.prepare('INSERT INTO blocks_mined (username, bounty_id, reward, mined_at) VALUES (?, ?, ?, ?)');
     (state.blocks_mined || []).forEach(b => {
@@ -351,6 +441,10 @@ module.exports = {
   incrementSeq,
   getAllUsers,
   getAllStakes,
+  getPosRewardPool: getPosRewardPoolSnapshot,
+  addPosRewardPool,
+  consumePosRewardPool,
+  distributePosRewards,
   exportFullState,
   importFullState,
   addTransaction,
