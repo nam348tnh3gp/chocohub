@@ -3,8 +3,7 @@ import os
 import sqlite3
 import time
 from datetime import datetime
-
-import requests
+from urllib import error, parse, request
 
 
 CONFIG_FILE = "swap_config.json"
@@ -17,6 +16,8 @@ DUCO_HEADERS = {
     "Accept": "application/json",
     "Connection": "keep-alive",
 }
+
+JSON_HEADERS = {"Content-Type": "application/json", **DUCO_HEADERS}
 
 
 def env_first(*names, default=None):
@@ -41,6 +42,35 @@ def load_file_config():
 def save_file_config(config):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
+
+
+def http_request_json(url, method="GET", data=None, headers=None, timeout=15):
+    req_headers = dict(headers or {})
+    payload = None
+    if data is not None:
+        payload = json.dumps(data).encode("utf-8")
+        req_headers.setdefault("Content-Type", "application/json")
+
+    req = request.Request(url, data=payload, headers=req_headers, method=method)
+    try:
+        with request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            status = getattr(resp, "status", 200)
+            if body:
+                try:
+                    return status, json.loads(body)
+                except json.JSONDecodeError:
+                    return status, body
+            return status, None
+    except error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+        try:
+            parsed = json.loads(body) if body else None
+        except json.JSONDecodeError:
+            parsed = body
+        return exc.code, parsed
+    except error.URLError as exc:
+        raise RuntimeError(str(exc.reason)) from exc
 
 
 def build_config():
@@ -175,20 +205,21 @@ def get_admin_token():
         return jwt_token
 
     try:
-        resp = requests.post(
+        status, data = http_request_json(
             f"{RENDER_API_URL}/auth",
-            json={"username": ADMIN_USERNAME, "pin": ADMIN_PIN},
+            method="POST",
+            data={"username": ADMIN_USERNAME, "pin": ADMIN_PIN},
+            headers=JSON_HEADERS,
             timeout=10,
         )
-        if resp.status_code == 200:
-            data = resp.json()
+        if status == 200 and isinstance(data, dict):
             if data.get("status") == "success" and data.get("token"):
                 jwt_token = data["token"]
                 token_expiry = now + 23 * 3600
                 print(f"🔑 Got token for {ADMIN_USERNAME}")
                 return jwt_token
-        print(f"❌ Authentication failed: {resp.status_code}")
-        if resp.status_code == 401:
+        print(f"❌ Authentication failed: {status}")
+        if status == 401:
             print("   -> Wrong username or PIN. Please check Railway env vars.")
             raise SystemExit(1)
     except Exception as e:
@@ -204,16 +235,10 @@ def api_call(endpoint, method="GET", data=None):
     url = f"{RENDER_API_URL}{endpoint}"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     try:
-        if method == "GET":
-            resp = requests.get(url, headers=headers, timeout=15)
-        elif method == "POST":
-            resp = requests.post(url, json=data, headers=headers, timeout=15)
-        else:
-            return None
-
-        if resp.status_code in (200, 201):
-            return resp.json()
-        print(f"⚠️ API {endpoint} error {resp.status_code}: {resp.text[:200]}")
+        status, payload = http_request_json(url, method=method, data=data, headers=headers, timeout=15)
+        if status in (200, 201):
+            return payload
+        print(f"⚠️ API {endpoint} error {status}: {str(payload)[:200]}")
     except Exception as e:
         print(f"⚠️ API connection error: {e}")
     return None
@@ -241,9 +266,8 @@ def update_faucet_balance():
         return balance_cache["balance"]
 
     try:
-        resp = requests.get(f"https://server.duinocoin.com/users/{DUCO_FAUCET_USERNAME}", headers=DUCO_HEADERS, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
+        status, data = http_request_json(f"https://server.duinocoin.com/users/{DUCO_FAUCET_USERNAME}", headers=DUCO_HEADERS, timeout=10)
+        if status == 200 and isinstance(data, dict):
             if data.get("success"):
                 balance = data["result"]["balance"]["balance"]
                 balance_cache["balance"] = balance
@@ -266,16 +290,16 @@ def send_duco(recipient, amount_cc):
         "memo": memo,
     }
     try:
-        resp = requests.get("https://server.duinocoin.com/transaction/", params=params, headers=DUCO_HEADERS, timeout=15)
-        if resp.status_code == 200:
-            data = resp.json()
+        url = "https://server.duinocoin.com/transaction/?" + parse.urlencode(params)
+        status, data = http_request_json(url, headers=DUCO_HEADERS, timeout=15)
+        if status == 200 and isinstance(data, dict):
             if data.get("success"):
                 print("   ✅ DUCO transfer initiated")
                 print(f"   📝 Memo: {memo}")
                 print(f"   💰 Amount: {amount_duco} DUCO")
                 return True, None
             return False, data.get("message", "Unknown error")
-        return False, f"HTTP {resp.status_code}"
+        return False, f"HTTP {status}"
     except Exception as e:
         return False, str(e)
 
@@ -283,17 +307,17 @@ def send_duco(recipient, amount_cc):
 def fetch_raw_transactions(username, limit=100):
     url = f"https://server.duinocoin.com/user_transactions/{username}?limit={limit}"
     try:
-        resp = requests.get(url, headers=DUCO_HEADERS, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
+        status, data = http_request_json(url, headers=DUCO_HEADERS, timeout=10)
+        if status == 200 and isinstance(data, dict):
             if data.get("success"):
                 return data.get("result", [])
             print(f"   ⚠️ API returned success=false: {data.get('message')}")
         else:
-            print(f"   ⚠️ HTTP {resp.status_code}")
-    except requests.Timeout:
-        print(f"   ⚠️ Timeout fetching transactions for {username}")
+            print(f"   ⚠️ HTTP {status}")
+    except RuntimeError as e:
+        print(f"   ⚠️ Timeout fetching transactions for {username}: {e}")
     except Exception as e:
+        print(f"   ⚠️ Timeout fetching transactions for {username}")
         print(f"   ⚠️ Error fetching: {e}")
     return []
 
