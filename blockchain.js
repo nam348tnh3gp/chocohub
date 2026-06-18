@@ -13,7 +13,7 @@ const BLOCK_TIME_TARGET = 30;            // 30 seconds per block
 const DIFFICULTY_ADJUSTMENT_BLOCKS = 16; // Adjust every 16 blocks
 const MIN_TARGET = 1n;                   // Hardest difficulty
 const MAX_TARGET = (1n << 255n);         // Easiest difficulty
-const BLOCK_REWARD = 1.0;
+const BASE_BLOCK_REWARD = 0.01;          // Base reward
 const MEMPOOL_MAX_SIZE = 1000;
 
 // ═══════════════════════════════════════════════════
@@ -116,11 +116,12 @@ function createBlock(minerName, nonce) {
   
   const newHeight = (latest ? latest.height : 0) + 1;
   const difficulty = targetToDifficulty(currentTarget);
+  const reward = BASE_BLOCK_REWARD * Math.log(1 + difficulty);
   
   sqlite.prepare(`
     INSERT INTO blocks (hash, height, timestamp, miner, nonce, target_hex, prev_hash, difficulty, reward)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(hash, newHeight, timestamp, minerName, nonce, currentTarget.toString(16), prevHash, difficulty, BLOCK_REWARD);
+  `).run(hash, newHeight, timestamp, minerName, nonce, currentTarget.toString(16), prevHash, difficulty, reward);
   
   const blockTime = timestamp - lastBlockTime;
   blockTimes.push(blockTime);
@@ -134,13 +135,13 @@ function createBlock(minerName, nonce) {
     lastAdjustmentHeight = currentHeight;
   }
   
-  db.updateBalance(minerName, BLOCK_REWARD);
+  db.updateBalance(minerName, reward);
   sqlite.prepare('INSERT INTO blocks_mined (username, bounty_id, reward) VALUES (?, ?, ?)')
-    .run(minerName, hash, BLOCK_REWARD);
+    .run(minerName, hash, reward);
   
-  console.log(`⛏️  Block #${newHeight} mined by ${minerName} | Hash: ${hash.substring(0, 16)}... | Diff: ${difficulty.toFixed(2)}`);
+  console.log(`⛏️  Block #${newHeight} mined by ${minerName} | Hash: ${hash.substring(0, 16)}... | Diff: ${difficulty.toFixed(2)} | Reward: ${reward.toFixed(4)} CC`);
   
-  return { hash, height: newHeight, reward: BLOCK_REWARD };
+  return { hash, height: newHeight, reward };
 }
 
 // ═══════════════════════════════════════════════════
@@ -277,6 +278,7 @@ function getJobForWorker(workerName) {
   const latest = getLatestBlock();
   const prevHash = latest ? latest.hash : '0'.repeat(64);
   const difficulty = targetToDifficulty(currentTarget);
+  const reward = BASE_BLOCK_REWARD * Math.log(1 + difficulty);
   
   jobAssignTime.set(workerName, Date.now());
   return {
@@ -284,7 +286,7 @@ function getJobForWorker(workerName) {
     target_hex: currentTarget.toString(16),
     difficulty: difficulty,
     bounty_id: 'job_' + crypto.randomBytes(6).toString('hex'),
-    reward: BLOCK_REWARD
+    reward: reward
   };
 }
 
