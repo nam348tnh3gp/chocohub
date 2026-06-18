@@ -1,164 +1,140 @@
-import json
 import os
-import sqlite3
 import time
+import sqlite3
+import json
+import asyncio
+import aiohttp
+import requests
 from datetime import datetime
-from urllib import error, parse, request
 
-
+# ========== CONFIG FILE ==========
 CONFIG_FILE = "swap_config.json"
+
+def load_config():
+    """Load config from file if exists"""
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+                print("✅ Loaded config from file")
+                return config
+        except:
+            pass
+    return None
+
+def save_config(config):
+    """Save config to file"""
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=2)
+    print("💾 Saved config to file")
+
+def interactive_setup():
+    """Ask user for configuration interactively"""
+    print("\n" + "="*50)
+    print("🔧 FIRST RUN - ENTER CONFIGURATION")
+    print("="*50)
+    
+    config = {}
+    
+    # Server
+    config["RENDER_API_URL"] = input("Server URL [https://chocohub-r011.onrender.com]: ").strip()
+    if not config["RENDER_API_URL"]:
+        config["RENDER_API_URL"] = "https://chocohub-r011.onrender.com"
+    
+    # Admin
+    print("\n--- Admin Info (authenticate with ChocoHub) ---")
+    config["ADMIN_USERNAME"] = input(f"Admin username [chocoetom]: ").strip()
+    if not config["ADMIN_USERNAME"]:
+        config["ADMIN_USERNAME"] = "chocoetom"
+    config["ADMIN_PIN"] = input("Admin PIN: ")
+    
+    # DUCO Faucet
+    print("\n--- DUCO Faucet Info (to send coins) ---")
+    config["DUCO_FAUCET_USERNAME"] = input("DUCO Faucet Username: ").strip()
+    config["DUCO_FAUCET_PASSWORD"] = input("DUCO Faucet Password: ")
+    
+    # DUCO Recipient (ví của bạn để nhận DUCO từ user)
+    print("\n--- Your DUCO Wallet (to receive coins from users) ---")
+    config["DUCO_RECIPIENT"] = input("Your DUCO username [Nam2010]: ").strip()
+    if not config["DUCO_RECIPIENT"]:
+        config["DUCO_RECIPIENT"] = "Nam2010"
+    
+    # Options
+    print("\n--- Options (Press Enter for defaults) ---")
+    memo_receive = input("Memo prefix for RECEIVING (user gửi cho bạn) [SWAP CC for]: ").strip()
+    config["MEMO_PREFIX_RECEIVE"] = memo_receive if memo_receive else "SWAP CC for"
+    
+    memo_send = input("Memo prefix for SENDING (bạn gửi cho user) [swap from chocohub]: ").strip()
+    config["MEMO_PREFIX_SEND"] = memo_send if memo_send else "swap from chocohub"
+    
+    interval = input("Check interval (seconds) [3]: ").strip()
+    config["SLEEP_INTERVAL"] = int(interval) if interval.isdigit() else 3
+    
+    print("\n" + "="*50)
+    print("✅ Configuration complete!")
+    print("="*50)
+    
+    return config
+
+# ========== LOAD OR ENTER CONFIG ==========
+config = load_config()
+if not config:
+    config = interactive_setup()
+    save_config(config)
+
+# ========== CONFIG FROM FILE ==========
+RENDER_API_URL = config.get("RENDER_API_URL")
+ADMIN_USERNAME = config.get("ADMIN_USERNAME")
+ADMIN_PIN = config.get("ADMIN_PIN")
+DUCO_FAUCET_USERNAME = config.get("DUCO_FAUCET_USERNAME")
+DUCO_FAUCET_PASSWORD = config.get("DUCO_FAUCET_PASSWORD")
+DUCO_RECIPIENT = config.get("DUCO_RECIPIENT", "Nam2010")
+MEMO_PREFIX_RECEIVE = config.get("MEMO_PREFIX_RECEIVE", "SWAP CC for")
+MEMO_PREFIX_SEND = config.get("MEMO_PREFIX_SEND", "swap from chocohub")
+SLEEP_INTERVAL = config.get("SLEEP_INTERVAL", 3)
+
+# Cache JWT
+jwt_token = None
+token_expiry = 0
+
+# Cache balance faucet DUCO
+balance_cache = {"balance": None, "last_updated": None, "expiry_seconds": 60}
+
+# Local database
 DB_FILE = "swap_history.db"
 DUCO_TX_FILE = "duco_processed.json"
-DEFAULT_SERVER_URL = "https://chocohub-r011.onrender.com"
 
+# HEADERS cho DUCO API
 DUCO_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept": "application/json",
-    "Connection": "keep-alive",
+    "Connection": "keep-alive"
 }
 
-JSON_HEADERS = {"Content-Type": "application/json", **DUCO_HEADERS}
-
-
-def env_first(*names, default=None):
-    for name in names:
-        value = os.getenv(name)
-        if value:
-            return value
-    return default
-
-
-def load_file_config():
-    if not os.path.exists(CONFIG_FILE):
-        return {}
-    try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def save_file_config(config):
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2)
-
-
-def http_request_json(url, method="GET", data=None, headers=None, timeout=15):
-    req_headers = dict(headers or {})
-    payload = None
-    if data is not None:
-        payload = json.dumps(data).encode("utf-8")
-        req_headers.setdefault("Content-Type", "application/json")
-
-    req = request.Request(url, data=payload, headers=req_headers, method=method)
-    try:
-        with request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-            status = getattr(resp, "status", 200)
-            if body:
-                try:
-                    return status, json.loads(body)
-                except json.JSONDecodeError:
-                    return status, body
-            return status, None
-    except error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
-        try:
-            parsed = json.loads(body) if body else None
-        except json.JSONDecodeError:
-            parsed = body
-        return exc.code, parsed
-    except error.URLError as exc:
-        raise RuntimeError(str(exc.reason)) from exc
-
-
-def build_config():
-    file_config = load_file_config()
-
-    config = {
-        "RENDER_API_URL": env_first("RENDER_API_URL", "MAIN_SERVER_URL", default=file_config.get("RENDER_API_URL", DEFAULT_SERVER_URL)),
-        "ADMIN_USERNAME": env_first("ADMIN_USERNAME", default=file_config.get("ADMIN_USERNAME", "chocoetom")),
-        "ADMIN_PIN": env_first("ADMIN_PIN", default=file_config.get("ADMIN_PIN")),
-        "DUCO_FAUCET_USERNAME": env_first("DUCO_USERNAME", "DUCO_FAUCET_USERNAME", default=file_config.get("DUCO_FAUCET_USERNAME")),
-        "DUCO_FAUCET_PASSWORD": env_first("DUCO_PASSWORD", "DUCO_FAUCET_PASSWORD", default=file_config.get("DUCO_FAUCET_PASSWORD")),
-        "DUCO_RECIPIENT": env_first("DUCO_RECIPIENT", "DUCO_USERNAME", "DUCO_FAUCET_USERNAME", default=file_config.get("DUCO_RECIPIENT")),
-        "MEMO_PREFIX_RECEIVE": env_first("MEMO_PREFIX_RECEIVE", default=file_config.get("MEMO_PREFIX_RECEIVE", "SWAP CC for")),
-        "MEMO_PREFIX_SEND": env_first("MEMO_PREFIX_SEND", default=file_config.get("MEMO_PREFIX_SEND", "swap from chocohub")),
-        "SLEEP_INTERVAL": int(env_first("SLEEP_INTERVAL", default=str(file_config.get("SLEEP_INTERVAL", 3)))),
-    }
-
-    if not config["DUCO_RECIPIENT"]:
-        config["DUCO_RECIPIENT"] = config["DUCO_FAUCET_USERNAME"] or "Nam2010"
-
-    return config
-
-
-config = build_config()
-worker_token = None
-
-if not all([config["RENDER_API_URL"], config["ADMIN_USERNAME"], config["ADMIN_PIN"], config["DUCO_FAUCET_USERNAME"], config["DUCO_FAUCET_PASSWORD"]]):
-    if os.isatty(0):
-        print("\n" + "=" * 50)
-        print("🔧 FIRST RUN - ENTER CONFIGURATION")
-        print("=" * 50)
-
-        config["RENDER_API_URL"] = input(f"Server URL [{DEFAULT_SERVER_URL}]: ").strip() or DEFAULT_SERVER_URL
-        print("\n--- Admin Info (authenticate with ChocoHub) ---")
-        config["ADMIN_USERNAME"] = input("Admin username [chocoetom]: ").strip() or "chocoetom"
-        config["ADMIN_PIN"] = input("Admin PIN: ")
-        print("\n--- DUCO Faucet Info (to send coins) ---")
-        config["DUCO_FAUCET_USERNAME"] = input("DUCO Faucet Username: ").strip()
-        config["DUCO_FAUCET_PASSWORD"] = input("DUCO Faucet Password: ")
-        print("\n--- Your DUCO Wallet (to receive coins from users) ---")
-        config["DUCO_RECIPIENT"] = input("Your DUCO username [Nam2010]: ").strip() or "Nam2010"
-        print("\n--- Options (Press Enter for defaults) ---")
-        config["MEMO_PREFIX_RECEIVE"] = input("Memo prefix for RECEIVING [SWAP CC for]: ").strip() or "SWAP CC for"
-        config["MEMO_PREFIX_SEND"] = input("Memo prefix for SENDING [swap from chocohub]: ").strip() or "swap from chocohub"
-        sleep_interval = input("Check interval (seconds) [3]: ").strip()
-        config["SLEEP_INTERVAL"] = int(sleep_interval) if sleep_interval.isdigit() else 3
-        print("\n" + "=" * 50)
-        print("✅ Configuration complete!")
-        print("=" * 50)
-        save_file_config(config)
-    else:
-        missing = [k for k in ["RENDER_API_URL", "ADMIN_USERNAME", "ADMIN_PIN", "DUCO_FAUCET_USERNAME", "DUCO_FAUCET_PASSWORD"] if not config.get(k)]
-        raise SystemExit(f"Missing required config in non-interactive mode: {', '.join(missing)}")
-
-
-RENDER_API_URL = config["RENDER_API_URL"].rstrip("/")
-ADMIN_USERNAME = config["ADMIN_USERNAME"]
-ADMIN_PIN = config["ADMIN_PIN"]
-DUCO_FAUCET_USERNAME = config["DUCO_FAUCET_USERNAME"]
-DUCO_FAUCET_PASSWORD = config["DUCO_FAUCET_PASSWORD"]
-DUCO_RECIPIENT = config["DUCO_RECIPIENT"]
-MEMO_PREFIX_RECEIVE = config["MEMO_PREFIX_RECEIVE"]
-MEMO_PREFIX_SEND = config["MEMO_PREFIX_SEND"]
-SLEEP_INTERVAL = int(config["SLEEP_INTERVAL"])
-
-
-balance_cache = {"balance": None, "last_updated": None, "expiry_seconds": 60}
-
+def truncate_hash(hash_str, length=9):
+    """Rút gọn hash cho hiển thị đẹp"""
+    if not hash_str:
+        return "unknown"
+    if len(hash_str) <= length:
+        return hash_str
+    return hash_str[:length] + "..."
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS swap_history
-           (request_id TEXT PRIMARY KEY,
-            from_user TEXT,
-            amount_cc REAL,
-            swap_type TEXT,
-            receiver TEXT,
-            processed_at TIMESTAMP,
-            txid TEXT)"""
-    )
+    c.execute("""CREATE TABLE IF NOT EXISTS swap_history
+                 (request_id TEXT PRIMARY KEY,
+                  from_user TEXT,
+                  amount_cc REAL,
+                  swap_type TEXT,
+                  receiver TEXT,
+                  processed_at TIMESTAMP,
+                  txid TEXT)""")
     conn.commit()
     conn.close()
-
+    print("📁 Database initialized")
 
 init_db()
-
 
 def is_processed(request_id):
     conn = sqlite3.connect(DB_FILE)
@@ -168,77 +144,75 @@ def is_processed(request_id):
     conn.close()
     return row is not None
 
-
 def record_processed(request_id, from_user, amount_cc, swap_type, receiver, txid):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute(
-        """INSERT OR REPLACE INTO swap_history
-           (request_id, from_user, amount_cc, swap_type, receiver, processed_at, txid)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (request_id, from_user, amount_cc, swap_type, receiver, datetime.now().isoformat(), txid),
-    )
+    c.execute("""INSERT OR REPLACE INTO swap_history
+                 (request_id, from_user, amount_cc, swap_type, receiver, processed_at, txid)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)""",
+              (request_id, from_user, amount_cc, swap_type, receiver, datetime.now().isoformat(), txid))
     conn.commit()
     conn.close()
 
-
 def load_processed_txids():
-    if not os.path.exists(DUCO_TX_FILE):
-        return set()
-    try:
-        with open(DUCO_TX_FILE, "r", encoding="utf-8") as f:
-            return set(json.load(f))
-    except Exception:
-        return set()
-
+    """Load danh sách txid đã xử lý (để tránh duplicate)"""
+    if os.path.exists(DUCO_TX_FILE):
+        try:
+            with open(DUCO_TX_FILE, 'r') as f:
+                txids = json.load(f)
+                return set(txids)
+        except:
+            pass
+    return set()
 
 def save_processed_txids(txids):
-    with open(DUCO_TX_FILE, "w", encoding="utf-8") as f:
+    with open(DUCO_TX_FILE, 'w') as f:
         json.dump(list(txids), f, indent=2)
 
+def get_admin_token():
+    global jwt_token, token_expiry
+    now = time.time()
+    if jwt_token and now < token_expiry:
+        return jwt_token
 
-def authenticate_worker():
-    global worker_token
-
-    payload = {
-        "username": ADMIN_USERNAME,
-        "pin": ADMIN_PIN,
-    }
-    status, data = http_request_json(f"{RENDER_API_URL}/auth", method="POST", data=payload, headers=JSON_HEADERS, timeout=15)
-    if status in (200, 201) and isinstance(data, dict):
-        token = data.get("token")
-        if token:
-            worker_token = token
-            print(f"🔐 Authenticated worker as {ADMIN_USERNAME}")
-            return token
-    raise RuntimeError(f"Failed to authenticate worker: {data}")
-
-
-def api_call(endpoint, method="GET", data=None, token=None):
-    global worker_token
-
-    auth_token = token or worker_token
-    if not auth_token:
-        auth_token = authenticate_worker()
-
-    url = f"{RENDER_API_URL}{endpoint}"
-    headers = {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/json"}
+    url = f"{RENDER_API_URL}/auth"
+    payload = {"username": ADMIN_USERNAME, "pin": ADMIN_PIN}
     try:
-        status, payload = http_request_json(url, method=method, data=data, headers=headers, timeout=15)
-        if status in (200, 201):
-            return payload
-        if status in (401, 403):
-            print(f"⚠️ API {endpoint} auth error {status}, refreshing worker token...")
-            worker_token = authenticate_worker()
-            headers["Authorization"] = f"Bearer {worker_token}"
-            status, payload = http_request_json(url, method=method, data=data, headers=headers, timeout=15)
-            if status in (200, 201):
-                return payload
-        print(f"⚠️ API {endpoint} error {status}: {str(payload)[:200]}")
+        resp = requests.post(url, json=payload, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("status") == "success" and data.get("token"):
+                jwt_token = data["token"]
+                token_expiry = now + 23 * 3600
+                print(f"🔑 Got token for {ADMIN_USERNAME}")
+                return jwt_token
+        print(f"❌ Authentication failed: {resp.status_code}")
+        if resp.status_code == 401:
+            print("   → Wrong username or PIN. Please run again with correct credentials.")
+            exit(1)
+    except Exception as e:
+        print(f"❌ Connection error: {e}")
+    return None
+
+def api_call(endpoint, method="GET", data=None):
+    token = get_admin_token()
+    if not token:
+        return None
+    url = f"{RENDER_API_URL}{endpoint}"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    try:
+        if method == "GET":
+            resp = requests.get(url, headers=headers, timeout=15)
+        elif method == "POST":
+            resp = requests.post(url, json=data, headers=headers, timeout=15)
+        else:
+            return None
+        if resp.status_code in (200, 201):
+            return resp.json()
+        print(f"⚠️ API {endpoint} error {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
         print(f"⚠️ API connection error: {e}")
     return None
-
 
 def get_pending_swaps():
     data = api_call("/swap/pending", "GET")
@@ -246,24 +220,20 @@ def get_pending_swaps():
         return data.get("pending", [])
     return []
 
-
 def fulfill_swap(request_id):
     data = api_call("/swap/fulfill", "POST", {"request_id": request_id})
-    return bool(data and data.get("status") == "success")
-
+    return data and data.get("status") == "success"
 
 def update_faucet_balance():
     now = time.time()
-    if (
-        balance_cache["balance"] is not None
-        and balance_cache["last_updated"]
-        and now - balance_cache["last_updated"] < balance_cache["expiry_seconds"]
-    ):
+    if (balance_cache["balance"] is not None and balance_cache["last_updated"] and
+        now - balance_cache["last_updated"] < balance_cache["expiry_seconds"]):
         return balance_cache["balance"]
-
     try:
-        status, data = http_request_json(f"https://server.duinocoin.com/users/{DUCO_FAUCET_USERNAME}", headers=DUCO_HEADERS, timeout=10)
-        if status == 200 and isinstance(data, dict):
+        url = f"https://server.duinocoin.com/users/{DUCO_FAUCET_USERNAME}"
+        resp = requests.get(url, headers=DUCO_HEADERS, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
             if data.get("success"):
                 balance = data["result"]["balance"]["balance"]
                 balance_cache["balance"] = balance
@@ -274,8 +244,8 @@ def update_faucet_balance():
         print(f"⚠️ Error fetching DUCO balance: {e}")
     return balance_cache["balance"] or 0.0
 
-
 def send_duco(recipient, amount_cc):
+    """Gửi DUCO đi (CC → DUCO) - Dùng memo riêng để phân biệt"""
     amount_duco = amount_cc / 10.0
     memo = f"{MEMO_PREFIX_SEND} {recipient}"
     params = {
@@ -283,138 +253,184 @@ def send_duco(recipient, amount_cc):
         "password": DUCO_FAUCET_PASSWORD,
         "recipient": recipient,
         "amount": amount_duco,
-        "memo": memo,
+        "memo": memo
     }
     try:
-        url = "https://server.duinocoin.com/transaction/?" + parse.urlencode(params)
-        status, data = http_request_json(url, headers=DUCO_HEADERS, timeout=15)
-        if status == 200 and isinstance(data, dict):
+        resp = requests.get("https://server.duinocoin.com/transaction/", params=params, headers=DUCO_HEADERS, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
             if data.get("success"):
-                print("   ✅ DUCO transfer initiated")
+                print(f"   ✅ DUCO transfer initiated")
                 print(f"   📝 Memo: {memo}")
                 print(f"   💰 Amount: {amount_duco} DUCO")
                 return True, None
-            return False, data.get("message", "Unknown error")
-        return False, f"HTTP {status}"
+            else:
+                return False, data.get("message", "Unknown error")
+        return False, f"HTTP {resp.status_code}"
     except Exception as e:
         return False, str(e)
 
-
-def fetch_raw_transactions(username, limit=100):
+# ========== ASYNC FUNCTIONS - FETCH RAW, KHÔNG FILTER ==========
+async def fetch_raw_transactions_async(session, username, limit=100):
+    """Fetch RAW transactions - không filter gì cả, lấy càng nhiều càng tốt"""
     url = f"https://server.duinocoin.com/user_transactions/{username}?limit={limit}"
     try:
-        status, data = http_request_json(url, headers=DUCO_HEADERS, timeout=10)
-        if status == 200 and isinstance(data, dict):
-            if data.get("success"):
-                return data.get("result", [])
-            print(f"   ⚠️ API returned success=false: {data.get('message')}")
-        else:
-            print(f"   ⚠️ HTTP {status}")
-    except RuntimeError as e:
-        print(f"   ⚠️ Timeout fetching transactions for {username}: {e}")
-    except Exception as e:
+        async with session.get(url, headers=DUCO_HEADERS, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if data.get("success"):
+                    return data.get("result", [])
+                else:
+                    print(f"   ⚠️ API returned success=false: {data.get('message')}")
+            else:
+                print(f"   ⚠️ HTTP {resp.status}")
+    except asyncio.TimeoutError:
         print(f"   ⚠️ Timeout fetching transactions for {username}")
+    except Exception as e:
         print(f"   ⚠️ Error fetching: {e}")
     return []
 
-
-def find_matching_duco_transaction(processed_txids, pending_swaps):
-    raw_transactions = fetch_raw_transactions(DUCO_RECIPIENT, 100)
-    if not raw_transactions:
-        print("   ❌ No transactions found from API")
+async def check_raw_duco_transactions_async(processed_txids, pending_swaps):
+    """
+    CHECK RAW TRANSACTIONS - KHÔNG FILTER GÌ CẢ
+    Lấy tất cả transactions từ API, check từng cái một
+    TIẾP TỤC CHECK TẤT CẢ TRANSACTIONS, KHÔNG DỪNG KHI SAI AMOUNT
+    """
+    async with aiohttp.ClientSession() as session:
+        # Fetch RAW transactions - lấy 100 transactions để chắc chắn
+        raw_transactions = await fetch_raw_transactions_async(session, DUCO_RECIPIENT, 100)
+        
+        if not raw_transactions:
+            print(f"   ❌ No transactions found from API")
+            return None
+        
+        print(f"   ✅ Fetched {len(raw_transactions)} RAW transactions (no filter)")
+        
+        # Lọc transactions chưa xử lý
+        unprocessed_txs = [tx for tx in raw_transactions if tx.get("hash") not in processed_txids]
+        
+        if not unprocessed_txs:
+            print(f"   ℹ️ All {len(raw_transactions)} transactions already processed")
+            return None
+        
+        print(f"   🎯 Found {len(unprocessed_txs)} unprocessed transactions")
+        
+        # Log tất cả unprocessed transactions để debug
+        print(f"   📋 RAW unprocessed transactions:")
+        for idx, tx in enumerate(unprocessed_txs[:20], 1):
+            sender = tx.get('sender', 'unknown')[:15]
+            recipient = tx.get('recipient', 'unknown')[:15]
+            amount = tx.get('amount', 0)
+            memo = tx.get('memo', '')[:40]
+            tx_hash = tx.get('hash', '')[:12]
+            print(f"      {idx}. {sender} → {recipient} | {amount} DUCO | Memo: '{memo}' | Hash: {tx_hash}")
+        
+        # Lọc các pending duco_to_cc swaps
+        pending_ducos = [req for req in pending_swaps 
+                        if req.get("swap_type") == "duco_to_cc" 
+                        and req.get("status") == "pending"]
+        
+        if not pending_ducos:
+            print(f"   ℹ️ No pending duco_to_cc swaps")
+            return None
+        
+        # Tạo map memo -> swap request (dùng MEMO_PREFIX_RECEIVE)
+        pending_by_memo = {}
+        for req in pending_ducos:
+            receiver = req.get("receiver")
+            expected_memo = f"{MEMO_PREFIX_RECEIVE} {receiver}"
+            pending_by_memo[expected_memo] = req
+            print(f"      📌 EXPECTED: Memo '{expected_memo}' for {req['amount_cc']/10} DUCO")
+        
+        # Duyệt qua TỪNG transaction RAW - KHÔNG DỪNG SỚM
+        for tx in unprocessed_txs:
+            tx_hash = tx.get("hash")
+            memo = tx.get("memo", "").strip()
+            amount_duco = float(tx.get("amount", 0))
+            sender = tx.get("sender", "unknown")
+            recipient = tx.get("recipient", "unknown")
+            
+            # Log đang check transaction nào
+            print(f"\n   🔍 Checking RAW TX: {truncate_hash(tx_hash)}")
+            print(f"      📤 Sender: {sender}")
+            print(f"      📥 Recipient: {recipient}")
+            print(f"      💰 Amount: {amount_duco} DUCO")
+            print(f"      📝 Memo: '{memo}'")
+            
+            # Tìm swap matching với memo
+            if memo not in pending_by_memo:
+                if MEMO_PREFIX_RECEIVE in memo:
+                    print(f"      ⚠️ Memo contains '{MEMO_PREFIX_RECEIVE}' but not expected")
+                # TIẾP TỤC CHECK TRANSACTION TIẾP THEO
+                continue
+            
+            req = pending_by_memo[memo]
+            expected_duco = req.get("amount_cc", 0) / 10.0
+            
+            # Kiểm tra amount - NẾU SAI THÌ LOG NHƯNG VẪN TIẾP TỤC
+            if abs(amount_duco - expected_duco) > 0.01:
+                print(f"      ❌ Amount mismatch: expected {expected_duco}, got {amount_duco}")
+                print(f"      ⏭️  Skipping this transaction, continue checking others...")
+                # TIẾP TỤC CHECK TRANSACTION TIẾP THEO
+                continue
+            
+            # Kiểm tra recipient
+            if recipient != DUCO_RECIPIENT:
+                print(f"      ❌ Recipient mismatch: expected {DUCO_RECIPIENT}, got {recipient}")
+                # TIẾP TỤC CHECK TRANSACTION TIẾP THEO
+                continue
+            
+            # TÌM THẤY MATCH HỢP LỆ!
+            print(f"\n   ✅✅✅ MATCH FOUND IN RAW TRANSACTIONS! ✅✅✅")
+            print(f"   📝 Transaction hash: {tx_hash}")
+            print(f"   👤 Sender: {sender}")
+            print(f"   💰 Amount: {amount_duco} DUCO")
+            print(f"   📋 Memo: '{memo}'")
+            print(f"   🔄 Swap ID: {req['id']}")
+            
+            return tx, req
+        
+        print(f"\n   ⏳ No VALID matching transaction found in {len(unprocessed_txs)} RAW transactions")
+        print(f"   💡 Checked all transactions but none had both correct memo AND correct amount")
         return None
-
-    print(f"   ✅ Fetched {len(raw_transactions)} RAW transactions (no filter)")
-    unprocessed_txs = [tx for tx in raw_transactions if tx.get("hash") not in processed_txids]
-    if not unprocessed_txs:
-        print(f"   ℹ️ All {len(raw_transactions)} transactions already processed")
-        return None
-
-    print(f"   🎯 Found {len(unprocessed_txs)} unprocessed transactions")
-    print("   📋 RAW unprocessed transactions:")
-    for idx, tx in enumerate(unprocessed_txs[:20], 1):
-        sender = tx.get("sender", "unknown")[:15]
-        recipient = tx.get("recipient", "unknown")[:15]
-        amount = tx.get("amount", 0)
-        memo = tx.get("memo", "")[:40]
-        tx_hash = tx.get("hash", "")[:12]
-        print(f"      {idx}. {sender} → {recipient} | {amount} DUCO | Memo: '{memo}' | Hash: {tx_hash}")
-
-    pending_ducos = [req for req in pending_swaps if req.get("swap_type") == "duco_to_cc" and req.get("status") == "pending"]
-    if not pending_ducos:
-        print("   ℹ️ No pending duco_to_cc swaps")
-        return None
-
-    pending_by_memo = {}
-    for req in pending_ducos:
-        receiver = req.get("receiver")
-        expected_memo = f"{MEMO_PREFIX_RECEIVE} {receiver}"
-        pending_by_memo[expected_memo] = req
-        print(f"      📌 EXPECTED: Memo '{expected_memo}' for {req['amount_cc'] / 10} DUCO")
-
-    for tx in unprocessed_txs:
-        tx_hash = tx.get("hash")
-        memo = tx.get("memo", "").strip()
-        amount_duco = float(tx.get("amount", 0))
-        recipient = tx.get("recipient", "unknown")
-
-        print(f"\n   🔍 Checking RAW TX: {tx_hash[:12]}...")
-        print(f"      📤 Sender: {tx.get('sender', 'unknown')}")
-        print(f"      📥 Recipient: {recipient}")
-        print(f"      💰 Amount: {amount_duco} DUCO")
-        print(f"      📝 Memo: '{memo}'")
-
-        if memo not in pending_by_memo:
-            continue
-
-        req = pending_by_memo[memo]
-        expected_duco = req.get("amount_cc", 0) / 10.0
-        if abs(amount_duco - expected_duco) > 0.01:
-            print(f"      ❌ Amount mismatch: expected {expected_duco}, got {amount_duco}")
-            continue
-
-        if recipient != DUCO_RECIPIENT:
-            print(f"      ❌ Recipient mismatch: expected {DUCO_RECIPIENT}, got {recipient}")
-            continue
-
-        print("\n   ✅✅✅ MATCH FOUND IN RAW TRANSACTIONS! ✅✅✅")
-        print(f"   📝 Transaction hash: {tx_hash}")
-        print(f"   👤 Sender: {tx.get('sender', 'unknown')}")
-        print(f"   💰 Amount: {amount_duco} DUCO")
-        print(f"   📋 Memo: '{memo}'")
-        print(f"   🔄 Swap ID: {req['id']}")
-        return tx, req
-
-    print(f"\n   ⏳ No VALID matching transaction found in {len(unprocessed_txs)} RAW transactions")
-    return None
-
 
 def check_duco_transactions_raw():
+    """
+    CHECK RAW TRANSACTIONS - KHÔNG FILTER, LẤY TRỰC TIẾP TỪ API
+    """
     print(f"\n🔍 RAW FETCH - Getting ALL transactions for {DUCO_RECIPIENT} from DUCO API...")
+    
     processed_txids = load_processed_txids()
     pending_swaps = get_pending_swaps()
-
+    
     if not pending_swaps:
         print("   ℹ️ No pending swaps")
         return False
-
-    result = find_matching_duco_transaction(processed_txids, pending_swaps)
-
+    
+    # Chạy async fetch raw transactions
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    result = loop.run_until_complete(check_raw_duco_transactions_async(processed_txids, pending_swaps))
+    loop.close()
+    
     if result:
         tx, req = result
         tx_hash = tx.get("hash")
+        
+        # Fulfill swap ngay lập tức
         if fulfill_swap(req["id"]):
             print(f"   ✅ Swap {req['id']} fulfilled successfully!")
-            record_processed(req["id"], req["from_user"], req["amount_cc"], req.get("swap_type"), req["receiver"], tx_hash)
+            record_processed(req["id"], req["from_user"], req["amount_cc"],
+                            req.get("swap_type"), req["receiver"], tx_hash)
             processed_txids.add(tx_hash)
             save_processed_txids(processed_txids)
             print(f"   📝 Recorded transaction hash: {tx_hash}")
             return True
-        print(f"   ❌ Failed to fulfill swap {req['id']}")
-        return False
-
+        else:
+            print(f"   ❌ Failed to fulfill swap {req['id']}")
+            return False
+    
     return False
-
 
 def process_swap(req):
     rid = req.get("id")
@@ -434,71 +450,91 @@ def process_swap(req):
     print(f"\n🔹 Swap {rid}: {from_user} -> {amount_cc} CC ({swap_type}) to {receiver}")
 
     if swap_type == "duco":
+        # CC → DUCO: Gửi DUCO từ faucet đến receiver (user)
         print(f"\n   💸 Sending DUCO from faucet to {receiver}")
+        
         balance = update_faucet_balance()
         required_duco = amount_cc / 10.0
+        
         if balance < required_duco:
             print(f"   ❌ Insufficient DUCO: need {required_duco:.2f}, have {balance:.2f}")
             return False
-
+        
         success, error = send_duco(receiver, amount_cc)
         if success:
-            print("   ✅ DUCO sent successfully!")
+            print(f"   ✅ DUCO sent successfully!")
             temp_txid = f"sent_{int(time.time())}"
             record_processed(rid, from_user, amount_cc, swap_type, receiver, temp_txid)
+            
             if fulfill_swap(rid):
                 print(f"   ✅ Swap {rid} fulfilled")
                 return True
         else:
             print(f"   ❌ Failed to send DUCO: {error}")
-        return False
+            return False
 
-    if swap_type == "duco_to_cc":
-        print(f"\n   🔍 User needs to send {amount_cc / 10:.2f} DUCO to {DUCO_RECIPIENT}")
+    elif swap_type == "duco_to_cc":
+        # DUCO → CC: User gửi DUCO cho bạn, check RAW transactions
+        print(f"\n   🔍 User needs to send {amount_cc/10:.2f} DUCO to {DUCO_RECIPIENT}")
         print(f"   📝 Expected memo: '{MEMO_PREFIX_RECEIVE} {receiver}'")
+        print(f"   ⚡ Checking ALL RAW transactions (continuing even if amount mismatch)...")
+        
+        # Check ngay lập tức không chờ
         success = check_duco_transactions_raw()
+        
         if success:
             print(f"   ✅ Swap {rid} processed and fulfilled!")
         else:
             print(f"   ⏳ No valid transaction found yet for swap {rid}")
+            print(f"   💡 Waiting for user to send DUCO with correct memo AND amount")
+        
         return success
 
-    print(f"   ⚠️ Unsupported swap type for auto-processing: {swap_type}")
-    return False
+    elif swap_type == "ccpoc":
+        amount_poc = amount_cc * 0.75
+        print(f"   [Simulated] Sending {amount_poc} CC PoC to {receiver}")
+        txid = f"SIM_{int(time.time())}"
+        record_processed(rid, from_user, amount_cc, swap_type, receiver, txid)
+        if fulfill_swap(rid):
+            print(f"   ✅ Swap {rid} completed")
+        return True
+    else:
+        print(f"   ⚠️ Unknown swap type: {swap_type}")
+        return False
 
-
-def periodic_check_raw():
+async def periodic_check_raw_async():
+    """Periodic check - fetch RAW transactions"""
     print("\n🔄 Periodic RAW check for pending DUCO→CC swaps...")
     processed_txids = load_processed_txids()
     pending_swaps = get_pending_swaps()
+    
     if pending_swaps:
-        result = find_matching_duco_transaction(processed_txids, pending_swaps)
+        result = await check_raw_duco_transactions_async(processed_txids, pending_swaps)
         if result:
             tx, req = result
             tx_hash = tx.get("hash")
             if fulfill_swap(req["id"]):
                 print(f"   ✅ Periodic check fulfilled swap {req['id']}")
-                record_processed(req["id"], req["from_user"], req["amount_cc"], req.get("swap_type"), req["receiver"], tx_hash)
+                record_processed(req["id"], req["from_user"], req["amount_cc"],
+                                req.get("swap_type"), req["receiver"], tx_hash)
                 processed_txids.add(tx_hash)
                 save_processed_txids(processed_txids)
 
-
 def main():
-    print("\n" + "=" * 60)
-    print("🚀 SWAP CLIENT - Railway auto worker")
-    print("=" * 60)
+    print("\n" + "="*60)
+    print("🚀 SWAP CLIENT - RAW FETCH (Continue on mismatch)")
+    print("="*60)
     print(f"📍 Server: {RENDER_API_URL}")
-    print(f"🔐 Worker auth: {ADMIN_USERNAME}")
+    print(f"👤 Admin: {ADMIN_USERNAME}")
     print(f"💰 DUCO Faucet: {DUCO_FAUCET_USERNAME}")
     print(f"📥 Your DUCO Wallet: {DUCO_RECIPIENT}")
     print(f"📝 Memo Receive (user → you): {MEMO_PREFIX_RECEIVE}")
     print(f"📝 Memo Send (you → user): {MEMO_PREFIX_SEND}")
     print(f"⏱️  Interval: {SLEEP_INTERVAL}s")
-    print("=" * 60 + "\n")
+    print("="*60 + "\n")
 
-    authenticate_worker()
     last_incoming_check = 0
-
+    
     while True:
         try:
             swaps = get_pending_swaps()
@@ -511,22 +547,31 @@ def main():
                 print(f"📋 Found {len(swaps)} pending swaps")
                 for req in swaps:
                     swap_type = req.get("swap_type")
+                    
                     if swap_type == "duco_to_cc":
-                        print(f"\n⚡ Processing DUCO→CC swap {req['id']} immediately")
+                        print(f"\n⚡⚡⚡ Processing DUCO→CC swap {req['id']} IMMEDIATELY! ⚡⚡⚡")
                         process_swap(req)
                         time.sleep(1)
                     elif swap_type == "duco":
                         print(f"\n💰 Processing CC→DUCO swap {req['id']}")
                         process_swap(req)
                         time.sleep(1)
+                    elif swap_type == "ccpoc":
+                        print(f"\n🎮 Processing CCPOC swap {req['id']}")
+                        process_swap(req)
+                        time.sleep(1)
                     else:
-                        print(f"   ℹ️ Skipping unsupported auto-swap type: {swap_type}")
+                        print(f"   ⚠️ Unknown swap type: {swap_type}")
             else:
                 print("✅ No pending swaps")
 
+            # Periodic check mỗi 15s cho các transaction đến sau
             now = time.time()
             if now - last_incoming_check > 15:
-                periodic_check_raw()
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(periodic_check_raw_async())
+                loop.close()
                 last_incoming_check = now
 
             print(f"\n⏳ Waiting {SLEEP_INTERVAL} seconds...")
@@ -538,10 +583,8 @@ def main():
         except Exception as e:
             print(f"❌ Loop error: {e}")
             import traceback
-
             traceback.print_exc()
             time.sleep(30)
-
 
 if __name__ == "__main__":
     main()
