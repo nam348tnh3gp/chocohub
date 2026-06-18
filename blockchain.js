@@ -29,7 +29,9 @@ sqlite.exec(`
     nonce INTEGER,
     target_hex TEXT,
     prev_hash TEXT,
-    merkle_root TEXT
+    merkle_root TEXT,
+    difficulty REAL,
+    reward REAL
   );
   
   CREATE TABLE IF NOT EXISTS mempool (
@@ -113,11 +115,12 @@ function createBlock(minerName, nonce) {
   }
   
   const newHeight = (latest ? latest.height : 0) + 1;
+  const difficulty = targetToDifficulty(currentTarget);
   
   sqlite.prepare(`
-    INSERT INTO blocks (hash, height, timestamp, miner, nonce, target_hex, prev_hash)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(hash, newHeight, timestamp, minerName, nonce, currentTarget.toString(16), prevHash);
+    INSERT INTO blocks (hash, height, timestamp, miner, nonce, target_hex, prev_hash, difficulty, reward)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(hash, newHeight, timestamp, minerName, nonce, currentTarget.toString(16), prevHash, difficulty, BLOCK_REWARD);
   
   const blockTime = timestamp - lastBlockTime;
   blockTimes.push(blockTime);
@@ -135,7 +138,7 @@ function createBlock(minerName, nonce) {
   sqlite.prepare('INSERT INTO blocks_mined (username, bounty_id, reward) VALUES (?, ?, ?)')
     .run(minerName, hash, BLOCK_REWARD);
   
-  console.log(`⛏️  Block #${newHeight} mined by ${minerName} | Hash: ${hash.substring(0, 16)}... | Diff: ${targetToDifficulty(currentTarget).toFixed(2)}`);
+  console.log(`⛏️  Block #${newHeight} mined by ${minerName} | Hash: ${hash.substring(0, 16)}... | Diff: ${difficulty.toFixed(2)}`);
   
   return { hash, height: newHeight, reward: BLOCK_REWARD };
 }
@@ -224,9 +227,25 @@ function getBlocks(limit = 50, offset = 0) {
 
 const jobAssignTime = new Map();
 
+function startAutoBounty() {
+  console.log(`🤖 Auto-bounty started (PoW mode)`);
+}
+
+function startPoSMinting() {
+  console.log(`🏦 PoS minting started`);
+}
+
+function checkAndRefillBounties() {
+  // No-op in new PoW system
+}
+
+function getCurrentValidator() {
+  return null; // No PoS in real PoW mode
+}
+
 function getActiveBounties() {
   const rows = sqlite.prepare(`
-    SELECT id, difficulty, reward, target_hex as binary_target, hash as last_hash
+    SELECT id, difficulty, reward, target_hex, hash as last_hash
     FROM blocks ORDER BY height DESC LIMIT 50
   `).all();
   const result = {};
@@ -235,7 +254,7 @@ function getActiveBounties() {
       id: r.id,
       difficulty: r.difficulty,
       reward: r.reward,
-      target_hex: r.binary_target,
+      target_hex: r.target_hex,
       last_hash: r.last_hash
     };
   });
@@ -246,8 +265,8 @@ function getJob(bountyId) {
   const block = sqlite.prepare('SELECT * FROM blocks WHERE id = ?').get(bountyId);
   if (!block) return null;
   return {
-    last_hash: block.last_hash,
-    target_hex: block.binary_target,
+    last_hash: block.hash,
+    target_hex: block.target_hex,
     difficulty: block.difficulty,
     bounty_id: block.id,
     reward: block.reward
@@ -305,5 +324,9 @@ module.exports = {
   getActiveBounties,
   getJob,
   getJobForWorker,
-  submitSolution
+  submitSolution,
+  startAutoBounty,
+  startPoSMinting,
+  checkAndRefillBounties,
+  getCurrentValidator
 };
