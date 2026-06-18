@@ -5,9 +5,20 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const http = require('http');
+const https = require('https');
 const db = require('../db');
 
 const router = express.Router();
+
+// ========== DUCO CONFIGURATION ==========
+const DUCO_CONFIG = {
+    API_URL: 'https://server.duinocoin.com',
+    USERNAME: process.env.DUCO_USERNAME || '',
+    PASSWORD: process.env.DUCO_PASSWORD || '',
+    CC_TO_DUCO_RATE: 0.1,  // 1 CC = 0.1 DUCO
+    DUCO_TO_CC_RATE: 10,   // 1 DUCO = 10 CC
+};
 
 // ========== XNO CONFIGURATION ==========
 const XNO_CONFIG = {
@@ -15,6 +26,74 @@ const XNO_CONFIG = {
     XNO_TO_CC_RATE: 500000,      // 1 XNO = 500,000 CC
     XNO_RECEIVE_ADDRESS: "nano_3k41y61xxgmre13exyk3q69k78bxxwhmrmncezt49jg1sok18xo64jeff5hk",
 };
+
+// ========== DUCO API HELPERS ==========
+function ducoApiRequest(endpoint, method = 'GET', body = null) {
+    return new Promise((resolve, reject) => {
+        const url = new URL(DUCO_CONFIG.API_URL + endpoint);
+        const isHttps = url.protocol === 'https:';
+        const client = isHttps ? https : http;
+
+        const options = {
+            hostname: url.hostname,
+            path: url.pathname + url.search,
+            method: method,
+            timeout: 10000,
+            headers: { 'User-Agent': 'ChocoHub-Swap/1.0' }
+        };
+
+        const req = client.request(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const parsed = JSON.parse(data);
+                    resolve({ status: res.statusCode, data: parsed });
+                } catch (e) {
+                    reject(new Error(`Invalid JSON: ${data}`));
+                }
+            });
+        });
+
+        req.on('error', reject);
+        req.on('timeout', () => {
+            req.destroy();
+            reject(new Error('DUCO API timeout'));
+        });
+
+        if (body) req.write(JSON.stringify(body));
+        req.end();
+    });
+}
+
+async function getDucoBalance(username) {
+    try {
+        const res = await ducoApiRequest(`/balances/${username}`);
+        if (res.status === 200 && res.data.success) {
+            return res.data.result.balance;
+        }
+        return null;
+    } catch (e) {
+        console.error('Error fetching DUCO balance:', e.message);
+        return null;
+    }
+}
+
+async function transferDuco(from, password, to, amount, memo = 'ChocoHub swap') {
+    try {
+        const res = await ducoApiRequest(
+            `/transaction?username=${encodeURIComponent(from)}&password=${encodeURIComponent(password)}&recipient=${encodeURIComponent(to)}&amount=${amount}&memo=${encodeURIComponent(memo)}`,
+            'GET'
+        );
+        if (res.status === 200 && res.data.success) {
+            return res.data.result;
+        }
+        return null;
+    } catch (e) {
+        console.error('Error transferring DUCO:', e.message);
+        return null;
+    }
+}
 
 // Auth 
 const ADMIN_USERS = ['chocoetom', 'Nam2010'];
@@ -324,6 +403,149 @@ router.post('/create_xno_to_cc', verifyToken, swapLimiter, (req, res) => {
     }
 });
 
+// ========== AUTO DUCO ↔ CC (via Duino-Coin API) ==========
+
+// 4. DUCO → CC (automatic, no holding, mint directly)
+router.post('/duco-to-cc', verifyToken, swapLimiter, async (req, res) => {
+    try {
+        const { duco_username, duco_password, amount_duco, receiver } = req.body;
+
+        if (!duco_username || !duco_password || !amount_duco || !receiver) {
+            return res.status(400).json({ status: 'error', message: 'Missing: duco_username, duco_password, amount_duco, receiver' });
+        }
+
+        const amount = parseFloat(amount_duco);
+        if (isNaN(amount) || amount <= 0) {
+            return res.status(400).json({ status: 'error', message: 'Invalid DUCO amount' });
+        }
+
+        // Check DUCO balance
+        const balance = await getDucoBalance(duco_username);
+        if (balance === null) {
+            return res.status(400).json({ status: 'error', message: 'Could not verify DUCO balance' });
+        }
+
+        if (balance < amount) {
+            return res.status(400).json({ status: 'error', message: `Insufficient DUCO. Balance: ${balance} DUCO` });
+        }
+
+        // Transfer DUCO to holding
+        const txid = await transferDuco(duco_username, duco_password, DUCO_CONFIG.USERNAME, amount, 'ChocoHub→CC');
+        if (!txid) {
+            return res.status(400).json({ status: 'error', message: 'DUCO transfer failed. Check credentials.' });
+        }
+
+        const amount_cc = amount * DUCO_CONFIG.DUCO_TO_CC_RATE;
+        const swapId = Date.now() + '-' + crypto.randomBytes(8).toString('hex');
+
+        const newRequest = {
+            id: swapId,
+            duco_username,
+            amount_duco: amount,
+            amount_cc,
+            swap_type: 'duco_to_cc',
+            receiver: receiver.trim(),
+            rate: DUCO_CONFIG.DUCO_TO_CC_RATE,
+            status: 'completed',
+            created_at: new Date().toISOString(),
+            completed_at: new Date().toISOString(),
+            duco_txid: txid,
+            auto_transfer: true
+        };
+
+        swapRequests.push(newRequest);
+        saveSwapRequests();
+
+        // Mint CC
+        mintCCForUser(receiver.trim(), amount_cc, swapId, 'DUCO');
+
+        require('https').request('https://ntfy.sh/chocohub-swaps', {method: 'POST'}).end(`✅ AUTO DUCO→CC: ${duco_username} +${amount} DUCO → ${receiver} +${amount_cc} CC [${txid}]`);
+
+        res.json({
+            status: 'success',
+            message: 'DUCO→CC swap completed',
+            swap_id: swapId,
+            duco_txid: txid,
+            details: { duco_sent: amount, cc_received: amount_cc, receiver, rate: DUCO_CONFIG.DUCO_TO_CC_RATE }
+        });
+    } catch (e) {
+        console.error('DUCO→CC error:', e.message);
+        res.status(500).json({ status: 'error', message: e.message });
+    }
+});
+
+// 5. CC → DUCO (automatic, deduct from user, transfer via API)
+router.post('/cc-to-duco', verifyToken, swapLimiter, async (req, res) => {
+    try {
+        const { amount_cc, duco_receiver } = req.body;
+        const from_user = req.user.username;
+
+        if (!amount_cc || !duco_receiver) {
+            return res.status(400).json({ status: 'error', message: 'Missing: amount_cc, duco_receiver' });
+        }
+
+        const amount = parseFloat(amount_cc);
+        if (isNaN(amount) || amount <= 0) {
+            return res.status(400).json({ status: 'error', message: 'Invalid CC amount' });
+        }
+
+        const user = db.getUser(from_user);
+        if (!user || user.balance < amount) {
+            return res.status(400).json({ status: 'error', message: 'Insufficient CC balance' });
+        }
+
+        // Deduct CC
+        db.updateBalance(from_user, -amount);
+        db.updateBalance('swap_holding', amount);
+        if (db.addTransaction.length >= 4) {
+            db.addTransaction(from_user, 'swap_holding', amount, `CC→DUCO for ${duco_receiver}`);
+        } else {
+            db.addTransaction(from_user, 'swap_holding', amount);
+        }
+
+        const amount_duco = amount * DUCO_CONFIG.CC_TO_DUCO_RATE;
+        const swapId = Date.now() + '-' + crypto.randomBytes(8).toString('hex');
+
+        // Try to transfer DUCO
+        const txid = await transferDuco(DUCO_CONFIG.USERNAME, DUCO_CONFIG.PASSWORD, duco_receiver, amount_duco, 'ChocoHub swap');
+        
+        let status = 'pending';
+        if (txid) {
+            status = 'completed';
+            db.updateBalance('swap_holding', -amount);
+        }
+
+        const newRequest = {
+            id: swapId,
+            from_user,
+            amount_cc: amount,
+            amount_duco,
+            swap_type: 'cc_to_duco',
+            duco_receiver: duco_receiver.trim(),
+            rate: DUCO_CONFIG.CC_TO_DUCO_RATE,
+            status,
+            created_at: new Date().toISOString(),
+            ...(txid && { completed_at: new Date().toISOString(), duco_txid: txid, auto_transfer: true })
+        };
+
+        swapRequests.push(newRequest);
+        saveSwapRequests();
+
+        require('https').request('https://ntfy.sh/chocohub-swaps', {method: 'POST'}).end(`CC→DUCO: ${from_user} -${amount} CC → ${duco_receiver} +${amount_duco} DUCO [${status}]`);
+
+        res.json({
+            status: 'success',
+            message: status === 'completed' ? 'CC→DUCO swap completed' : 'CC→DUCO pending (transfer failed)',
+            swap_id: swapId,
+            ...(txid && { duco_txid: txid }),
+            details: { cc_sent: amount, duco_received: amount_duco, receiver: duco_receiver, rate: DUCO_CONFIG.CC_TO_DUCO_RATE }
+        });
+    } catch (e) {
+        console.error('CC→DUCO error:', e.message);
+        res.status(500).json({ status: 'error', message: e.message });
+    }
+});
+
 // List pending swaps
 router.get('/pending', verifyToken, (req, res) => {
     try {
@@ -438,12 +660,13 @@ router.get('/rates', (req, res) => {
     res.json({
         status: 'success',
         rates: {
-            cc_to_duco: 10,
+            cc_to_duco: DUCO_CONFIG.CC_TO_DUCO_RATE,
+            duco_to_cc: DUCO_CONFIG.DUCO_TO_CC_RATE,
             cc_to_ccpoc: 0.75,
             xno_to_cc: XNO_CONFIG.XNO_TO_CC_RATE,
             cc_to_xno: XNO_CONFIG.CC_TO_XNO_RATE,
             note: {
-                duco: '1 DUCO = 10 CC',
+                duco: `1 DUCO = ${DUCO_CONFIG.DUCO_TO_CC_RATE} CC | 1 CC = ${DUCO_CONFIG.CC_TO_DUCO_RATE} DUCO`,
                 ccpoc: '1 CC PoC = 0.75 CC',
                 xno: `1 XNO = ${XNO_CONFIG.XNO_TO_CC_RATE.toLocaleString()} CC | 1 CC = ${XNO_CONFIG.CC_TO_XNO_RATE} XNO`,
                 xno_receive_address: XNO_CONFIG.XNO_RECEIVE_ADDRESS
