@@ -1,11 +1,9 @@
-import asyncio
 import json
 import os
 import sqlite3
 import time
 from datetime import datetime
 
-import aiohttp
 import requests
 
 
@@ -282,94 +280,93 @@ def send_duco(recipient, amount_cc):
         return False, str(e)
 
 
-async def fetch_raw_transactions_async(session, username, limit=100):
+def fetch_raw_transactions(username, limit=100):
     url = f"https://server.duinocoin.com/user_transactions/{username}?limit={limit}"
     try:
-        async with session.get(url, headers=DUCO_HEADERS, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                if data.get("success"):
-                    return data.get("result", [])
-                print(f"   ⚠️ API returned success=false: {data.get('message')}")
-            else:
-                print(f"   ⚠️ HTTP {resp.status}")
-    except asyncio.TimeoutError:
+        resp = requests.get(url, headers=DUCO_HEADERS, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("success"):
+                return data.get("result", [])
+            print(f"   ⚠️ API returned success=false: {data.get('message')}")
+        else:
+            print(f"   ⚠️ HTTP {resp.status_code}")
+    except requests.Timeout:
         print(f"   ⚠️ Timeout fetching transactions for {username}")
     except Exception as e:
         print(f"   ⚠️ Error fetching: {e}")
     return []
 
 
-async def check_raw_duco_transactions_async(processed_txids, pending_swaps):
-    async with aiohttp.ClientSession() as session:
-        raw_transactions = await fetch_raw_transactions_async(session, DUCO_RECIPIENT, 100)
-        if not raw_transactions:
-            print("   ❌ No transactions found from API")
-            return None
-
-        print(f"   ✅ Fetched {len(raw_transactions)} RAW transactions (no filter)")
-        unprocessed_txs = [tx for tx in raw_transactions if tx.get("hash") not in processed_txids]
-        if not unprocessed_txs:
-            print(f"   ℹ️ All {len(raw_transactions)} transactions already processed")
-            return None
-
-        print(f"   🎯 Found {len(unprocessed_txs)} unprocessed transactions")
-        print("   📋 RAW unprocessed transactions:")
-        for idx, tx in enumerate(unprocessed_txs[:20], 1):
-            sender = tx.get("sender", "unknown")[:15]
-            recipient = tx.get("recipient", "unknown")[:15]
-            amount = tx.get("amount", 0)
-            memo = tx.get("memo", "")[:40]
-            tx_hash = tx.get("hash", "")[:12]
-            print(f"      {idx}. {sender} → {recipient} | {amount} DUCO | Memo: '{memo}' | Hash: {tx_hash}")
-
-        pending_ducos = [req for req in pending_swaps if req.get("swap_type") == "duco_to_cc" and req.get("status") == "pending"]
-        if not pending_ducos:
-            print("   ℹ️ No pending duco_to_cc swaps")
-            return None
-
-        pending_by_memo = {}
-        for req in pending_ducos:
-            receiver = req.get("receiver")
-            expected_memo = f"{MEMO_PREFIX_RECEIVE} {receiver}"
-            pending_by_memo[expected_memo] = req
-            print(f"      📌 EXPECTED: Memo '{expected_memo}' for {req['amount_cc'] / 10} DUCO")
-
-        for tx in unprocessed_txs:
-            tx_hash = tx.get("hash")
-            memo = tx.get("memo", "").strip()
-            amount_duco = float(tx.get("amount", 0))
-            recipient = tx.get("recipient", "unknown")
-
-            print(f"\n   🔍 Checking RAW TX: {tx_hash[:12]}...")
-            print(f"      📤 Sender: {tx.get('sender', 'unknown')}")
-            print(f"      📥 Recipient: {recipient}")
-            print(f"      💰 Amount: {amount_duco} DUCO")
-            print(f"      📝 Memo: '{memo}'")
-
-            if memo not in pending_by_memo:
-                continue
-
-            req = pending_by_memo[memo]
-            expected_duco = req.get("amount_cc", 0) / 10.0
-            if abs(amount_duco - expected_duco) > 0.01:
-                print(f"      ❌ Amount mismatch: expected {expected_duco}, got {amount_duco}")
-                continue
-
-            if recipient != DUCO_RECIPIENT:
-                print(f"      ❌ Recipient mismatch: expected {DUCO_RECIPIENT}, got {recipient}")
-                continue
-
-            print("\n   ✅✅✅ MATCH FOUND IN RAW TRANSACTIONS! ✅✅✅")
-            print(f"   📝 Transaction hash: {tx_hash}")
-            print(f"   👤 Sender: {tx.get('sender', 'unknown')}")
-            print(f"   💰 Amount: {amount_duco} DUCO")
-            print(f"   📋 Memo: '{memo}'")
-            print(f"   🔄 Swap ID: {req['id']}")
-            return tx, req
-
-        print(f"\n   ⏳ No VALID matching transaction found in {len(unprocessed_txs)} RAW transactions")
+def find_matching_duco_transaction(processed_txids, pending_swaps):
+    raw_transactions = fetch_raw_transactions(DUCO_RECIPIENT, 100)
+    if not raw_transactions:
+        print("   ❌ No transactions found from API")
         return None
+
+    print(f"   ✅ Fetched {len(raw_transactions)} RAW transactions (no filter)")
+    unprocessed_txs = [tx for tx in raw_transactions if tx.get("hash") not in processed_txids]
+    if not unprocessed_txs:
+        print(f"   ℹ️ All {len(raw_transactions)} transactions already processed")
+        return None
+
+    print(f"   🎯 Found {len(unprocessed_txs)} unprocessed transactions")
+    print("   📋 RAW unprocessed transactions:")
+    for idx, tx in enumerate(unprocessed_txs[:20], 1):
+        sender = tx.get("sender", "unknown")[:15]
+        recipient = tx.get("recipient", "unknown")[:15]
+        amount = tx.get("amount", 0)
+        memo = tx.get("memo", "")[:40]
+        tx_hash = tx.get("hash", "")[:12]
+        print(f"      {idx}. {sender} → {recipient} | {amount} DUCO | Memo: '{memo}' | Hash: {tx_hash}")
+
+    pending_ducos = [req for req in pending_swaps if req.get("swap_type") == "duco_to_cc" and req.get("status") == "pending"]
+    if not pending_ducos:
+        print("   ℹ️ No pending duco_to_cc swaps")
+        return None
+
+    pending_by_memo = {}
+    for req in pending_ducos:
+        receiver = req.get("receiver")
+        expected_memo = f"{MEMO_PREFIX_RECEIVE} {receiver}"
+        pending_by_memo[expected_memo] = req
+        print(f"      📌 EXPECTED: Memo '{expected_memo}' for {req['amount_cc'] / 10} DUCO")
+
+    for tx in unprocessed_txs:
+        tx_hash = tx.get("hash")
+        memo = tx.get("memo", "").strip()
+        amount_duco = float(tx.get("amount", 0))
+        recipient = tx.get("recipient", "unknown")
+
+        print(f"\n   🔍 Checking RAW TX: {tx_hash[:12]}...")
+        print(f"      📤 Sender: {tx.get('sender', 'unknown')}")
+        print(f"      📥 Recipient: {recipient}")
+        print(f"      💰 Amount: {amount_duco} DUCO")
+        print(f"      📝 Memo: '{memo}'")
+
+        if memo not in pending_by_memo:
+            continue
+
+        req = pending_by_memo[memo]
+        expected_duco = req.get("amount_cc", 0) / 10.0
+        if abs(amount_duco - expected_duco) > 0.01:
+            print(f"      ❌ Amount mismatch: expected {expected_duco}, got {amount_duco}")
+            continue
+
+        if recipient != DUCO_RECIPIENT:
+            print(f"      ❌ Recipient mismatch: expected {DUCO_RECIPIENT}, got {recipient}")
+            continue
+
+        print("\n   ✅✅✅ MATCH FOUND IN RAW TRANSACTIONS! ✅✅✅")
+        print(f"   📝 Transaction hash: {tx_hash}")
+        print(f"   👤 Sender: {tx.get('sender', 'unknown')}")
+        print(f"   💰 Amount: {amount_duco} DUCO")
+        print(f"   📋 Memo: '{memo}'")
+        print(f"   🔄 Swap ID: {req['id']}")
+        return tx, req
+
+    print(f"\n   ⏳ No VALID matching transaction found in {len(unprocessed_txs)} RAW transactions")
+    return None
 
 
 def check_duco_transactions_raw():
@@ -381,12 +378,7 @@ def check_duco_transactions_raw():
         print("   ℹ️ No pending swaps")
         return False
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        result = loop.run_until_complete(check_raw_duco_transactions_async(processed_txids, pending_swaps))
-    finally:
-        loop.close()
+    result = find_matching_duco_transaction(processed_txids, pending_swaps)
 
     if result:
         tx, req = result
@@ -455,12 +447,12 @@ def process_swap(req):
     return False
 
 
-async def periodic_check_raw_async():
+def periodic_check_raw():
     print("\n🔄 Periodic RAW check for pending DUCO→CC swaps...")
     processed_txids = load_processed_txids()
     pending_swaps = get_pending_swaps()
     if pending_swaps:
-        result = await check_raw_duco_transactions_async(processed_txids, pending_swaps)
+        result = find_matching_duco_transaction(processed_txids, pending_swaps)
         if result:
             tx, req = result
             tx_hash = tx.get("hash")
@@ -513,12 +505,7 @@ def main():
 
             now = time.time()
             if now - last_incoming_check > 15:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(periodic_check_raw_async())
-                finally:
-                    loop.close()
+                periodic_check_raw()
                 last_incoming_check = now
 
             print(f"\n⏳ Waiting {SLEEP_INTERVAL} seconds...")
