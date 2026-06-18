@@ -1,4 +1,5 @@
 ﻿import os
+import sys
 import time
 import sqlite3
 import json
@@ -20,16 +21,37 @@ DUCO_HEADERS = {
 JSON_HEADERS = {"Content-Type": "application/json", **DUCO_HEADERS}
 
 
+def env_first(*names, default=None):
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return default
+
+
 def load_config():
+    config = {
+        "RENDER_API_URL": env_first("RENDER_API_URL", "MAIN_SERVER_URL"),
+        "ADMIN_USERNAME": env_first("ADMIN_USERNAME"),
+        "ADMIN_PIN": env_first("ADMIN_PIN"),
+        "DUCO_FAUCET_USERNAME": env_first("DUCO_USERNAME", "DUCO_FAUCET_USERNAME"),
+        "DUCO_FAUCET_PASSWORD": env_first("DUCO_PASSWORD", "DUCO_FAUCET_PASSWORD"),
+        "DUCO_RECIPIENT": env_first("DUCO_RECIPIENT"),
+        "MEMO_PREFIX_RECEIVE": env_first("MEMO_PREFIX_RECEIVE"),
+        "MEMO_PREFIX_SEND": env_first("MEMO_PREFIX_SEND"),
+        "SLEEP_INTERVAL": env_first("SLEEP_INTERVAL"),
+    }
+
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                print("✅ Loaded config from file")
-                return config if isinstance(config, dict) else None
+                file_config = json.load(f)
+                if isinstance(file_config, dict):
+                    print("✅ Loaded config from file")
+                    config = {**file_config, **{k: v for k, v in config.items() if v is not None}}
         except Exception:
             pass
-    return None
+    return config or {}
 
 
 def save_config(config):
@@ -71,9 +93,16 @@ def interactive_setup():
 
 
 config = load_config()
-if not config:
-    config = interactive_setup()
-    save_config(config)
+required_keys = ["RENDER_API_URL", "ADMIN_USERNAME", "ADMIN_PIN", "DUCO_FAUCET_USERNAME", "DUCO_FAUCET_PASSWORD"]
+missing_keys = [k for k in required_keys if not config.get(k)]
+
+if missing_keys:
+    should_prompt = sys.stdin.isatty() and not os.getenv("RENDER") and not os.getenv("RENDER_SERVICE_ID")
+    if should_prompt:
+        config = interactive_setup()
+        save_config(config)
+    else:
+        raise SystemExit(f"Missing required config in non-interactive mode: {', '.join(missing_keys)}")
 
 RENDER_API_URL = config.get("RENDER_API_URL", DEFAULT_SERVER_URL)
 ADMIN_USERNAME = config.get("ADMIN_USERNAME", "chocoetom")
@@ -514,4 +543,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
