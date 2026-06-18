@@ -78,8 +78,8 @@ def build_config():
 
     config = {
         "RENDER_API_URL": env_first("RENDER_API_URL", "MAIN_SERVER_URL", default=file_config.get("RENDER_API_URL", DEFAULT_SERVER_URL)),
-        "ADMIN_USERNAME": env_first("ADMIN_USERNAME", default=file_config.get("ADMIN_USERNAME", "chocoetom")),
-        "ADMIN_PIN": env_first("ADMIN_PIN", "ADMIN_PASSWORD", "PIN", "USER_PIN", default=file_config.get("ADMIN_PIN") or file_config.get("ADMIN_PASSWORD") or file_config.get("PIN") or file_config.get("USER_PIN")),
+        "WORKER_USERNAME": env_first("WORKER_USERNAME", "SWAP_USERNAME", "ADMIN_USERNAME", "USERNAME", default=file_config.get("WORKER_USERNAME") or file_config.get("SWAP_USERNAME") or file_config.get("ADMIN_USERNAME") or file_config.get("USERNAME")),
+        "WORKER_PIN": env_first("WORKER_PIN", "SWAP_PIN", "ADMIN_PIN", "PIN", "USER_PIN", default=file_config.get("WORKER_PIN") or file_config.get("SWAP_PIN") or file_config.get("ADMIN_PIN") or file_config.get("PIN") or file_config.get("USER_PIN")),
         "DUCO_FAUCET_USERNAME": env_first("DUCO_USERNAME", "DUCO_FAUCET_USERNAME", default=file_config.get("DUCO_FAUCET_USERNAME")),
         "DUCO_FAUCET_PASSWORD": env_first("DUCO_PASSWORD", "DUCO_FAUCET_PASSWORD", default=file_config.get("DUCO_FAUCET_PASSWORD")),
         "DUCO_RECIPIENT": env_first("DUCO_RECIPIENT", "DUCO_USERNAME", "DUCO_FAUCET_USERNAME", default=file_config.get("DUCO_RECIPIENT")),
@@ -95,17 +95,18 @@ def build_config():
 
 
 config = build_config()
+worker_token = None
 
-if not all([config["RENDER_API_URL"], config["ADMIN_USERNAME"], config["ADMIN_PIN"], config["DUCO_FAUCET_USERNAME"], config["DUCO_FAUCET_PASSWORD"]]):
+if not all([config["RENDER_API_URL"], config["WORKER_USERNAME"], config["WORKER_PIN"], config["DUCO_FAUCET_USERNAME"], config["DUCO_FAUCET_PASSWORD"]]):
     if os.isatty(0):
         print("\n" + "=" * 50)
         print("🔧 FIRST RUN - ENTER CONFIGURATION")
         print("=" * 50)
 
         config["RENDER_API_URL"] = input(f"Server URL [{DEFAULT_SERVER_URL}]: ").strip() or DEFAULT_SERVER_URL
-        print("\n--- Admin Info (authenticate with ChocoHub) ---")
-        config["ADMIN_USERNAME"] = input("Admin username [chocoetom]: ").strip() or "chocoetom"
-        config["ADMIN_PIN"] = input("PIN: ")
+        print("\n--- Worker Login Info ---")
+        config["WORKER_USERNAME"] = input("Username: ").strip()
+        config["WORKER_PIN"] = input("PIN: ")
         print("\n--- DUCO Faucet Info (to send coins) ---")
         config["DUCO_FAUCET_USERNAME"] = input("DUCO Faucet Username: ").strip()
         config["DUCO_FAUCET_PASSWORD"] = input("DUCO Faucet Password: ")
@@ -121,13 +122,13 @@ if not all([config["RENDER_API_URL"], config["ADMIN_USERNAME"], config["ADMIN_PI
         print("=" * 50)
         save_file_config(config)
     else:
-        missing = [k for k in ["RENDER_API_URL", "ADMIN_USERNAME", "ADMIN_PIN", "DUCO_FAUCET_USERNAME", "DUCO_FAUCET_PASSWORD"] if not config.get(k)]
+        missing = [k for k in ["RENDER_API_URL", "WORKER_USERNAME", "WORKER_PIN", "DUCO_FAUCET_USERNAME", "DUCO_FAUCET_PASSWORD"] if not config.get(k)]
         raise SystemExit(f"Missing required config in non-interactive mode: {', '.join(missing)}")
 
 
 RENDER_API_URL = config["RENDER_API_URL"].rstrip("/")
-ADMIN_USERNAME = config["ADMIN_USERNAME"]
-ADMIN_PIN = config["ADMIN_PIN"]
+WORKER_USERNAME = config["WORKER_USERNAME"]
+WORKER_PIN = config["WORKER_PIN"]
 DUCO_FAUCET_USERNAME = config["DUCO_FAUCET_USERNAME"]
 DUCO_FAUCET_PASSWORD = config["DUCO_FAUCET_PASSWORD"]
 DUCO_RECIPIENT = config["DUCO_RECIPIENT"]
@@ -136,8 +137,6 @@ MEMO_PREFIX_SEND = config["MEMO_PREFIX_SEND"]
 SLEEP_INTERVAL = int(config["SLEEP_INTERVAL"])
 
 
-jwt_token = None
-token_expiry = 0
 balance_cache = {"balance": None, "last_updated": None, "expiry_seconds": 60}
 
 
@@ -198,46 +197,43 @@ def save_processed_txids(txids):
         json.dump(list(txids), f, indent=2)
 
 
-def get_admin_token():
-    global jwt_token, token_expiry
-    now = time.time()
-    if jwt_token and now < token_expiry:
-        return jwt_token
+def authenticate_worker():
+    global worker_token
 
-    try:
-        status, data = http_request_json(
-            f"{RENDER_API_URL}/auth",
-            method="POST",
-            data={"username": ADMIN_USERNAME, "pin": ADMIN_PIN},
-            headers=JSON_HEADERS,
-            timeout=10,
-        )
-        if status == 200 and isinstance(data, dict):
-            if data.get("status") == "success" and data.get("token"):
-                jwt_token = data["token"]
-                token_expiry = now + 23 * 3600
-                print(f"🔑 Got token for {ADMIN_USERNAME}")
-                return jwt_token
-        print(f"❌ Authentication failed: {status}")
-        if status == 401:
-            print("   -> Wrong username or PIN. Please check Railway env vars.")
-            raise SystemExit(1)
-    except Exception as e:
-        print(f"❌ Connection error: {e}")
-    return None
+    payload = {
+        "username": WORKER_USERNAME,
+        "pin": WORKER_PIN,
+    }
+    status, data = http_request_json(f"{RENDER_API_URL}/auth", method="POST", data=payload, headers=JSON_HEADERS, timeout=15)
+    if status in (200, 201) and isinstance(data, dict):
+        token = data.get("token")
+        if token:
+            worker_token = token
+            print(f"🔐 Authenticated worker as {WORKER_USERNAME}")
+            return token
+    raise RuntimeError(f"Failed to authenticate worker: {data}")
 
 
-def api_call(endpoint, method="GET", data=None):
-    token = get_admin_token()
-    if not token:
-        return None
+def api_call(endpoint, method="GET", data=None, token=None):
+    global worker_token
+
+    auth_token = token or worker_token
+    if not auth_token:
+        auth_token = authenticate_worker()
 
     url = f"{RENDER_API_URL}{endpoint}"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/json"}
     try:
         status, payload = http_request_json(url, method=method, data=data, headers=headers, timeout=15)
         if status in (200, 201):
             return payload
+        if status in (401, 403):
+            print(f"⚠️ API {endpoint} auth error {status}, refreshing worker token...")
+            worker_token = authenticate_worker()
+            headers["Authorization"] = f"Bearer {worker_token}"
+            status, payload = http_request_json(url, method=method, data=data, headers=headers, timeout=15)
+            if status in (200, 201):
+                return payload
         print(f"⚠️ API {endpoint} error {status}: {str(payload)[:200]}")
     except Exception as e:
         print(f"⚠️ API connection error: {e}")
@@ -492,7 +488,7 @@ def main():
     print("🚀 SWAP CLIENT - Railway auto worker")
     print("=" * 60)
     print(f"📍 Server: {RENDER_API_URL}")
-    print(f"👤 Admin: {ADMIN_USERNAME}")
+    print(f"🔐 Worker auth: {WORKER_USERNAME}")
     print(f"💰 DUCO Faucet: {DUCO_FAUCET_USERNAME}")
     print(f"📥 Your DUCO Wallet: {DUCO_RECIPIENT}")
     print(f"📝 Memo Receive (user → you): {MEMO_PREFIX_RECEIVE}")
@@ -500,6 +496,7 @@ def main():
     print(f"⏱️  Interval: {SLEEP_INTERVAL}s")
     print("=" * 60 + "\n")
 
+    authenticate_worker()
     last_incoming_check = 0
 
     while True:
