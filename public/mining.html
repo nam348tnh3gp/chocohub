@@ -245,7 +245,7 @@
         .toast.success { border-color: #40C057; color: #40C057; }
         .toast.error { border-color: #FA5252; color: #FA5252; }
 
-        /* Ad unit (mantido exatamente como no original, apenas com o novo ID) */
+        /* Ad unit (mantido exatamente como no original, com o novo ID) */
         .ad-sidebar {
             position: fixed;
             top: 50%;
@@ -402,11 +402,6 @@
     (function() {
         // ---------- Auth ----------
         const workerName = localStorage.getItem('choco_user');
-        if (!workerName) {
-            console.warn('Please log in first.');
-            window.location.href = '/';
-            return;
-        }
 
         // ---------- DOM elements ----------
         const startBtn = document.getElementById('startBtn');
@@ -419,6 +414,24 @@
         const difficultySpan = document.getElementById('difficultyValue');
         const progressFill = document.getElementById('progressFill');
         const consoleDiv = document.getElementById('console');
+
+        // ---------- Helper functions ----------
+        function log(msg, type = 'info') {
+            const line = document.createElement('div');
+            line.className = `log-line log-${type}`;
+            line.textContent = `> ${msg}`;
+            consoleDiv.appendChild(line);
+            line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            while (consoleDiv.children.length > 100) consoleDiv.removeChild(consoleDiv.firstChild);
+        }
+
+        // Se não estiver logado, a página permanece visível, mas a mineração não inicia
+        if (!workerName) {
+            log('Not logged in. Please log in to start mining.', 'warn');
+            startBtn.disabled = true;
+            stopBtn.disabled = true;
+            return;
+        }
 
         // ---------- State ----------
         let miningActive = false;
@@ -433,16 +446,6 @@
 
         // Web Worker (mining core)
         let worker = null;
-
-        // ---------- Helper functions ----------
-        function log(msg, type = 'info') {
-            const line = document.createElement('div');
-            line.className = `log-line log-${type}`;
-            line.textContent = `> ${msg}`;
-            consoleDiv.appendChild(line);
-            line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            while (consoleDiv.children.length > 100) consoleDiv.removeChild(consoleDiv.firstChild);
-        }
 
         function showToast(msg, isError = false) {
             const toast = document.getElementById('toast');
