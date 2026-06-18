@@ -9,8 +9,8 @@ sqlite.pragma('journal_mode = WAL');
 // ═══════════════════════════════════════════════════
 // CONFIG
 // ═══════════════════════════════════════════════════
-const BLOCK_TIME_TARGET = 30;            // 30 seconds per block
-const DIFFICULTY_ADJUSTMENT_BLOCKS = 16; // Adjust every 16 blocks
+const BLOCK_TIME_TARGET = 10;            // 30 seconds per block
+const DIFFICULTY_ADJUSTMENT_BLOCKS = 6; // Adjust every 16 blocks
 const MIN_TARGET = 1n;                   // Hardest difficulty
 const MAX_TARGET = (1n << 255n);         // Easiest difficulty
 const BASE_BLOCK_REWARD = 0.01;          // Base reward
@@ -64,8 +64,8 @@ function difficultyToTarget(difficulty) {
   return target > MAX_TARGET ? MAX_TARGET : (target < MIN_TARGET ? MIN_TARGET : target);
 }
 
-function hashHeader(prevHash, nonce, timestamp, minerName) {
-  const headerData = prevHash + nonce.toString().padStart(20, '0') + timestamp + minerName;
+function hashHeader(prevHash, nonce, minerName) {
+  const headerData = prevHash + nonce.toString().padStart(20, '0') + minerName;
   return crypto.createHash('sha256').update(headerData).digest('hex');
 }
 
@@ -108,7 +108,7 @@ function createBlock(minerName, nonce) {
   const latest = getLatestBlock();
   const prevHash = latest ? latest.hash : '0'.repeat(64);
   const timestamp = Date.now();
-  const hash = hashHeader(prevHash, nonce, timestamp, minerName);
+  const hash = hashHeader(prevHash, nonce, minerName);
   
   if (!verifyProofOfWork(hash, currentTarget)) {
     return { error: 'Invalid PoW', hash, target: currentTarget.toString(16) };
@@ -293,8 +293,7 @@ function getJobForWorker(workerName) {
 function submitSolution(bountyId, nonce, workerName, deviceType) {
   const latest = getLatestBlock();
   const prevHash = latest ? latest.hash : '0'.repeat(64);
-  const timestamp = Date.now();
-  const hash = hashHeader(prevHash, nonce, timestamp, workerName);
+  const hash = hashHeader(prevHash, nonce, workerName);
   
   if (!verifyProofOfWork(hash, currentTarget)) {
     return { status: 'error', reason: `Invalid nonce: hash ${hash.substring(0, 12)}... >= target` };
@@ -305,7 +304,7 @@ function submitSolution(bountyId, nonce, workerName, deviceType) {
     return { status: 'error', reason: result.error };
   }
   
-  return { status: 'success', message: `Block solved! You earned ${result.reward} CC.`, reward: result.reward };
+  return { status: 'success', message: `Block solved! You earned ${result.reward.toFixed(4)} CC.`, reward: result.reward };
 }
 
 // ═══════════════════════════════════════════════════
