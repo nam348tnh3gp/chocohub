@@ -68,29 +68,42 @@ function ducoApiRequest(endpoint, method = 'GET', body = null) {
 
 async function getDucoBalance(username) {
     try {
+        console.log(`📊 Checking DUCO balance for: ${username}`);
         const res = await ducoApiRequest(`/balances/${username}`);
+        console.log(`   Status: ${res.status}, Success: ${res.data.success}`);
         if (res.status === 200 && res.data.success) {
-            return res.data.result.balance;
+            const balance = res.data.result.balance;
+            console.log(`   ✅ Balance: ${balance} DUCO`);
+            return balance;
         }
+        console.log(`   ❌ Failed: ${JSON.stringify(res.data)}`);
         return null;
     } catch (e) {
-        console.error('Error fetching DUCO balance:', e.message);
+        console.error(`   ❌ Error fetching DUCO balance:`, e.message);
         return null;
     }
 }
 
 async function transferDuco(from, password, to, amount, memo = 'ChocoHub swap') {
     try {
-        const res = await ducoApiRequest(
-            `/transaction?username=${encodeURIComponent(from)}&password=${encodeURIComponent(password)}&recipient=${encodeURIComponent(to)}&amount=${amount}&memo=${encodeURIComponent(memo)}`,
-            'GET'
-        );
+        console.log(`💸 DUCO transfer: ${from} → ${to}, amount: ${amount}, memo: ${memo}`);
+        console.log(`   From: ${from}, Password: ${password ? '***' : 'MISSING'}`);
+        
+        const endpoint = `/transaction?username=${encodeURIComponent(from)}&password=${encodeURIComponent(password)}&recipient=${encodeURIComponent(to)}&amount=${amount}&memo=${encodeURIComponent(memo)}`;
+        console.log(`   Endpoint: ${endpoint.substring(0, 50)}...`);
+        
+        const res = await ducoApiRequest(endpoint, 'GET');
+        console.log(`   Status: ${res.status}, Success: ${res.data.success}`);
+        console.log(`   Response: ${JSON.stringify(res.data).substring(0, 200)}`);
+        
         if (res.status === 200 && res.data.success) {
+            console.log(`   ✅ Transfer successful: ${res.data.result}`);
             return res.data.result;
         }
+        console.log(`   ❌ Transfer failed: ${JSON.stringify(res.data)}`);
         return null;
     } catch (e) {
-        console.error('Error transferring DUCO:', e.message);
+        console.error(`   ❌ Error transferring DUCO:`, e.message);
         return null;
     }
 }
@@ -408,30 +421,40 @@ router.post('/create_xno_to_cc', verifyToken, swapLimiter, (req, res) => {
 // 4. DUCO → CC (automatic, no holding, mint directly)
 router.post('/duco-to-cc', verifyToken, swapLimiter, async (req, res) => {
     try {
+        console.log(`🔄 DUCO→CC request from ${req.user.username}:`, req.body);
+        
         const { duco_username, duco_password, amount_duco, receiver } = req.body;
 
         if (!duco_username || !duco_password || !amount_duco || !receiver) {
+            console.log(`   ❌ Missing fields`);
             return res.status(400).json({ status: 'error', message: 'Missing: duco_username, duco_password, amount_duco, receiver' });
         }
 
         const amount = parseFloat(amount_duco);
         if (isNaN(amount) || amount <= 0) {
+            console.log(`   ❌ Invalid amount: ${amount_duco}`);
             return res.status(400).json({ status: 'error', message: 'Invalid DUCO amount' });
         }
 
         // Check DUCO balance
         const balance = await getDucoBalance(duco_username);
         if (balance === null) {
+            console.log(`   ❌ Could not verify balance`);
             return res.status(400).json({ status: 'error', message: 'Could not verify DUCO balance' });
         }
 
         if (balance < amount) {
+            console.log(`   ❌ Insufficient balance: ${balance} < ${amount}`);
             return res.status(400).json({ status: 'error', message: `Insufficient DUCO. Balance: ${balance} DUCO` });
         }
 
         // Transfer DUCO to holding
+        console.log(`   🔑 DUCO_CONFIG: username=${DUCO_CONFIG.USERNAME}, hasPassword=${!!DUCO_CONFIG.PASSWORD}`);
+        console.log(`   📝 Will transfer ${amount} DUCO from ${duco_username} to ${DUCO_CONFIG.USERNAME}`);
+        
         const txid = await transferDuco(duco_username, duco_password, DUCO_CONFIG.USERNAME, amount, 'ChocoHub→CC');
         if (!txid) {
+            console.log(`   ❌ Transfer failed`);
             return res.status(400).json({ status: 'error', message: 'DUCO transfer failed. Check credentials.' });
         }
 
@@ -457,9 +480,12 @@ router.post('/duco-to-cc', verifyToken, swapLimiter, async (req, res) => {
         saveSwapRequests();
 
         // Mint CC
+        console.log(`   ✨ Minting ${amount_cc} CC to ${receiver}`);
         mintCCForUser(receiver.trim(), amount_cc, swapId, 'DUCO');
 
         require('https').request('https://ntfy.sh/chocohub-swaps', {method: 'POST'}).end(`✅ AUTO DUCO→CC: ${duco_username} +${amount} DUCO → ${receiver} +${amount_cc} CC [${txid}]`);
+
+        console.log(`   ✅ Swap completed: ${swapId}`);
 
         res.json({
             status: 'success',
@@ -469,7 +495,7 @@ router.post('/duco-to-cc', verifyToken, swapLimiter, async (req, res) => {
             details: { duco_sent: amount, cc_received: amount_cc, receiver, rate: DUCO_CONFIG.DUCO_TO_CC_RATE }
         });
     } catch (e) {
-        console.error('DUCO→CC error:', e.message);
+        console.error('DUCO→CC error:', e.message, e.stack);
         res.status(500).json({ status: 'error', message: e.message });
     }
 });
@@ -477,24 +503,37 @@ router.post('/duco-to-cc', verifyToken, swapLimiter, async (req, res) => {
 // 5. CC → DUCO (automatic, deduct from user, transfer via API)
 router.post('/cc-to-duco', verifyToken, swapLimiter, async (req, res) => {
     try {
+        console.log(`🔄 CC→DUCO request from ${req.user.username}:`, req.body);
+        
         const { amount_cc, duco_receiver } = req.body;
         const from_user = req.user.username;
 
         if (!amount_cc || !duco_receiver) {
+            console.log(`   ❌ Missing fields`);
             return res.status(400).json({ status: 'error', message: 'Missing: amount_cc, duco_receiver' });
         }
 
         const amount = parseFloat(amount_cc);
         if (isNaN(amount) || amount <= 0) {
+            console.log(`   ❌ Invalid amount: ${amount_cc}`);
             return res.status(400).json({ status: 'error', message: 'Invalid CC amount' });
         }
 
         const user = db.getUser(from_user);
-        if (!user || user.balance < amount) {
+        if (!user) {
+            console.log(`   ❌ User not found: ${from_user}`);
+            return res.status(400).json({ status: 'error', message: 'User not found' });
+        }
+        
+        console.log(`   User balance: ${user.balance}, needed: ${amount}`);
+        
+        if (user.balance < amount) {
+            console.log(`   ❌ Insufficient balance`);
             return res.status(400).json({ status: 'error', message: 'Insufficient CC balance' });
         }
 
         // Deduct CC
+        console.log(`   💰 Deducting ${amount} CC from ${from_user}`);
         db.updateBalance(from_user, -amount);
         db.updateBalance('swap_holding', amount);
         if (db.addTransaction.length >= 4) {
@@ -506,13 +545,19 @@ router.post('/cc-to-duco', verifyToken, swapLimiter, async (req, res) => {
         const amount_duco = amount * DUCO_CONFIG.CC_TO_DUCO_RATE;
         const swapId = Date.now() + '-' + crypto.randomBytes(8).toString('hex');
 
+        console.log(`   🔑 DUCO_CONFIG: username=${DUCO_CONFIG.USERNAME}, hasPassword=${!!DUCO_CONFIG.PASSWORD}`);
+        console.log(`   📝 Will transfer ${amount_duco} DUCO to ${duco_receiver}`);
+        
         // Try to transfer DUCO
         const txid = await transferDuco(DUCO_CONFIG.USERNAME, DUCO_CONFIG.PASSWORD, duco_receiver, amount_duco, 'ChocoHub swap');
         
         let status = 'pending';
         if (txid) {
             status = 'completed';
+            console.log(`   ✅ Transfer succeeded, removing from holding`);
             db.updateBalance('swap_holding', -amount);
+        } else {
+            console.log(`   ⚠️ Transfer failed, keeping as pending`);
         }
 
         const newRequest = {
@@ -533,6 +578,8 @@ router.post('/cc-to-duco', verifyToken, swapLimiter, async (req, res) => {
 
         require('https').request('https://ntfy.sh/chocohub-swaps', {method: 'POST'}).end(`CC→DUCO: ${from_user} -${amount} CC → ${duco_receiver} +${amount_duco} DUCO [${status}]`);
 
+        console.log(`   ✅ Swap recorded: ${swapId} [${status}]`);
+
         res.json({
             status: 'success',
             message: status === 'completed' ? 'CC→DUCO swap completed' : 'CC→DUCO pending (transfer failed)',
@@ -541,7 +588,7 @@ router.post('/cc-to-duco', verifyToken, swapLimiter, async (req, res) => {
             details: { cc_sent: amount, duco_received: amount_duco, receiver: duco_receiver, rate: DUCO_CONFIG.CC_TO_DUCO_RATE }
         });
     } catch (e) {
-        console.error('CC→DUCO error:', e.message);
+        console.error('CC→DUCO error:', e.message, e.stack);
         res.status(500).json({ status: 'error', message: e.message });
     }
 });
