@@ -7,7 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const http2 = require('http2');
-const { spawn, spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 const selfsigned = require('selfsigned');
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
@@ -169,83 +169,6 @@ async function sendMinerWebhook(worker, bountyId, device) {
     });
   } catch (err) {
     console.error('⚠️ quiet error on webhook:', err.message);
-  }
-}
-
-const DUCO_WORKER_COMMANDS = ['python', 'python3', 'py'];
-const PY_REQUIREMENTS_PATH = path.join(__dirname, 'requirements.txt');
-let ducoWorkerProcess = null;
-let ducoWorkerRestartTimer = null;
-let ducoWorkerShouldRestart = true;
-
-function ensureDucoWorkerDependencies(command) {
-  if (!fs.existsSync(PY_REQUIREMENTS_PATH)) {
-    return true;
-  }
-
-  console.log(`📦 Ensuring Python dependencies for DUCO worker via ${command}...`);
-  const result = spawnSync(command, ['-m', 'pip', 'install', '--disable-pip-version-check', '-r', PY_REQUIREMENTS_PATH], {
-    cwd: __dirname,
-    stdio: 'inherit',
-    env: process.env,
-  });
-
-  if (result.error) {
-    console.error(`❌ Failed to install DUCO worker dependencies with ${command}: ${result.error.message}`);
-    return false;
-  }
-  if (result.status !== 0) {
-    console.error(`❌ pip install for DUCO worker exited with code ${result.status}`);
-    return false;
-  }
-  return true;
-}
-
-function startDucoSwapWorker(commandIndex = 0) {
-  if (!process.env.DUCO_USERNAME && !process.env.DUCO_FAUCET_USERNAME) {
-    console.log('ℹ️ DUCO auto swap worker not started: missing DUCO credentials in env');
-    return;
-  }
-
-  const workerPath = path.join(__dirname, 'send.py');
-  const command = DUCO_WORKER_COMMANDS[commandIndex];
-  if (!command) {
-    console.error('❌ DUCO auto swap worker could not start: no Python command was available');
-    return;
-  }
-
-  if (!ensureDucoWorkerDependencies(command)) {
-    return;
-  }
-
-  console.log(`🔄 Starting DUCO auto swap worker with ${command}...`);
-  ducoWorkerProcess = spawn(command, [workerPath], {
-    cwd: __dirname,
-    env: process.env,
-    stdio: 'inherit',
-  });
-
-  ducoWorkerProcess.on('error', (err) => {
-    console.error(`⚠️ Failed to start DUCO worker with ${command}: ${err.message}`);
-    if (commandIndex + 1 < DUCO_WORKER_COMMANDS.length) {
-      startDucoSwapWorker(commandIndex + 1);
-    }
-  });
-
-  ducoWorkerProcess.on('exit', (code, signal) => {
-    ducoWorkerProcess = null;
-    console.log(`🔄 DUCO worker exited (${signal || code}).`);
-    if (!ducoWorkerShouldRestart) return;
-    if (ducoWorkerRestartTimer) clearTimeout(ducoWorkerRestartTimer);
-    ducoWorkerRestartTimer = setTimeout(() => startDucoSwapWorker(0), 15000);
-  });
-}
-
-function stopDucoSwapWorker() {
-  ducoWorkerShouldRestart = false;
-  if (ducoWorkerRestartTimer) clearTimeout(ducoWorkerRestartTimer);
-  if (ducoWorkerProcess && !ducoWorkerProcess.killed) {
-    ducoWorkerProcess.kill();
   }
 }
 
@@ -1331,18 +1254,15 @@ app.use((err, req, res, next) => {
 });
 
 process.on('SIGINT', () => {
-  stopDucoSwapWorker();
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  stopDucoSwapWorker();
   process.exit(0);
 });
 
 blockchain.startAutoBounty();
 blockchain.startPoSMinting();
-startDucoSwapWorker();
 
 app.listen(PORT, () => {
   console.log('');
