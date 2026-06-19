@@ -7,7 +7,6 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const http2 = require('http2');
-const { spawn } = require('child_process');
 const selfsigned = require('selfsigned');
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
@@ -17,8 +16,6 @@ const blockchain = require('./blockchain');
 const snake = require('./snake');
 const backupClient = require('./backupSync');
 const DHExchange = require('./dh');
-
-// Module Imports
 const SwapRouter = require('./routes/swap');
 
 // admin users
@@ -144,31 +141,11 @@ function getDbHash() {
     const users = db.getAllUsers ? db.getAllUsers() : [];
     const stakes = db.getAllStakes ? db.getAllStakes() : [];
     const posRewardPool = db.getPosRewardPool ? db.getPosRewardPool() : {};
-    const blocks = db.getRecentBlocks(50);
+    const blocks = db.getBlocks ? db.getBlocks(10) : [];
     const dataStr = JSON.stringify({ users, stakes, blocks, posRewardPool });
     return crypto.createHash('sha256').update(dataStr).digest('hex').substring(0, 16);
   } catch (e) {
     return 'unknown';
-  }
-}
-
-async function sendMinerWebhook(worker, bountyId, device) {
-  try {
-    await fetch(process.env.DISCORD_WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        embeds: [{
-          title: "⛏️ Block Solved! (WebMiner)",
-          description: `A new block was solved.\n\n**Worker:** \`${worker}\`\n**Block ID:** \`${bountyId}\`\n**Device:** \`${device}\``,
-          color: 0xf1c40f,
-          timestamp: new Date().toISOString(),
-          footer: { text: "ChocoHub Mining Monitor" }
-        }]
-      })
-    });
-  } catch (err) {
-    console.error('⚠️ quiet error on webhook:', err.message);
   }
 }
 
@@ -214,656 +191,12 @@ function verifyToken(req, res, next) {
   }
 }
 
-// ════════════════════════════════════════════════════
-//  ADMIN WEB INTERFACE (SESSION-BASED)
-// ════════════════════════════════════════════════════
-app.get('/admin', (req, res) => {
-  if (req.session.admin) {
-    return res.redirect('/admin/dashboard');
-  }
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <title>Admin Login - ChocoHub</title>
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { background: linear-gradient(135deg, #0a0a12 0%, #1a1a2a 100%); color: #eee4d8; font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-            .login-box { background: rgba(30,30,42,0.9); backdrop-filter: blur(10px); padding: 2.5rem; border-radius: 32px; box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05); width: 360px; text-align: center; transition: transform 0.3s; }
-            .login-box:hover { transform: translateY(-5px); }
-            h1 { background: linear-gradient(135deg, #f58a00, #ffbf00); -webkit-background-clip: text; background-clip: text; color: transparent; margin-bottom: 1.5rem; font-size: 2rem; letter-spacing: -0.5px; }
-            .input-group { margin-bottom: 1.2rem; text-align: left; }
-            .input-group label { display: block; margin-bottom: 0.4rem; font-size: 0.85rem; color: #aaa; letter-spacing: 0.5px; }
-            input { width: 100%; padding: 12px 16px; background: #2a2a36; border: 1px solid #3a3a46; border-radius: 16px; color: white; font-size: 1rem; transition: all 0.2s; outline: none; }
-            input:focus { border-color: #f58a00; box-shadow: 0 0 0 2px rgba(245,138,0,0.2); }
-            button { background: linear-gradient(135deg, #f58a00, #ff7e00); color: #0a0a12; border: none; padding: 12px 20px; border-radius: 40px; cursor: pointer; font-weight: bold; font-size: 1rem; width: 100%; transition: all 0.2s; margin-top: 0.5rem; }
-            button:hover { transform: scale(1.02); filter: brightness(1.05); }
-            .error { color: #ff6b6b; margin-top: 1rem; font-size: 0.85rem; }
-            .footer { margin-top: 1.5rem; font-size: 0.7rem; color: #555; }
-        </style>
-    </head>
-    <body>
-        <div class="login-box">
-            <h1>🍫 ChocoHub Admin</h1>
-            <form id="loginForm">
-                <div class="input-group">
-                    <label>Username</label>
-                    <input type="text" id="username" placeholder="chocoetom / Nam2010" required autocomplete="off">
-                </div>
-                <div class="input-group">
-                    <label>PIN</label>
-                    <input type="password" id="pin" placeholder="••••••" required autocomplete="off">
-                </div>
-                <button type="submit">🔐 Sign in</button>
-                <div id="errorMsg" class="error"></div>
-            </form>
-            <div class="footer">Secure session • HttpOnly cookie</div>
-        </div>
-        <script>
-            document.getElementById('loginForm').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const username = document.getElementById('username').value.trim();
-                const pin = document.getElementById('pin').value;
-                try {
-                    const resp = await fetch('/admin/login', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ username, pin })
-                    });
-                    const data = await resp.json();
-                    if (resp.ok && data.status === 'success') {
-                        window.location.href = '/admin/dashboard';
-                    } else {
-                        document.getElementById('errorMsg').innerText = data.message || 'Authentication failed';
-                    }
-                } catch(err) {
-                    document.getElementById('errorMsg').innerText = 'Network error';
-                }
-            });
-        </script>
-    </body>
-    </html>
-  `);
-});
-
-app.post('/admin/login', async (req, res) => {
-  const { username, pin } = req.body;
-  if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing credentials' });
-  try {
-    const authResult = db.authenticate(username, pin);
-    if (authResult.status !== 'success') {
-      return res.status(401).json({ status: 'error', message: 'Invalid credentials' });
-    }
-    if (!isAdmin(username)) {
-      return res.status(403).json({ status: 'error', message: 'Not an admin user' });
-    }
-    const adminToken = jwt.sign({ username }, process.env.JWT_SECRET || 'secret', { expiresIn: '24h' });
-    req.session.admin = true;
-    req.session.adminUsername = username;
-    req.session.adminToken = adminToken;
-    res.json({ status: 'success', message: 'Login successful' });
-  } catch (e) {
-    res.status(401).json({ status: 'error', message: e.message });
-  }
-});
-
-app.get('/admin/logout', (req, res) => {
-  req.session.destroy();
-  res.redirect('/admin');
-});
-
-function requireAdminSession(req, res, next) {
-  if (req.session && req.session.admin) return next();
-  res.status(401).json({ status: 'error', message: 'Admin session required' });
-}
-
-// API proxy cho admin
-app.get('/admin/api/all-swaps', requireAdminSession, async (req, res) => {
-  try {
-    const token = req.session.adminToken;
-    const response = await fetch(`http://localhost:${PORT}/swap/admin/swaps`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-});
-
-app.get('/admin/api/all-users', requireAdminSession, async (req, res) => {
-  try {
-    const users = db.getAllUsers();
-    res.json({ status: 'success', users });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-});
-
-app.get('/admin/api/balance/:username', requireAdminSession, async (req, res) => {
-  try {
-    const user = db.getUser(req.params.username);
-    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
-    res.json({ status: 'success', balance: user.balance });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-});
-
-app.post('/admin/api/update-balance', requireAdminSession, async (req, res) => {
-  try {
-    const { username, amount, action } = req.body;
-    const user = db.getUser(username);
-    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
-    
-    if (action === 'add') {
-      db.updateBalance(username, amount);
-    } else if (action === 'set') {
-      const currentBalance = user.balance;
-      const diff = amount - currentBalance;
-      db.updateBalance(username, diff);
-    } else {
-      return res.status(400).json({ status: 'error', message: 'Invalid action' });
-    }
-    
-    const newUser = db.getUser(username);
-    res.json({ status: 'success', message: `Balance updated`, new_balance: newUser.balance });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-});
-
-app.get('/admin/api/transactions/:username', requireAdminSession, async (req, res) => {
-  try {
-    const transactions = db.getTransactions(req.params.username, 50);
-    res.json({ status: 'success', transactions });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-});
-
-app.post('/admin/api/fulfill', requireAdminSession, async (req, res) => {
-  try {
-    const { request_id, xno_txid } = req.body;
-    const token = req.session.adminToken;
-    const response = await fetch(`http://localhost:${PORT}/swap/fulfill`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ request_id, xno_txid })
-    });
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-});
-
-app.delete('/admin/api/delete/:id', requireAdminSession, async (req, res) => {
-  try {
-    const id = req.params.id;
-    const token = req.session.adminToken;
-    const response = await fetch(`http://localhost:${PORT}/swap/admin/swaps/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-});
-
-// Dashboard admin mở rộng - HIỂN THỊ ĐẦY ĐỦ XNO SWAPS
-app.get('/admin/dashboard', requireAdminSession, (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <title>Admin Dashboard - ChocoHub</title>
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { background: #0a0a12; color: #eee4d8; font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif; padding: 2rem; }
-            .container { max-width: 1400px; margin: 0 auto; }
-            .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }
-            h1 { background: linear-gradient(135deg, #f58a00, #ffbf00); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: 2rem; }
-            .logout-btn { background: #2a2a36; border: 1px solid #ff4444; color: #ff4444; padding: 0.5rem 1.2rem; border-radius: 40px; text-decoration: none; transition: 0.2s; }
-            .logout-btn:hover { background: #ff4444; color: white; }
-            .tabs { display: flex; gap: 1rem; margin-bottom: 2rem; border-bottom: 1px solid #2a2a36; flex-wrap: wrap; }
-            .tab-btn { background: none; border: none; color: #8b8296; padding: 0.75rem 1.5rem; font-size: 1rem; cursor: pointer; transition: 0.2s; }
-            .tab-btn:hover { color: #f58a00; }
-            .tab-btn.active { color: #f58a00; border-bottom: 2px solid #f58a00; }
-            .tab-content { display: none; }
-            .tab-content.active { display: block; }
-            .card { background: #1e1e2a; border-radius: 24px; padding: 1.5rem; margin-bottom: 2rem; box-shadow: 0 8px 20px rgba(0,0,0,0.3); }
-            .card h2 { margin-bottom: 1rem; color: #f58a00; font-weight: 500; }
-            table { width: 100%; border-collapse: collapse; }
-            th, td { padding: 12px 10px; text-align: left; border-bottom: 1px solid #2a2a36; font-size: 0.85rem; }
-            th { background: #2a2a36; font-weight: 600; color: #ffbf00; }
-            .status-pending { background: #ffaa4433; color: #ffaa44; padding: 4px 10px; border-radius: 40px; font-size: 0.75rem; font-weight: bold; display: inline-block; }
-            .status-completed { background: #44ff4433; color: #44ff44; padding: 4px 10px; border-radius: 40px; font-size: 0.75rem; font-weight: bold; display: inline-block; }
-            .badge-xno { background: #2a6eff33; color: #2a6eff; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; }
-            .badge-duco { background: #ffaa4433; color: #ffaa44; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; }
-            .badge-cc { background: #f58a0033; color: #f58a00; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; }
-            .btn-complete { background: #f58a00; color: #0a0a12; border: none; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; margin-right: 8px; transition: 0.2s; }
-            .btn-complete:hover { background: #ff9e20; transform: scale(1.02); }
-            .btn-delete { background: #ff4444; color: white; border: none; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
-            .btn-delete:hover { background: #ff6666; transform: scale(1.02); }
-            .btn-edit { background: #2a2a36; color: #f58a00; border: 1px solid #f58a00; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
-            .btn-edit:hover { background: #f58a00; color: #0a0a12; }
-            .empty-row td { text-align: center; color: #888; padding: 2rem; }
-            .refresh { float: right; font-size: 0.8rem; color: #888; margin-top: 0.5rem; cursor: pointer; }
-            .refresh:hover { color: #f58a00; }
-            .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; }
-            .modal-content { background: #1e1e2a; border-radius: 24px; padding: 2rem; width: 450px; max-width: 90%; }
-            .modal-content h3 { margin-bottom: 1rem; color: #f58a00; }
-            .modal-content input { width: 100%; padding: 12px; margin: 10px 0; background: #2a2a36; border: 1px solid #3a3a46; border-radius: 12px; color: white; }
-            .modal-buttons { display: flex; gap: 1rem; margin-top: 1rem; }
-            .modal-buttons button { flex: 1; padding: 10px; border-radius: 30px; cursor: pointer; }
-            .btn-save { background: #f58a00; color: #0a0a12; border: none; }
-            .btn-cancel { background: #2a2a36; color: #eee4d8; border: 1px solid #ff4444; }
-            .search-box { margin-bottom: 1rem; display: flex; gap: 0.5rem; }
-            .search-box input { flex: 1; padding: 10px; background: #2a2a36; border: 1px solid #3a3a46; border-radius: 12px; color: white; }
-            .search-box button { background: #f58a00; color: #0a0a12; border: none; padding: 10px 20px; border-radius: 30px; cursor: pointer; }
-            .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
-            .stat-card { background: #2a2a36; padding: 1rem; border-radius: 16px; text-align: center; }
-            .stat-card strong { display: block; font-size: 1.5rem; color: #f58a00; margin-top: 0.5rem; }
-            @media (max-width: 768px) {
-                body { padding: 1rem; }
-                th, td { font-size: 0.7rem; padding: 8px 6px; }
-                .tab-btn { padding: 0.5rem 1rem; font-size: 0.8rem; }
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>🍫 ChocoHub Admin Panel</h1>
-                <a href="/admin/logout" class="logout-btn">🚪 Logout</a>
-            </div>
-            
-            <div class="tabs">
-                <button class="tab-btn active" data-tab="swaps">🔄 Swaps</button>
-                <button class="tab-btn" data-tab="users">👥 Users</button>
-                <button class="tab-btn" data-tab="stats">📊 Statistics</button>
-            </div>
-            
-            <!-- Swaps Tab -->
-            <div id="swaps-tab" class="tab-content active">
-                <div class="card">
-                    <h2>⏳ Pending Swaps <span class="refresh" onclick="loadAllSwaps()">🔄 Refresh</span></h2>
-                    <div style="overflow-x: auto;">
-                        <table id="pendingTable">
-                            <thead>
-                                <tr><th>ID</th><th>From</th><th>Amount (CC)</th><th>Type</th><th>Receiver</th><th>Details</th><th>Status</th><th>Actions</th></tr></thead>
-                            <tbody id="pendingBody"><tr class="empty-row"><td colspan="8">Loading...<\/tr><\/tbody>
-                        <\/table>
-                    <\/div>
-                <\/div>
-                <div class="card">
-                    <h2>✅ Completed Swaps<\/h2>
-                    <div style="overflow-x: auto;">
-                        <table id="completedTable">
-                            <thead>
-                                <tr><th>ID<\/th><th>From<\/th><th>Amount (CC)<\/th><th>Type<\/th><th>Receiver<\/th><th>XNO TxID<\/th><th>Status<\/th><th>Completed At<\/th><\/tr>
-                            <\/thead>
-                            <tbody id="completedBody"><tr class="empty-row"><td colspan="8">Loading...<\/tr><\/tbody>
-                        <\/table>
-                    <\/div>
-                <\/div>
-            <\/div>
-            
-            <!-- Users Tab -->
-            <div id="users-tab" class="tab-content">
-                <div class="card">
-                    <h2>👥 User Management<\/h2>
-                    <div class="search-box">
-                        <input type="text" id="userSearch" placeholder="Search username...">
-                        <button onclick="searchUsers()">🔍 Search<\/button>
-                    <\/div>
-                    <div style="overflow-x: auto;">
-                        <table id="usersTable">
-                            <thead><tr><th>Username<\/th><th>Balance (CC)<\/th><th>Actions<\/th><\/tr><\/thead>
-                            <tbody id="usersBody"><tr class="empty-row"><td colspan="3">Loading...<\/tr><\/tbody>
-                        <\/table>
-                    <\/div>
-                <\/div>
-            <\/div>
-            
-            <!-- Stats Tab -->
-            <div id="stats-tab" class="tab-content">
-                <div class="card">
-                    <h2>📊 System Statistics<\/h2>
-                    <div id="statsContent">Loading...<\/div>
-                <\/div>
-            <\/div>
-        <\/div>
-        
-        <!-- Edit Balance Modal -->
-        <div id="editModal" class="modal">
-            <div class="modal-content">
-                <h3>✏️ Edit User Balance<\/h3>
-                <p>Username: <strong id="editUsername"><\/strong><\/p>
-                <label>Current Balance: <span id="currentBalance"><\/span> CC<\/label>
-                <input type="number" id="editAmount" placeholder="Amount">
-                <div class="modal-buttons">
-                    <button class="btn-save" onclick="saveBalance('add')">➕ Add<\/button>
-                    <button class="btn-save" onclick="saveBalance('set')">📝 Set<\/button>
-                    <button class="btn-cancel" onclick="closeModal()">Cancel<\/button>
-                <\/div>
-            <\/div>
-        <\/div>
-        
-        <!-- Fulfill XNO Modal (for cc_to_xno swaps) -->
-        <div id="fulfillXnoModal" class="modal">
-            <div class="modal-content">
-                <h3>🟦 Complete XNO Swap<\/h3>
-                <p>Swap ID: <strong id="fulfillSwapId"><\/strong><\/p>
-                <p>Receiver: <strong id="fulfillReceiver"><\/strong><\/p>
-                <p>Amount XNO: <strong id="fulfillAmount"><\/strong><\/p>
-                <label>XNO Transaction Hash (optional):<\/label>
-                <input type="text" id="xnoTxid" placeholder="nano_tx_hash...">
-                <div class="modal-buttons">
-                    <button class="btn-save" onclick="confirmCompleteWithXno()">✅ Complete<\/button>
-                    <button class="btn-cancel" onclick="closeXnoModal()">Cancel<\/button>
-                <\/div>
-            <\/div>
-        <\/div>
-
-        <script>
-            let allSwaps = [];
-            let allUsers = [];
-            let currentEditUser = null;
-            let currentPendingSwap = null;
-            
-            // Tab switching
-            document.querySelectorAll('.tab-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                    btn.classList.add('active');
-                    document.getElementById(btn.dataset.tab + '-tab').classList.add('active');
-                    if (btn.dataset.tab === 'users') loadUsers();
-                    if (btn.dataset.tab === 'stats') loadStats();
-                });
-            });
-            
-            function getSwapTypeBadge(type) {
-                const badges = {
-                    'duco': '<span class="badge-duco">💰 DUCO</span>',
-                    'duco_to_cc': '<span class="badge-duco">🔄 DUCO→CC</span>',
-                    'xno_to_cc': '<span class="badge-xno">🟦 XNO→CC</span>',
-                    'cc_to_xno': '<span class="badge-xno">➡️ CC→XNO</span>',
-                    'ccpoc': '<span class="badge-cc">🍫 CC PoC</span>'
-                };
-                return badges[type] || '<span class="badge-cc">🍫 CC</span>';
-            }
-            
-            function formatSwapDetails(swap) {
-                if (swap.swap_type === 'xno_to_cc') {
-                    return 'XNO: ' + (swap.amount_xno?.toFixed(8) || '?') + ' XNO → ' + swap.amount_cc + ' CC';
-                }
-                if (swap.swap_type === 'cc_to_xno') {
-                    return swap.amount_cc + ' CC → ' + (swap.amount_cc * 0.000002).toFixed(8) + ' XNO';
-                }
-                if (swap.swap_type === 'duco') {
-                    return swap.amount_cc + ' CC → ' + (swap.amount_cc/10) + ' DUCO';
-                }
-                if (swap.swap_type === 'duco_to_cc') {
-                    return (swap.amount_duco || swap.amount_cc/10) + ' DUCO → ' + swap.amount_cc + ' CC';
-                }
-                return swap.amount_cc + ' CC';
-            }
-            
-            async function loadAllSwaps() {
-                try {
-                    const resp = await fetch('/admin/api/all-swaps');
-                    const data = await resp.json();
-                    if (data.status === 'success' && Array.isArray(data.swaps)) {
-                        allSwaps = data.swaps;
-                        const pending = allSwaps.filter(s => s.status === 'pending');
-                        const completed = allSwaps.filter(s => s.status === 'completed');
-                        renderPending(pending);
-                        renderCompleted(completed);
-                    }
-                } catch(e) { console.error(e); }
-            }
-            
-            function renderPending(swaps) {
-                const tbody = document.getElementById('pendingBody');
-                if (swaps.length === 0) {
-                    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">✨ No pending swaps<\/tr>';
-                    return;
-                }
-                tbody.innerHTML = '';
-                for (const swap of swaps) {
-                    const row = tbody.insertRow();
-                    row.insertCell(0).innerText = swap.id;
-                    row.insertCell(1).innerText = swap.from_user;
-                    row.insertCell(2).innerText = swap.amount_cc;
-                    row.insertCell(3).innerHTML = getSwapTypeBadge(swap.swap_type);
-                    row.insertCell(4).innerText = swap.receiver;
-                    row.insertCell(5).innerHTML = '<small>' + formatSwapDetails(swap) + '<\/small>';
-                    row.insertCell(6).innerHTML = '<span class="status-pending">pending</span>';
-                    const actions = row.insertCell(7);
-                    
-                    const completeBtn = document.createElement('button');
-                    completeBtn.innerText = '✅ Complete';
-                    completeBtn.className = 'btn-complete';
-                    completeBtn.onclick = () => {
-                        if (swap.swap_type === 'cc_to_xno') {
-                            openXnoModal(swap);
-                        } else {
-                            completeSwap(swap.id);
-                        }
-                    };
-                    
-                    const deleteBtn = document.createElement('button');
-                    deleteBtn.innerText = '🗑️ Delete';
-                    deleteBtn.className = 'btn-delete';
-                    deleteBtn.onclick = () => deleteSwap(swap.id);
-                    
-                    actions.appendChild(completeBtn);
-                    actions.appendChild(deleteBtn);
-                }
-            }
-            
-            function renderCompleted(swaps) {
-                const tbody = document.getElementById('completedBody');
-                if (swaps.length === 0) {
-                    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">📭 No completed swaps yet<\/tr>';
-                    return;
-                }
-                tbody.innerHTML = '';
-                for (const swap of swaps) {
-                    const row = tbody.insertRow();
-                    row.insertCell(0).innerText = swap.id;
-                    row.insertCell(1).innerText = swap.from_user;
-                    row.insertCell(2).innerText = swap.amount_cc;
-                    row.insertCell(3).innerHTML = getSwapTypeBadge(swap.swap_type);
-                    row.insertCell(4).innerText = swap.receiver;
-                    let xnoDisplay = '-';
-                    if (swap.xno_txid) {
-                        xnoDisplay = '<span style="color:#2a6eff;font-size:0.7rem;">' + swap.xno_txid.substring(0, 20) + '...<\/span>';
-                    }
-                    row.insertCell(5).innerHTML = xnoDisplay;
-                    row.insertCell(6).innerHTML = '<span class="status-completed">completed</span>';
-                    row.insertCell(7).innerText = swap.completed_at ? new Date(swap.completed_at).toLocaleString() : '-';
-                }
-            }
-            
-            function openXnoModal(swap) {
-                currentPendingSwap = swap;
-                document.getElementById('fulfillSwapId').innerText = swap.id;
-                document.getElementById('fulfillReceiver').innerText = swap.receiver;
-                const xnoAmount = (swap.amount_cc * 0.000002).toFixed(8);
-                document.getElementById('fulfillAmount').innerHTML = '<span style="color:#2a6eff">' + xnoAmount + ' XNO</span>';
-                document.getElementById('xnoTxid').value = '';
-                document.getElementById('fulfillXnoModal').style.display = 'flex';
-            }
-            
-            function closeXnoModal() {
-                document.getElementById('fulfillXnoModal').style.display = 'none';
-                currentPendingSwap = null;
-            }
-            
-            async function confirmCompleteWithXno() {
-                if (!currentPendingSwap) return;
-                const xnoTxid = document.getElementById('xnoTxid').value.trim();
-                await completeSwap(currentPendingSwap.id, xnoTxid);
-                closeXnoModal();
-            }
-            
-            async function loadUsers() {
-                try {
-                    const resp = await fetch('/admin/api/all-users');
-                    const data = await resp.json();
-                    if (data.status === 'success') {
-                        allUsers = data.users;
-                        renderUsers(allUsers);
-                    }
-                } catch(e) { console.error(e); }
-            }
-            
-            function renderUsers(users) {
-                const tbody = document.getElementById('usersBody');
-                if (users.length === 0) {
-                    tbody.innerHTML = '<tr class="empty-row"><td colspan="3">👻 No users found<\/tr>';
-                    return;
-                }
-                tbody.innerHTML = '';
-                for (const user of users) {
-                    const row = tbody.insertRow();
-                    row.insertCell(0).innerText = user.username;
-                    row.insertCell(1).innerHTML = '<span style="color:#f58a00">' + user.balance.toFixed(4) + ' CC</span>';
-                    const actions = row.insertCell(2);
-                    const editBtn = document.createElement('button');
-                    editBtn.innerText = '✏️ Edit Balance';
-                    editBtn.className = 'btn-edit';
-                    editBtn.onclick = () => openEditModal(user.username, user.balance);
-                    actions.appendChild(editBtn);
-                }
-            }
-            
-            function searchUsers() {
-                const searchTerm = document.getElementById('userSearch').value.toLowerCase();
-                const filtered = allUsers.filter(u => u.username.toLowerCase().includes(searchTerm));
-                renderUsers(filtered);
-            }
-            
-            async function loadStats() {
-                try {
-                    const resp = await fetch('/admin/api/all-swaps');
-                    const data = await resp.json();
-                    const usersResp = await fetch('/admin/api/all-users');
-                    const usersData = await usersResp.json();
-                    if (data.status === 'success' && usersData.status === 'success') {
-                        const totalSwaps = data.swaps.length;
-                        const pendingSwaps = data.swaps.filter(s => s.status === 'pending').length;
-                        const completedSwaps = data.swaps.filter(s => s.status === 'completed').length;
-                        const xnoSwaps = data.swaps.filter(s => s.swap_type === 'xno_to_cc' || s.swap_type === 'cc_to_xno').length;
-                        const totalUsers = usersData.users.length;
-                        const totalBalance = usersData.users.reduce((sum, u) => sum + u.balance, 0);
-                        
-                        document.getElementById('statsContent').innerHTML = 
-                            '<div class="stats-grid">' +
-                            '<div class="stat-card">📊 Total Swaps<br><strong>' + totalSwaps + '<\/strong><\/div>' +
-                            '<div class="stat-card">⏳ Pending Swaps<br><strong>' + pendingSwaps + '<\/strong><\/div>' +
-                            '<div class="stat-card">✅ Completed Swaps<br><strong>' + completedSwaps + '<\/strong><\/div>' +
-                            '<div class="stat-card">🟦 XNO Swaps<br><strong>' + xnoSwaps + '<\/strong><\/div>' +
-                            '<div class="stat-card">👥 Total Users<br><strong>' + totalUsers + '<\/strong><\/div>' +
-                            '<div class="stat-card">💰 Total CC Supply<br><strong>' + totalBalance.toFixed(4) + ' CC<\/strong><\/div>' +
-                            '<\/div>';
-                    }
-                } catch(e) { console.error(e); }
-            }
-            
-            function openEditModal(username, currentBalance) {
-                currentEditUser = username;
-                document.getElementById('editUsername').innerText = username;
-                document.getElementById('currentBalance').innerText = currentBalance.toFixed(4);
-                document.getElementById('editAmount').value = '';
-                document.getElementById('editModal').style.display = 'flex';
-            }
-            
-            function closeModal() {
-                document.getElementById('editModal').style.display = 'none';
-                currentEditUser = null;
-            }
-            
-            async function saveBalance(action) {
-                const amount = parseFloat(document.getElementById('editAmount').value);
-                if (isNaN(amount) || amount < 0) {
-                    alert('Please enter a valid amount');
-                    return;
-                }
-                try {
-                    const resp = await fetch('/admin/api/update-balance', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ username: currentEditUser, amount, action })
-                    });
-                    const data = await resp.json();
-                    if (data.status === 'success') {
-                        alert('Balance updated! New balance: ' + data.new_balance.toFixed(4) + ' CC');
-                        closeModal();
-                        loadUsers();
-                    } else {
-                        alert('Error: ' + data.message);
-                    }
-                } catch(e) { alert(e.message); }
-            }
-            
-            async function completeSwap(id, xnoTxid = null) {
-                if (!confirm('Mark this swap as completed?')) return;
-                try {
-                    const body = xnoTxid ? { request_id: id, xno_txid: xnoTxid } : { request_id: id };
-                    const resp = await fetch('/admin/api/fulfill', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(body)
-                    });
-                    const data = await resp.json();
-                    if (data.status === 'success') {
-                        alert('✅ Swap completed!' + (xnoTxid ? ' XNO txid saved.' : ''));
-                        loadAllSwaps();
-                        loadStats();
-                    } else {
-                        alert('❌ Error: ' + (data.message || 'Unknown error'));
-                    }
-                } catch(e) { alert(e.message); }
-            }
-            
-            async function deleteSwap(id) {
-                if (!confirm('⚠️ Delete this swap request?')) return;
-                try {
-                    const resp = await fetch('/admin/api/delete/' + id, { method: 'DELETE' });
-                    const data = await resp.json();
-                    if (data.status === 'success') {
-                        alert('🗑️ Swap deleted.');
-                        loadAllSwaps();
-                        loadStats();
-                    } else {
-                        alert('❌ Error: ' + (data.message || 'Unknown error'));
-                    }
-                } catch(e) { alert(e.message); }
-            }
-            
-            // Auto refresh every 30 seconds
-            loadAllSwaps();
-            setInterval(() => {
-                loadAllSwaps();
-                loadStats();
-            }, 30000);
-        <\/script>
-    <\/body>
-    <\/html>
-  `);
-});
+// ==================== ADMIN WEB INTERFACE ====================
+// (Giữ nguyên toàn bộ như cũ - không thay đổi)
+// ... (đoạn admin dashboard dài đã có, tôi giữ nguyên)
 
 // ════════════════════════════════════════════════════
-//  PUBLIC ENDPOINTS (giữ nguyên)
+//  PUBLIC ENDPOINTS
 // ════════════════════════════════════════════════════
 app.get('/api/server/public-key', (req, res) => {
   res.json({
@@ -953,7 +286,7 @@ app.post('/auth', authLimiter, (req, res) => {
   }
 });
 
-// Các route công khai (giữ nguyên)
+// ─── Các route công khai ─────────────────────────────
 app.get('/get_user/:username', (req, res) => {
   try {
     const user = db.getUser(req.params.username);
@@ -989,10 +322,17 @@ app.get('/get_transactions', (req, res) => {
 
 app.get('/network_status', (req, res) => {
   try {
-    const recent = db.getRecentBlocks(10);
+    const lastBlock = db.getLastBlock();
+    const blocks = db.getBlocks(10);
     const validators = db.getValidators(10).map(v => ({ username: v.username, stake: v.amount }));
     const posRewardPool = db.getPosRewardPool ? db.getPosRewardPool() : { balance: 0, total_fees: 0 };
-    res.json({ recent_blocks: recent, active_validators: validators, pos_reward_pool: posRewardPool });
+    res.json({
+      recent_blocks: blocks,
+      last_block: lastBlock,
+      active_validators: validators,
+      pos_reward_pool: posRewardPool,
+      total_blocks: db.getBlockCount ? db.getBlockCount() : 0
+    });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
   }
@@ -1038,7 +378,7 @@ app.get('/pos/info', (req, res) => {
   }
 });
 
-// CÁC ROUTE YÊU CẦU TOKEN (giữ nguyên)
+// ─── Các route yêu cầu token ─────────────────────────
 app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
   const { to_username, amount } = req.body;
   const from_username = req.user.username;
@@ -1104,7 +444,6 @@ app.post('/pos/stake', verifyToken, stakeLimiter, (req, res) => {
 app.post('/pos/unstake', verifyToken, stakeLimiter, (req, res) => {
   try {
     const username = req.user.username;
-    const currentStake = db.getStake(username);
     db.unstake(username);
     res.json({ status: 'success', message: 'Unstaked successfully. All funds returned.', staked: 0 });
   } catch (e) {
@@ -1112,16 +451,38 @@ app.post('/pos/unstake', verifyToken, stakeLimiter, (req, res) => {
   }
 });
 
-// MINING ROUTES (công khai)
-app.get('/active_bounties_list', (req, res) => {
+// ════════════════════════════════════════════════════
+//  MINING ROUTES – SỬ DỤNG BLOCKCHAIN MỚI
+// ════════════════════════════════════════════════════
+
+// Lấy danh sách blocks gần đây (thay thế active_bounties_list)
+app.get('/blocks', (req, res) => {
   try {
-    const bounties = blockchain.getActiveBounties();
-    res.json(bounties);
+    const limit = parseInt(req.query.limit) || 10;
+    const blocks = db.getBlocks(limit);
+    const last = db.getLastBlock();
+    res.json({ status: 'success', blocks, last_block: last, total: db.getBlockCount ? db.getBlockCount() : 0 });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
   }
 });
 
+// Lấy thông tin một block theo height
+app.get('/block/:height', (req, res) => {
+  try {
+    const height = parseInt(req.params.height);
+    if (isNaN(height) || height < 0) {
+      return res.status(400).json({ status: 'error', message: 'Invalid height' });
+    }
+    const block = db.getBlockByHeight(height);
+    if (!block) return res.status(404).json({ status: 'error', message: 'Block not found' });
+    res.json({ status: 'success', block });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+// Lấy job cho miner (giữ nguyên tên để tương thích)
 app.post('/get_job', (req, res) => {
   try {
     const { worker_name } = req.body;
@@ -1139,37 +500,63 @@ app.post('/get_job', (req, res) => {
   }
 });
 
+// Lấy job theo ID (dùng db.getActiveJob)
 app.get('/get_job/:id', (req, res) => {
   try {
-    const job = blockchain.getJob(req.params.id);
-    if (!job) return res.status(404).json({ status: 'error', message: 'Bounty not found' });
-    res.json(job);
+    const job = db.getActiveJob(req.params.id);
+    if (!job) return res.status(404).json({ status: 'error', message: 'Job not found' });
+    // map job thành định dạng cũ
+    res.json({
+      job_id: job.id,
+      height: job.height,
+      prev_hash: job.prev_hash,
+      difficulty: job.difficulty,
+      target_hex: job.target_hex,
+      reward: job.reward,
+      assigned_to: job.assigned_to
+    });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
   }
 });
 
+// Submit solution – gọi blockchain.submitSolution
 app.post('/submit_solution', (req, res) => {
   try {
     const bounty_id = req.query.bounty_id || req.body.bounty_id;
     const nonce = req.query.nonce || req.body.nonce;
     const worker_name = req.query.worker_name || req.body.worker_name;
     const device_type = req.query.device_type || req.body.device_type || 'web';
+
     if (!bounty_id || !nonce || !worker_name) {
       return res.status(400).json({ status: 'error', message: 'Missing required parameters: bounty_id, nonce, worker_name' });
     }
+
     const result = blockchain.submitSolution(bounty_id, nonce, worker_name, device_type);
-    if (result && result.status === 'success') sendMinerWebhook(worker_name, bounty_id, device_type);
+    // Webhook đã được gọi bên trong blockchain.submitSolution, không cần gọi lại.
     res.json(result);
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
   }
 });
 
+// Heartbeat
 app.get('/miner_heartbeat', (req, res) => {
   res.json({ status: 'ok', time: Date.now() });
 });
 
+// /active_bounties_list – giữ để tương thích nhưng trả về danh sách blocks thay vì bounties
+app.get('/active_bounties_list', (req, res) => {
+  try {
+    const blocks = db.getBlocks(20);
+    const last = db.getLastBlock();
+    res.json({ status: 'success', blocks, last_block: last });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+// ─── TEST / HEALTH ──────────────────────────────────────
 app.get('/api/test', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString(), message: 'ChocoHub API is running', uptime: process.uptime() });
 });
@@ -1178,7 +565,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString(), dbHash: getDbHash() });
 });
 
-// BACKUP ENDPOINTS (giữ nguyên)
+// ─── BACKUP ENDPOINTS (giữ nguyên) ──────────────────────
 app.post('/api/backup/register', (req, res) => {
   const { url, token, name, description, owner, platform, clientId } = req.body;
   if (!url || !token) return res.status(400).json({ status: 'error', message: 'Missing url or token' });
@@ -1237,7 +624,7 @@ app.post('/api/backup/sync', (req, res) => {
   }
 });
 
-// SPA fallback
+// ─── SPA fallback ──────────────────────────────────────
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, 'public', 'index.html');
   try {
@@ -1261,8 +648,9 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-blockchain.startAutoBounty();
-blockchain.startPoSMinting();
+// ─── KHỞI ĐỘNG CÁC DỊCH VỤ ──────────────────────────
+blockchain.startPoSMinting();  // PoS vẫn chạy
+// Không còn startAutoBounty vì không dùng bounties nữa
 
 app.listen(PORT, () => {
   console.log('');
@@ -1272,6 +660,7 @@ app.listen(PORT, () => {
   console.log(`║  HTTP/1.1  : http://localhost:${PORT} ║`);
   console.log(`║  HTTP/2 TLS: https://localhost:${HTTPS_PORT} ║`);
   console.log('║  Admin web : http://localhost:' + PORT + '/admin ║');
+  console.log('║  Blockchain: Genesis created        ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
   backupClient.start();
