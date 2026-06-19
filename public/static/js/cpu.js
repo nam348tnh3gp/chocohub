@@ -1,21 +1,21 @@
-// cpu.js – SHA-256 tối ưu tốc độ (batch processing, tái sử dụng buffer)
+// cpu.js – SHA-256 tối ưu tốc độ (batch processing, tái sử dụng buffer) – hỗ trợ server blockchain mới
 (function() {
 'use strict';
 
 let running = false;
-let bountyId = '';
-let targetBytes = null;      // target dạng Uint8Array (32 bytes)
+let jobId = '';                 // có thể là bounty_id hoặc job_id
+let targetBytes = null;         // target dạng Uint8Array (32 bytes)
 let prefixBytes, suffixBytes;
 let nonceBytes = new Uint8Array(20);
 let miningNonce = 0;
-let inputBuffer = null;      // buffer tái sử dụng, chỉ cập nhật nonce
+let inputBuffer = null;         // buffer tái sử dụng, chỉ cập nhật nonce
 
-// Bảng K
+// Bảng K SHA-256
 const K = new Uint32Array([
     0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
     0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-    0xe49b69c1,0xefbe4786,0xfc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x6ca6351,0x14292967,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
     0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
     0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
     0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
@@ -62,7 +62,10 @@ function sha256(msg) {
     }
     const hash = new Uint8Array(32);
     for (let i=0; i<8; i++) {
-        hash[i*4] = H[i]>>>24; hash[i*4+1] = H[i]>>>16; hash[i*4+2] = H[i]>>>8; hash[i*4+3] = H[i];
+        hash[i*4] = H[i]>>>24;
+        hash[i*4+1] = H[i]>>>16 & 0xFF;
+        hash[i*4+2] = H[i]>>>8 & 0xFF;
+        hash[i*4+3] = H[i] & 0xFF;
     }
     return hash;
 }
@@ -74,7 +77,7 @@ function meetsTargetFast(hash) {
             return hash[i] < targetBytes[i];
         }
     }
-    return true; // bằng nhau
+    return true; // bằng nhau (trường hợp rất hiếm)
 }
 
 // Ghi nonce vào nonceBytes (ASCII decimal, 20 ký tự, căn phải)
@@ -102,17 +105,24 @@ function mineBatch() {
     let hashes = 0;
     const startTime = performance.now();
     const input = inputBuffer;
+    const prefixLen = prefixBytes.length;
     for (let i = 0; i < BATCH_SIZE && running; i++) {
         setNonce(miningNonce);
         // copy nonceBytes vào vị trí thích hợp trong input
-        for (let j = 0; j < 20; j++) input[prefixBytes.length + j] = nonceBytes[j];
+        for (let j = 0; j < 20; j++) input[prefixLen + j] = nonceBytes[j];
         const hash = sha256(input);
         if (meetsTargetFast(hash)) {
+            // Chuyển hash thành hex string để gửi về (dùng cho debug)
+            let hex = '';
+            for (let i = 0; i < 32; i++) {
+                const b = hash[i];
+                hex += (b < 16 ? '0' : '') + b.toString(16);
+            }
             self.postMessage({
                 type: 'found',
                 nonce: miningNonce,
-                hash: Array.from(hash).map(b => (b<16?'0':'')+b.toString(16)).join(''),
-                bounty_id: bountyId
+                hash: hex,
+                job_id: jobId
             });
             running = false;
             return;
@@ -127,31 +137,75 @@ function mineBatch() {
     } else {
         self.postMessage({ type: 'progress', hashes: hashes });
     }
-    if (running) setTimeout(mineBatch, 0);
+    if (running) {
+        // Dùng requestAnimationFrame nếu có, hoặc setTimeout 0 để không block main thread
+        if (typeof requestAnimationFrame !== 'undefined') {
+            requestAnimationFrame(mineBatch);
+        } else {
+            setTimeout(mineBatch, 0);
+        }
+    }
 }
 
-function initJob(lastHash, username, targetHexStr, bid) {
-    bountyId = bid;
+// Khởi tạo job với thông tin từ server (hỗ trợ cả định dạng cũ và mới)
+function initJob(jobData) {
+    // Lấy job_id (có thể là bounty_id hoặc job_id)
+    jobId = jobData.bounty_id || jobData.job_id || jobData.id;
+    if (!jobId) {
+        self.postMessage({ type: 'error', message: 'Missing job id' });
+        return;
+    }
+
+    // Lấy last_hash hoặc prev_hash
+    const lastHash = jobData.last_hash || jobData.prev_hash;
+    if (!lastHash) {
+        self.postMessage({ type: 'error', message: 'Missing last_hash' });
+        return;
+    }
+
+    const username = jobData.username || jobData.worker_name || 'anonymous';
+    const targetHexStr = jobData.target_hex || jobData.targetHex;
+    if (!targetHexStr) {
+        self.postMessage({ type: 'error', message: 'Missing target_hex' });
+        return;
+    }
+
     // Chuyển targetHex thành Uint8Array để so sánh nhanh
     targetBytes = new Uint8Array(32);
     for (let i = 0; i < 32; i++) {
         targetBytes[i] = parseInt(targetHexStr.substr(i*2, 2), 16);
     }
+
     const enc = new TextEncoder();
     prefixBytes = enc.encode(lastHash);
     suffixBytes = enc.encode(username);
     nonceBytes.fill(48);
     miningNonce = 0;
     inputBuffer = buildInputBuffer();
+
+    // Thông báo đã sẵn sàng
+    self.postMessage({
+        type: 'job_ready',
+        job_id: jobId,
+        difficulty: jobData.difficulty || '?',
+        reward: jobData.reward || '?'
+    });
 }
 
 self.onmessage = function(e) {
     switch(e.data.type) {
         case 'start':
             if (!running) {
-                initJob(e.data.last_hash, e.data.username, e.data.target_hex, e.data.bounty_id);
-                running = true;
-                mineBatch();
+                initJob(e.data);
+                if (jobId) {
+                    running = true;
+                    // Bắt đầu mining ngay
+                    if (typeof requestAnimationFrame !== 'undefined') {
+                        requestAnimationFrame(mineBatch);
+                    } else {
+                        setTimeout(mineBatch, 0);
+                    }
+                }
             }
             break;
         case 'stop':
@@ -160,6 +214,21 @@ self.onmessage = function(e) {
         case 'ping':
             self.postMessage({ type: 'pong' });
             break;
+        default:
+            // fallback: nếu nhận data trực tiếp (không có type) thì coi như start
+            if (e.data && (e.data.bounty_id || e.data.job_id)) {
+                if (!running) {
+                    initJob(e.data);
+                    if (jobId) {
+                        running = true;
+                        if (typeof requestAnimationFrame !== 'undefined') {
+                            requestAnimationFrame(mineBatch);
+                        } else {
+                            setTimeout(mineBatch, 0);
+                        }
+                    }
+                }
+            }
     }
 };
 
