@@ -646,6 +646,16 @@
         let balanceAnimationId = null;
         let authToken = null;
 
+        // Cache để tránh re-render không cần thiết
+        let cachedBlocks = null;
+        let cachedValidators = null;
+        let blocksHash = '';
+        let validatorsHash = '';
+
+        function simpleHash(obj) {
+            return JSON.stringify(obj).length; // dùng độ dài làm hash nhanh (đủ cho so sánh thay đổi)
+        }
+
         function animateValue(id, start, end, duration) {
             const obj = document.getElementById(id);
             if (!obj) return;
@@ -706,58 +716,71 @@
             }
         }
 
+        // Cập nhật network monitor với caching để tránh re-render không cần thiết
         async function updateNetworkMonitor() {
             try {
                 const res = await fetch('/network_status');
                 if (!res.ok) throw new Error('Fetch failed');
                 const data = await res.json();
 
-                const blocksLog = document.getElementById('mined-blocks-log');
-                if (data.recent_blocks && data.recent_blocks.length > 0) {
-                    const frag = document.createDocumentFragment();
-                    data.recent_blocks.forEach(b => {
-                        const li = document.createElement('li');
-                        const spanId = document.createElement('span');
-                        spanId.className = 'block-id';
-                        spanId.textContent = '#' + (b.id ? b.id.substring(0,8) : '?');
-                        li.appendChild(spanId);
-                        li.appendChild(document.createTextNode(' - ' + (b.username || 'unknown') + ' - '));
-                        const spanReward = document.createElement('span');
-                        spanReward.className = 'reward';
-                        spanReward.textContent = String(b.reward) + ' CC';
-                        li.appendChild(spanReward);
-                        frag.appendChild(li);
-                    });
-                    blocksLog.textContent = '';
-                    blocksLog.appendChild(frag);
-                } else {
-                    blocksLog.innerHTML = '<li class="empty-state">Awaiting activity...</li>';
+                // Kiểm tra blocks
+                const blocks = data.recent_blocks || [];
+                const newBlocksHash = blocks.map(b => b.id + b.reward + (b.username||'')).join('|');
+                if (newBlocksHash !== blocksHash) {
+                    blocksHash = newBlocksHash;
+                    const blocksLog = document.getElementById('mined-blocks-log');
+                    if (blocks.length > 0) {
+                        const frag = document.createDocumentFragment();
+                        blocks.forEach(b => {
+                            const li = document.createElement('li');
+                            const spanId = document.createElement('span');
+                            spanId.className = 'block-id';
+                            spanId.textContent = '#' + (b.id ? b.id.substring(0,8) : '?');
+                            li.appendChild(spanId);
+                            li.appendChild(document.createTextNode(' - ' + (b.username || 'unknown') + ' - '));
+                            const spanReward = document.createElement('span');
+                            spanReward.className = 'reward';
+                            spanReward.textContent = String(b.reward) + ' CC';
+                            li.appendChild(spanReward);
+                            frag.appendChild(li);
+                        });
+                        blocksLog.textContent = '';
+                        blocksLog.appendChild(frag);
+                    } else {
+                        blocksLog.innerHTML = '<li class="empty-state">Awaiting activity...</li>';
+                    }
                 }
 
-                const minersList = document.getElementById('active-miners-list');
-                if (data.active_validators && data.active_validators.length > 0) {
-                    const frag = document.createDocumentFragment();
-                    data.active_validators.forEach(v => {
-                        const div = document.createElement('div');
-                        div.className = 'miner-entry';
-                        const dot = document.createElement('span');
-                        dot.className = 'miner-dot';
-                        dot.setAttribute('aria-hidden', 'true');
-                        div.appendChild(dot);
-                        const name = document.createElement('span');
-                        name.className = 'miner-name';
-                        name.textContent = v.username || '?';
-                        div.appendChild(name);
-                        const stake = document.createElement('span');
-                        stake.className = 'miner-device';
-                        stake.textContent = (v.stake || 0) + ' CC staked';
-                        div.appendChild(stake);
-                        frag.appendChild(div);
-                    });
-                    minersList.textContent = '';
-                    minersList.appendChild(frag);
-                } else {
-                    minersList.innerHTML = '<div class="empty-state">No active validators</div>';
+                // Kiểm tra validators
+                const validators = data.active_validators || [];
+                const newValidatorsHash = validators.map(v => v.username + v.stake).join('|');
+                if (newValidatorsHash !== validatorsHash) {
+                    validatorsHash = newValidatorsHash;
+                    const minersList = document.getElementById('active-miners-list');
+                    if (validators.length > 0) {
+                        const frag = document.createDocumentFragment();
+                        validators.forEach(v => {
+                            const div = document.createElement('div');
+                            div.className = 'miner-entry';
+                            const dot = document.createElement('span');
+                            dot.className = 'miner-dot';
+                            dot.setAttribute('aria-hidden', 'true');
+                            div.appendChild(dot);
+                            const name = document.createElement('span');
+                            name.className = 'miner-name';
+                            name.textContent = v.username || '?';
+                            div.appendChild(name);
+                            const stake = document.createElement('span');
+                            stake.className = 'miner-device';
+                            stake.textContent = (v.stake || 0) + ' CC staked';
+                            div.appendChild(stake);
+                            frag.appendChild(div);
+                        });
+                        minersList.textContent = '';
+                        minersList.appendChild(frag);
+                    } else {
+                        minersList.innerHTML = '<div class="empty-state">No active validators</div>';
+                    }
                 }
             } catch (e) {
                 console.warn('Network monitor update failed:', e.message);
@@ -798,7 +821,6 @@
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
-                    // ✅ Lưu username GIỮ NGUYÊN hoa/thường (không toLowerCase)
                     localStorage.setItem('choco_user', username);
                     if (data.token) {
                         localStorage.setItem('choco_token', data.token);
@@ -848,9 +870,11 @@
                     setTimeout(() => { dashUI.classList.add('loaded'); }, 150);
                 }
                 setHumaneGreeting(user.charAt(0).toUpperCase() + user.slice(1));
+                // Load dữ liệu lần đầu
                 await Promise.allSettled([updateBalanceAction(), updateNetworkMonitor()]);
+                // Thiết lập interval với thời gian dài hơn để giảm tải
                 setInterval(updateBalanceAction, 5000);
-                setInterval(updateNetworkMonitor, 10000);
+                setInterval(updateNetworkMonitor, 15000); // tăng từ 10s lên 15s
             }
 
             const authBtn = document.getElementById('auth-btn');
