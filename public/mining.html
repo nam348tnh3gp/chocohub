@@ -21,13 +21,11 @@
             padding: 2rem 1rem;
         }
 
-        /* Layout */
         .miner-container {
             max-width: 680px;
             margin: 0 auto;
         }
 
-        /* Header */
         .header {
             display: flex;
             justify-content: space-between;
@@ -64,7 +62,6 @@
             color: #F58A00;
         }
 
-        /* Stats cards */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -94,7 +91,6 @@
             color: #8B8296;
         }
 
-        /* Current job card */
         .job-card {
             background: rgba(18, 16, 15, 0.85);
             backdrop-filter: blur(12px);
@@ -154,7 +150,6 @@
             border-radius: 10px;
         }
 
-        /* Control panel */
         .control-panel {
             background: rgba(18, 16, 15, 0.85);
             backdrop-filter: blur(8px);
@@ -202,7 +197,6 @@
             transform: none;
         }
 
-        /* Console log */
         .console {
             background: #0A0A0A;
             border-radius: 20px;
@@ -223,7 +217,6 @@
         .log-err  { color: #FF8888; }
         .log-win  { color: #7FE0A0; font-weight: 600; }
 
-        /* Toast */
         .toast {
             position: fixed;
             bottom: 20px;
@@ -245,7 +238,6 @@
         .toast.success { border-color: #40C057; color: #40C057; }
         .toast.error { border-color: #FA5252; color: #FA5252; }
 
-        /* Ad unit (mantido exatamente como no original, com o novo ID) */
         .ad-sidebar {
             position: fixed;
             top: 50%;
@@ -320,7 +312,7 @@
     </style>
 </head>
 <body>
-<!-- BEGIN AADS AD UNIT 2444734 (substituído mantendo estrutura original) -->
+<!-- BEGIN AADS AD UNIT 2444734 -->
 <div class="ad-sidebar">
     <input autocomplete="off" type="checkbox" id="aadsstickymqfltshv" hidden />
     <div class="ad-inner">
@@ -425,7 +417,6 @@
             while (consoleDiv.children.length > 100) consoleDiv.removeChild(consoleDiv.firstChild);
         }
 
-        // Se não estiver logado, a página permanece visível, mas a mineração não inicia
         if (!workerName) {
             log('Not logged in. Please log in to start mining.', 'warn');
             startBtn.disabled = true;
@@ -478,7 +469,6 @@
             }
         }
 
-        // Hashrate tracker
         function startHashrateTracker() {
             if (hashrateInterval) clearInterval(hashrateInterval);
             currentHashCount = 0;
@@ -495,7 +485,7 @@
             }, 1000);
         }
 
-        // ---------- Job handling ----------
+        // ---------- Job handling (supports both old and new formats) ----------
         async function fetchNewJob() {
             try {
                 const res = await fetch('/get_job', {
@@ -505,7 +495,10 @@
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const job = await res.json();
-                if (!job || !job.bounty_id) throw new Error('Invalid job response');
+                // Accept job if it has bounty_id OR job_id
+                if (!job || !(job.bounty_id || job.job_id)) {
+                    throw new Error('Invalid job response (missing id)');
+                }
                 return job;
             } catch (err) {
                 log(`Failed to fetch job: ${err.message}`, 'err');
@@ -517,15 +510,16 @@
             if (!job) return false;
             currentJob = job;
 
-            // Update UI
-            jobIdSpan.textContent = job.bounty_id.substring(0, 12) + '...';
-            const reward = (job.reward !== undefined && job.reward !== null) ? job.reward.toFixed(4) : '?';
+            // Determine job ID
+            const jobId = job.bounty_id || job.job_id;
+            jobIdSpan.textContent = jobId.substring(0, 12) + '...';
+            const reward = (job.reward !== undefined && job.reward !== null) ? parseFloat(job.reward).toFixed(4) : '?';
             rewardSpan.textContent = `${reward} CC`;
             difficultySpan.textContent = job.difficulty || '?';
             document.getElementById('jobCard').classList.add('mining');
             progressFill.style.width = '0%';
 
-            // Send to worker
+            // Send the whole job object to the worker – worker.js expects all fields
             if (!worker) {
                 worker = new Worker('/static/js/cpu.js');
                 worker.onmessage = handleWorkerMessage;
@@ -534,10 +528,7 @@
 
             worker.postMessage({
                 type: 'start',
-                last_hash: job.last_hash,
-                username: workerName,
-                target_hex: job.target_hex,
-                bounty_id: job.bounty_id
+                ...job
             });
 
             miningActive = true;
@@ -548,7 +539,7 @@
             startHashrateTracker();
             updateUI();
 
-            log(`Mining job #${job.bounty_id.substring(0,10)}... | diff: ${job.difficulty} | reward: ${reward} CC`, 'info');
+            log(`Mining job #${jobId.substring(0,10)}... | diff: ${job.difficulty} | reward: ${reward} CC`, 'info');
             return true;
         }
 
@@ -582,7 +573,7 @@
                     totalHashes += newHashes;
                     currentHashCount += newHashes;
                     updateUI();
-                    // Progress bar: approximate based on difficulty (just visual)
+                    // Progress bar: approximate based on difficulty
                     const targetTotal = currentJob?.difficulty ? parseInt(currentJob.difficulty) : 50000;
                     const percent = Math.min(95, (totalHashes / targetTotal) * 100);
                     progressFill.style.width = percent + '%';
@@ -592,25 +583,31 @@
                     progressFill.style.width = '100%';
                     miningActive = false;
                     if (worker) worker.postMessage({ type: 'stop' });
-                    submitSolution(data.bounty_id, data.nonce, workerName);
+                    // Use job_id (or bounty_id) from worker response
+                    const jobId = data.job_id || data.bounty_id;
+                    if (jobId) {
+                        submitSolution(jobId, data.nonce, workerName);
+                    } else {
+                        log('No job id in found message', 'err');
+                    }
                     break;
                 case 'pong':
-                    // heartbeat, ignore
+                    // heartbeat
                     break;
                 default:
                     break;
             }
         }
 
-        // Submit solution
-        async function submitSolution(bountyId, nonce, wName) {
-            log(`Submitting solution for #${bountyId.substring(0,8)}...`, 'info');
+        // Submit solution (uses 'bounty_id' parameter as expected by server)
+        async function submitSolution(jobId, nonce, wName) {
+            log(`Submitting solution for #${jobId.substring(0,8)}...`, 'info');
             try {
                 const res = await fetch('/submit_solution', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        bounty_id: bountyId,
+                        bounty_id: jobId,   // server still expects 'bounty_id'
                         nonce: nonce,
                         worker_name: wName,
                         device_type: 'web_miner'
@@ -621,7 +618,6 @@
                     const reward = result.reward || '?';
                     log(`✅ BLOCK SOLVED! +${reward} CC`, 'win');
                     showToast(`+${reward} CC earned!`, false);
-                    // Auto-fetch next job if auto mode is on
                     if (autoMineEnabled) {
                         setTimeout(() => startMiningLoop(), 2000);
                     } else {
@@ -630,7 +626,7 @@
                         stopBtn.disabled = true;
                     }
                 } else {
-                    log(`❌ Submission rejected: ${result.reason || 'unknown'}`, 'err');
+                    log(`❌ Submission rejected: ${result.reason || result.message || 'unknown'}`, 'err');
                     showToast('Solution rejected', true);
                     if (autoMineEnabled) {
                         setTimeout(() => startMiningLoop(), 3000);
