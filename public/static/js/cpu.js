@@ -1,4 +1,5 @@
 // cpu.js – SHA-256 tối ưu tốc độ (batch processing, tái sử dụng buffer) – hỗ trợ server blockchain mới
+// Đã cập nhật: thêm debug, ưu tiên username từ jobData
 (function() {
 'use strict';
 
@@ -163,7 +164,14 @@ function initJob(jobData) {
         return;
     }
 
+    // ⚠️ QUAN TRỌNG: lấy username, ưu tiên từ username/worker_name
     const username = jobData.username || jobData.worker_name || 'anonymous';
+    if (username === 'anonymous') {
+        self.postMessage({ type: 'debug', message: '⚠️ No username provided, using "anonymous"' });
+    } else {
+        self.postMessage({ type: 'debug', message: `✅ Using username: "${username}"` });
+    }
+
     const targetHexStr = jobData.target_hex || jobData.targetHex;
     if (!targetHexStr) {
         self.postMessage({ type: 'error', message: 'Missing target_hex' });
