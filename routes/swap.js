@@ -382,13 +382,12 @@ router.post('/fulfill', verifyToken, verifyAdmin, (req, res) => {
 
     if (request.swap_type === 'duco' || request.swap_type === 'ccpoc' || request.swap_type === 'cc_to_xno') {
       db.updateBalance('swap_holding', -gross);
-      db.updateBalance(adminName, net);
       if (db.addTransaction.length >= 4) {
-        db.addTransaction('swap_holding', adminName, net, `Swap payout for ${request.from_user} (${request.id})`);
+        db.addTransaction('swap_holding', 'swap_system', gross, `Swap burned for ${request.from_user} (${request.id})`);
       } else {
-        db.addTransaction('swap_holding', adminName, net);
+        db.addTransaction('swap_holding', 'swap_system', gross);
       }
-      console.log(`✅ Swap payout: ${net} CC to ${adminName} from ${gross} CC gross (${fee} CC fee) [${request.swap_type}]`);
+      console.log(`✅ Swap completed and burned: ${gross} CC from ${request.from_user} (fee collected: ${fee} CC) [${request.swap_type}]`);
 
       if (request.swap_type === 'cc_to_xno') {
         if (xno_txid) {
