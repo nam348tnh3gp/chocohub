@@ -1,5 +1,7 @@
 // db.js – Full fix + PoS Staking + Leaderboard + Backup full snapshot + Transactions
 // 🆕 Thêm bảng worker_difficulty cho per-worker dynamic difficulty
+// 🆕 Thêm blockchain tables: blocks, mining_jobs
+
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -11,11 +13,8 @@ db.pragma('journal_mode = WAL');
 // Helper: chuyển datetime từ SQLite (YYYY-MM-DD HH:MM:SS) sang ISO string (YYYY-MM-DDTHH:MM:SSZ)
 function toISO(dateStr) {
     if (!dateStr) return null;
-    // Nếu đã có Z hoặc + thì giữ nguyên
     if (dateStr.includes('Z') || dateStr.includes('+')) return dateStr;
-    // Nếu đã ở dạng YYYY-MM-DDTHH:MM:SS (không Z) thì thêm Z
     if (dateStr.includes('T')) return dateStr + 'Z';
-    // Dạng 'YYYY-MM-DD HH:MM:SS' -> replace space với T và thêm Z
     return dateStr.replace(' ', 'T') + 'Z';
 }
 
@@ -91,6 +90,35 @@ db.exec(`
     last_solve_time INTEGER DEFAULT 0,
     updated_at TEXT DEFAULT (datetime('now'))
   );
+
+  -- 🆕 Bảng blockchain mới
+  CREATE TABLE IF NOT EXISTS blocks (
+    height INTEGER PRIMARY KEY,
+    hash TEXT UNIQUE NOT NULL,
+    prev_hash TEXT NOT NULL,
+    miner TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    reward REAL NOT NULL,
+    difficulty REAL NOT NULL,
+    tx_count INTEGER DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS mining_jobs (
+    id TEXT PRIMARY KEY,
+    height INTEGER NOT NULL,
+    prev_hash TEXT NOT NULL,
+    difficulty REAL NOT NULL,
+    target_hex TEXT NOT NULL,
+    reward REAL NOT NULL,
+    assigned_to TEXT,
+    status TEXT DEFAULT 'active',
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  -- Tạo index cho hiệu suất
+  CREATE INDEX IF NOT EXISTS idx_mining_jobs_assigned_to_status ON mining_jobs(assigned_to, status);
+  CREATE INDEX IF NOT EXISTS idx_blocks_height ON blocks(height DESC);
 `);
 
 console.log('✅ Database ready (better-sqlite3)');
@@ -133,14 +161,13 @@ function getTransactions(username, limit = 20) {
     ORDER BY id DESC
     LIMIT ?
   `).all(username.trim(), username.trim(), limit);
-  // Chuyển đổi created_at sang ISO
   return rows.map(row => ({
     ...row,
     created_at: toISO(row.created_at)
   }));
 }
 
-// ─── Blocks & Miners ─────────────────────────────
+// ─── Blocks & Miners (cũ) ─────────────────────────
 function getRecentBlocks(limit = 10) {
   const rows = db.prepare('SELECT bounty_id as id, username, reward, mined_at FROM blocks_mined ORDER BY mined_at DESC LIMIT ?').all(limit);
   return rows.map(row => ({
@@ -367,6 +394,9 @@ function importFullState(state) {
     db.exec('DELETE FROM snake_claims');
     db.exec('DELETE FROM bounties');
     db.exec('DELETE FROM sync_seq');
+    // Xóa thêm bảng mới nếu có dữ liệu cũ (tuỳ chọn)
+    // db.exec('DELETE FROM blocks');
+    // db.exec('DELETE FROM mining_jobs');
 
     const insertUser = db.prepare('INSERT INTO users (username, pin_hash, balance) VALUES (?, ?, ?)');
     (state.users || []).forEach(u => {
@@ -422,6 +452,75 @@ function setWorkerDifficulty(workerName, difficulty, lastSolveTime) {
   `).run(workerName, difficulty, lastSolveTime);
 }
 
+// ═══════════════════════════════════════════════════
+// 🆕 BLOCKCHAIN HELPER FUNCTIONS
+// ═══════════════════════════════════════════════════
+
+function getLastBlock() {
+  return db.prepare('SELECT * FROM blocks ORDER BY height DESC LIMIT 1').get();
+}
+
+function getBlockByHeight(height) {
+  return db.prepare('SELECT * FROM blocks WHERE height = ?').get(height);
+}
+
+function getBlockByHash(hash) {
+  return db.prepare('SELECT * FROM blocks WHERE hash = ?').get(hash);
+}
+
+function insertBlock(block) {
+  const { height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count } = block;
+  db.prepare(`
+    INSERT INTO blocks (height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count || 0);
+}
+
+function getActiveJob(jobId) {
+  return db.prepare('SELECT * FROM mining_jobs WHERE id = ? AND status = ?').get(jobId, 'active');
+}
+
+function getJobForWorker(workerName) {
+  return db.prepare('SELECT * FROM mining_jobs WHERE assigned_to = ? AND status = ? ORDER BY created_at DESC LIMIT 1')
+    .get(workerName, 'active');
+}
+
+function createJob(job) {
+  const { id, height, prev_hash, difficulty, target_hex, reward, assigned_to } = job;
+  db.prepare(`
+    INSERT INTO mining_jobs (id, height, prev_hash, difficulty, target_hex, reward, assigned_to, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
+  `).run(id, height, prev_hash, difficulty, target_hex, reward, assigned_to);
+}
+
+function markJobSolved(jobId) {
+  db.prepare('UPDATE mining_jobs SET status = ? WHERE id = ?').run('solved', jobId);
+}
+
+function deleteJobsForWorker(workerName, exceptJobId) {
+  db.prepare(`
+    DELETE FROM mining_jobs
+    WHERE assigned_to = ? AND status = 'active' AND id != ?
+  `).run(workerName, exceptJobId);
+}
+
+function cleanupExpiredJobs(expireSeconds) {
+  db.prepare(`
+    DELETE FROM mining_jobs
+    WHERE status = 'active'
+    AND (strftime('%s', 'now') - strftime('%s', created_at)) > ?
+  `).run(expireSeconds);
+}
+
+function getBlockCount() {
+  const row = db.prepare('SELECT COUNT(*) as count FROM blocks').get();
+  return row ? row.count : 0;
+}
+
+function getBlocks(limit = 10, offset = 0) {
+  return db.prepare('SELECT * FROM blocks ORDER BY height DESC LIMIT ? OFFSET ?').all(limit, offset);
+}
+
 // ─── Exports ─────────────────────────────────────
 module.exports = {
   authenticate,
@@ -450,7 +549,20 @@ module.exports = {
   addTransaction,
   getTransactions,
   cleanupOldBounties,
-  // 🆕 Per-worker difficulty
+  // Per-worker difficulty
   getWorkerDifficulty,
-  setWorkerDifficulty
+  setWorkerDifficulty,
+  // Blockchain helpers
+  getLastBlock,
+  getBlockByHeight,
+  getBlockByHash,
+  insertBlock,
+  getActiveJob,
+  getJobForWorker,
+  createJob,
+  markJobSolved,
+  deleteJobsForWorker,
+  cleanupExpiredJobs,
+  getBlockCount,
+  getBlocks
 };
