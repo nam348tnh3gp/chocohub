@@ -1,32 +1,17 @@
-// blockchain.js - PoW + fee-funded PoS reward distribution + job assignment
+// blockchain.js - PoW chuẩn với blockchain liên tục, per-worker difficulty, reward 0.05 CC/block
 const crypto = require('crypto');
 const db = require('./db');
 
-const Database = require('better-sqlite3');
-const path = require('path');
-const sqlite = new Database(path.join(__dirname, 'chocohub.db'));
-sqlite.pragma('journal_mode = WAL');
+// ─── Cấu hình ────────────────────────────────────
+const REWARD_PER_BLOCK = 0.05;                  // 0.05 CC
+const INITIAL_DIFFICULTY = 10;                  // mặc định cho worker mới
+const JOB_EXPIRE_SECONDS = 60;                  // job hết hạn sau 60s
+const MIN_DIFFICULTY = 1;
+const MAX_DIFFICULTY = 1000000;
+const DIFFICULTY_ADJUSTMENT_FACTOR = 0.5;       // hệ số điều chỉnh (0.5 = trung bình)
+const TARGET_SOLVE_TIME = 10;                   // giây mong muốn (cho per‑worker điều chỉnh)
 
-try {
-  sqlite.exec(`ALTER TABLE bounties ADD COLUMN worker_name TEXT DEFAULT NULL`);
-} catch (e) {
-  // Column already exists
-}
-
-const BLOCK_TIME_TARGET = 10;
-const DEFAULT_DIFFICULTY = 1;
-const MIN_DIFFICULTY = 1.0;
-const MAX_DIFFICULTY = 1000000.0;
-const MAX_DIFFICULTY_CHANGE = 0.25;
-
-const jobAssignTime = new Map();
-
-const AUTO_BOUNTY_MIN = 0.0001;
-const AUTO_BOUNTY_MAX = 0.01;
-const MIN_ACTIVE_BOUNTIES = 30;
-const MAX_ACTIVE_BOUNTIES = 100;
-const AUTO_BOUNTY_INTERVAL = 3000;
-
+// ─── Helper: chuyển difficulty → target hex ──
 function difficultyToTarget(difficulty) {
   const maxTarget = (1n << 256n) - 1n;
   const diffScaled = BigInt(Math.floor(difficulty * 1000));
@@ -35,58 +20,189 @@ function difficultyToTarget(difficulty) {
   return targetValue.toString(16).padStart(64, '0');
 }
 
-function createAutoBounty() {
-  const variation = (Math.random() - 0.5) * 0.4;
-  let difficulty = DEFAULT_DIFFICULTY * (1 + variation);
-  difficulty = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, difficulty));
-  difficulty = Math.round(difficulty * 10) / 10;
-
-  const reward = parseFloat((AUTO_BOUNTY_MIN + Math.random() * (AUTO_BOUNTY_MAX - AUTO_BOUNTY_MIN)).toFixed(3));
-  const bountyId = 'auto_' + crypto.randomBytes(6).toString('hex');
-  const targetHex = difficultyToTarget(difficulty);
-  const lastHash = crypto.randomBytes(32).toString('hex');
-
-  sqlite.prepare(`
-    INSERT INTO bounties (id, creator_username, target_device, difficulty, reward, cost, binary_target, last_hash, status, worker_name)
-    VALUES (?, ?, ?, ?, ?, 0, ?, ?, 'active', NULL)
-  `).run(bountyId, 'server', 'all', difficulty, reward, targetHex, lastHash);
-}
-
-function cleanupOldBounties() {
-  try {
-    const activeCount = sqlite.prepare('SELECT COUNT(*) as count FROM bounties WHERE status=?').get('active').count;
-    if (activeCount > MAX_ACTIVE_BOUNTIES) {
-      const toDelete = activeCount - MAX_ACTIVE_BOUNTIES;
-      sqlite
-        .prepare(`DELETE FROM bounties WHERE id IN (SELECT id FROM bounties WHERE status = 'active' ORDER BY created_at ASC LIMIT ?)`)
-        .run(toDelete);
-      console.log(`🧹 Cleaned up ${toDelete} old bounties`);
-    }
-  } catch (e) {
-    console.error('Cleanup error:', e.message);
+// ─── Khởi tạo blockchain (genesis) ─────────────
+function initBlockchain() {
+  const last = db.getLastBlock();
+  if (!last) {
+    const genesis = {
+      height: 0,
+      hash: '0'.repeat(64),
+      prev_hash: '0'.repeat(64),
+      miner: 'genesis',
+      nonce: '0',
+      timestamp: Math.floor(Date.now() / 1000),
+      reward: 0,
+      difficulty: INITIAL_DIFFICULTY,
+      tx_count: 0
+    };
+    db.insertBlock(genesis);
+    console.log('🌱 Genesis block created');
   }
 }
 
-function checkAndRefillBounties() {
+// ─── Lấy block cuối ────────────────────────────
+function getLastBlock() {
+  return db.getLastBlock();
+}
+
+// ─── Lấy job cho worker (tạo mới nếu chưa có) ─
+function getJobForWorker(workerName) {
+  // Dọn dẹp job hết hạn
+  db.cleanupExpiredJobs(JOB_EXPIRE_SECONDS);
+
+  // Kiểm tra worker đã có job active chưa
+  let job = db.getJobForWorker(workerName);
+  if (job) {
+    return mapJob(job);
+  }
+
+  // Lấy block cuối
+  const lastBlock = getLastBlock();
+  const height = lastBlock ? lastBlock.height + 1 : 0;
+  const prevHash = lastBlock ? lastBlock.hash : '0'.repeat(64);
+
+  // Lấy difficulty riêng của worker (nếu chưa có, tạo mới)
+  let diff = db.getWorkerDifficulty(workerName);
+  if (diff === null) {
+    diff = INITIAL_DIFFICULTY;
+    db.setWorkerDifficulty(workerName, diff, Date.now());
+  }
+
+  // Đảm bảo diff trong khoảng cho phép
+  diff = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, diff));
+
+  const targetHex = difficultyToTarget(diff);
+  const reward = REWARD_PER_BLOCK;
+
+  const jobId = 'job_' + crypto.randomBytes(6).toString('hex');
+  db.createJob({
+    id: jobId,
+    height,
+    prev_hash: prevHash,
+    difficulty: diff,
+    target_hex: targetHex,
+    reward,
+    assigned_to: workerName
+  });
+
+  const newJob = db.getActiveJob(jobId);
+  return mapJob(newJob);
+}
+
+// ─── Chuyển đổi job object ─────────────────────
+function mapJob(job) {
+  if (!job) return null;
+  return {
+    job_id: job.id,
+    height: job.height,
+    prev_hash: job.prev_hash,
+    difficulty: job.difficulty,
+    target_hex: job.target_hex,
+    reward: job.reward,
+    assigned_to: job.assigned_to
+  };
+}
+
+// ─── Submit solution ────────────────────────────
+function submitSolution(jobId, nonce, workerName, deviceType) {
+  const job = db.getActiveJob(jobId);
+  if (!job) throw new Error('Job not found or already solved');
+  if (job.assigned_to && job.assigned_to !== workerName) {
+    throw new Error('This job is assigned to another worker');
+  }
+
+  // Kiểm tra nonce
+  const input = job.prev_hash + String(nonce).padStart(20, '0') + workerName;
+  const hashHex = crypto.createHash('sha256').update(input).digest('hex');
+
+  if (hashHex >= job.target_hex) {
+    return { status: 'error', reason: `Invalid nonce: hash ${hashHex.substring(0,12)}... >= target` };
+  }
+
+  // Tạo block
+  const timestamp = Math.floor(Date.now() / 1000);
+  const newBlock = {
+    height: job.height,
+    hash: hashHex,
+    prev_hash: job.prev_hash,
+    miner: workerName,
+    nonce: String(nonce),
+    timestamp,
+    reward: job.reward,
+    difficulty: job.difficulty,
+    tx_count: 0
+  };
+
+  // Lưu block
+  db.insertBlock(newBlock);
+
+  // Thưởng cho miner
+  db.updateBalance(workerName, job.reward);
+
+  // Đánh dấu job solved và xóa job cũ của worker
+  db.markJobSolved(jobId);
+  db.deleteJobsForWorker(workerName, jobId);
+
+  // Điều chỉnh difficulty cho worker dựa trên thời gian giải
+  // Lấy thời gian tạo job từ database
+  const solveTime = (timestamp - new Date(job.created_at).getTime() / 1000);
+  if (solveTime > 0) {
+    adjustWorkerDifficulty(workerName, solveTime);
+  }
+
+  // Gửi thông báo (webhook)
+  sendMinerWebhook(workerName, newBlock.height, deviceType);
+
+  console.log(`⛏️ Block ${newBlock.height} solved by ${workerName} (${deviceType}) reward ${job.reward} CC`);
+
+  return {
+    status: 'success',
+    message: `Block ${newBlock.height} solved! Reward: ${job.reward} CC`,
+    reward: job.reward,
+    block_hash: hashHex
+  };
+}
+
+// ─── Điều chỉnh difficulty cho worker ──────────
+function adjustWorkerDifficulty(workerName, solveTime) {
+  const currentDiff = db.getWorkerDifficulty(workerName) || INITIAL_DIFFICULTY;
+  const targetTime = TARGET_SOLVE_TIME;
+
+  // Tính toán difficulty mới
+  let idealDiff = currentDiff * (targetTime / solveTime);
+  let newDiff = currentDiff + (idealDiff - currentDiff) * DIFFICULTY_ADJUSTMENT_FACTOR;
+  // Giới hạn thay đổi tối đa 25% để tránh biến động mạnh
+  const maxChange = currentDiff * 0.25;
+  newDiff = Math.max(currentDiff - maxChange, Math.min(currentDiff + maxChange, newDiff));
+  newDiff = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, newDiff));
+  newDiff = Math.round(newDiff * 10) / 10;
+
+  db.setWorkerDifficulty(workerName, newDiff, Date.now());
+  console.log(`👷 Worker ${workerName}: difficulty ${currentDiff.toFixed(1)} → ${newDiff.toFixed(1)} (solve time ${solveTime.toFixed(1)}s)`);
+}
+
+// ─── Webhook (giữ nguyên) ─────────────────────
+async function sendMinerWebhook(worker, height, device) {
   try {
-    cleanupOldBounties();
-    const activeCount = sqlite.prepare('SELECT COUNT(*) as count FROM bounties WHERE status=?').get('active').count;
-    if (activeCount < MIN_ACTIVE_BOUNTIES) {
-      const needed = MIN_ACTIVE_BOUNTIES - activeCount;
-      for (let i = 0; i < needed; i++) createAutoBounty();
-      console.log(`📊 Bounties refilled: ${activeCount} → ${MIN_ACTIVE_BOUNTIES}`);
-    }
-  } catch (e) {
-    console.error('Auto-bounty error:', e.message);
+    await fetch(process.env.DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        embeds: [{
+          title: "⛏️ New Block Mined!",
+          description: `Block **#${height}** was solved.\n\n**Worker:** \`${worker}\`\n**Device:** \`${device}\`\n**Reward:** 0.05 CC`,
+          color: 0xf1c40f,
+          timestamp: new Date().toISOString(),
+          footer: { text: "ChocoHub PoW" }
+        }]
+      })
+    });
+  } catch (err) {
+    console.error('⚠️ Webhook error:', err.message);
   }
 }
 
-function startAutoBounty() {
-  checkAndRefillBounties();
-  setInterval(checkAndRefillBounties, AUTO_BOUNTY_INTERVAL);
-  console.log('🤖 Auto-bounty started');
-}
-
+// ─── PoS (giữ nguyên từ cũ) ────────────────────
 const POS_BLOCK_INTERVAL = 30000;
 const MIN_STAKE = 10;
 let currentValidator = null;
@@ -129,117 +245,24 @@ function startPoSMinting() {
   console.log('🏦 PoS reward distribution started (fee-funded pool, proportional stake share)');
 }
 
-function adjustWorkerDifficulty(workerName, solveTime) {
-  const currentDiff = db.getWorkerDifficulty(workerName) || DEFAULT_DIFFICULTY;
-  const targetTime = BLOCK_TIME_TARGET;
+// ─── Khởi tạo khi load module ──────────────────
+initBlockchain();
 
-  let idealDiff = currentDiff * (targetTime / solveTime);
-  let newDiff = currentDiff + (idealDiff - currentDiff) * 0.5;
-  const maxChange = currentDiff * MAX_DIFFICULTY_CHANGE;
-  newDiff = Math.max(currentDiff - maxChange, Math.min(currentDiff + maxChange, newDiff));
-  newDiff = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, newDiff));
-  newDiff = Math.round(newDiff * 10) / 10;
-
-  db.setWorkerDifficulty(workerName, newDiff, Date.now());
-  console.log(`👷 Worker ${workerName}: difficulty ${currentDiff.toFixed(1)} → ${newDiff.toFixed(1)} (solve time ${solveTime.toFixed(1)}s)`);
-}
-
-function getActiveBounties() {
-  const rows = sqlite.prepare('SELECT id, creator_username, target_device, difficulty, reward, binary_target, last_hash FROM bounties WHERE status=? ORDER BY created_at DESC LIMIT 50').all('active');
-  const result = {};
-  rows.forEach(r => {
-    result[r.id] = {
-      id: r.id,
-      creator: r.creator_username,
-      target_device: r.target_device,
-      difficulty: r.difficulty,
-      reward: r.reward,
-      target_hex: r.binary_target,
-      last_hash: r.last_hash
-    };
-  });
-  return result;
-}
-
-function getJob(bountyId) {
-  const bounty = sqlite.prepare('SELECT * FROM bounties WHERE id=? AND status=?').get(bountyId, 'active');
-  if (!bounty) return null;
-  return {
-    last_hash: bounty.last_hash,
-    target_hex: bounty.binary_target,
-    difficulty: bounty.difficulty,
-    bounty_id: bounty.id,
-    reward: bounty.reward
-  };
-}
-
-function getJobForWorker(workerName) {
-  let bounty = sqlite.prepare("SELECT * FROM bounties WHERE worker_name = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1").get(workerName);
-  if (!bounty) {
-    let diff = db.getWorkerDifficulty(workerName);
-    if (!diff) diff = DEFAULT_DIFFICULTY;
-
-    const bountyId = 'wrk_' + crypto.randomBytes(6).toString('hex');
-    const targetHex = difficultyToTarget(diff);
-    const lastHash = crypto.randomBytes(32).toString('hex');
-    const reward = parseFloat((AUTO_BOUNTY_MIN + Math.random() * (AUTO_BOUNTY_MAX - AUTO_BOUNTY_MIN)).toFixed(3));
-
-    sqlite.prepare(`
-      INSERT INTO bounties (id, creator_username, target_device, difficulty, reward, cost, binary_target, last_hash, status, worker_name)
-      VALUES (?, 'server', 'all', ?, ?, 0, ?, ?, 'active', ?)
-    `).run(bountyId, diff, reward, targetHex, lastHash, workerName);
-    bounty = sqlite.prepare('SELECT * FROM bounties WHERE id = ?').get(bountyId);
-  }
-
-  jobAssignTime.set(workerName, Date.now());
-  return {
-    last_hash: bounty.last_hash,
-    target_hex: bounty.binary_target,
-    difficulty: bounty.difficulty,
-    bounty_id: bounty.id,
-    reward: bounty.reward
-  };
-}
-
-function submitSolution(bountyId, nonce, workerName, deviceType) {
-  const bounty = sqlite.prepare('SELECT * FROM bounties WHERE id=? AND status=?').get(bountyId, 'active');
-  if (!bounty) throw new Error('Bounty not found or already solved');
-  if (bounty.worker_name && bounty.worker_name !== workerName) throw new Error('This bounty is assigned to another worker');
-
-  const noncePadded = String(nonce).padStart(20, '0');
-  const input = bounty.last_hash + noncePadded + workerName;
-  const hashHex = crypto.createHash('sha256').update(input).digest('hex');
-
-  if (hashHex >= bounty.binary_target) {
-    return { status: 'error', reason: `Invalid nonce: hash ${hashHex.substring(0, 12)}... >= target` };
-  }
-
-  sqlite.prepare('UPDATE bounties SET status=?, nonce=?, solver_username=? WHERE id=?').run('solved', String(nonce), workerName, bountyId);
-  const reward = bounty.reward || 0.006;
-  db.updateBalance(workerName, reward);
-  sqlite.prepare('INSERT INTO blocks_mined (username, bounty_id, reward) VALUES (?, ?, ?)').run(workerName, bountyId, reward);
-
-  const assignTime = jobAssignTime.get(workerName);
-  if (assignTime) {
-    const solveTime = (Date.now() - assignTime) / 1000;
-    adjustWorkerDifficulty(workerName, solveTime);
-    jobAssignTime.delete(workerName);
-  }
-
-  cleanupOldBounties();
-  return { status: 'success', message: `Block solved! You earned ${reward} CC.`, reward };
-}
-
+// ─── Export các hàm (giữ tương thích với cũ) ──
 module.exports = {
-  getActiveBounties,
-  getJob,
+  // PoW mới
+  getLastBlock,
   getJobForWorker,
   submitSolution,
-  startAutoBounty,
-  checkAndRefillBounties,
-  cleanupOldBounties,
+  // PoS
   startPoSMinting,
   distributePoSRewards,
   getCurrentValidator,
-  getCurrentDifficulty: () => DEFAULT_DIFFICULTY
+  getCurrentDifficulty: () => INITIAL_DIFFICULTY,
+  // Hàm cũ (để tương thích – có thể bỏ dần)
+  getActiveBounties: () => ({}),   // không dùng nữa
+  getJob: (id) => null,            // không dùng nữa
+  startAutoBounty: () => {},       // không dùng nữa
+  checkAndRefillBounties: () => {},
+  cleanupOldBounties: () => {}
 };
