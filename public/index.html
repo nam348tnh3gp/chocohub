@@ -641,20 +641,14 @@
         // ══════════════════════════════════════════════════════
         // SECURITY-FIXED DASHBOARD SCRIPT (Case-Sensitive Username)
         // ══════════════════════════════════════════════════════
-        
+
         let currentBalance = 0;
         let balanceAnimationId = null;
         let authToken = null;
 
         // Cache để tránh re-render không cần thiết
-        let cachedBlocks = null;
-        let cachedValidators = null;
         let blocksHash = '';
         let validatorsHash = '';
-
-        function simpleHash(obj) {
-            return JSON.stringify(obj).length; // dùng độ dài làm hash nhanh (đủ cho so sánh thay đổi)
-        }
 
         function animateValue(id, start, end, duration) {
             const obj = document.getElementById(id);
@@ -716,16 +710,21 @@
             }
         }
 
-        // Cập nhật network monitor với caching để tránh re-render không cần thiết
+        // Cập nhật network monitor với caching và xử lý linh hoạt
         async function updateNetworkMonitor() {
             try {
                 const res = await fetch('/network_status');
                 if (!res.ok) throw new Error('Fetch failed');
                 const data = await res.json();
 
-                // Kiểm tra blocks
+                // Xử lý blocks – hỗ trợ cả dữ liệu mới (height, miner) và cũ (id, username)
                 const blocks = data.recent_blocks || [];
-                const newBlocksHash = blocks.map(b => b.id + b.reward + (b.username||'')).join('|');
+                const newBlocksHash = blocks.map(b => {
+                    const id = b.id || b.bounty_id || b.hash || (b.height !== undefined ? '#' + b.height : '?');
+                    const miner = b.username || b.miner || b.solver_username || 'unknown';
+                    const reward = b.reward || 0;
+                    return id + miner + reward;
+                }).join('|');
                 if (newBlocksHash !== blocksHash) {
                     blocksHash = newBlocksHash;
                     const blocksLog = document.getElementById('mined-blocks-log');
@@ -733,14 +732,20 @@
                         const frag = document.createDocumentFragment();
                         blocks.forEach(b => {
                             const li = document.createElement('li');
+                            // Hiển thị ID – ưu tiên height, id, hash
+                            let blockId = b.id || b.bounty_id || b.hash;
+                            if (b.height !== undefined) blockId = '#' + b.height;
+                            if (!blockId) blockId = '?';
                             const spanId = document.createElement('span');
                             spanId.className = 'block-id';
-                            spanId.textContent = '#' + (b.id ? b.id.substring(0,8) : '?');
+                            spanId.textContent = blockId.length > 10 ? blockId.substring(0,10) + '…' : blockId;
                             li.appendChild(spanId);
-                            li.appendChild(document.createTextNode(' - ' + (b.username || 'unknown') + ' - '));
+                            // Tên miner – ưu tiên username, miner, solver_username
+                            const miner = b.username || b.miner || b.solver_username || 'unknown';
+                            li.appendChild(document.createTextNode(' - ' + miner + ' - '));
                             const spanReward = document.createElement('span');
                             spanReward.className = 'reward';
-                            spanReward.textContent = String(b.reward) + ' CC';
+                            spanReward.textContent = (b.reward || 0) + ' CC';
                             li.appendChild(spanReward);
                             frag.appendChild(li);
                         });
@@ -751,9 +756,9 @@
                     }
                 }
 
-                // Kiểm tra validators
+                // Xử lý validators
                 const validators = data.active_validators || [];
-                const newValidatorsHash = validators.map(v => v.username + v.stake).join('|');
+                const newValidatorsHash = validators.map(v => (v.username || v.miner || '?') + (v.stake || 0)).join('|');
                 if (newValidatorsHash !== validatorsHash) {
                     validatorsHash = newValidatorsHash;
                     const minersList = document.getElementById('active-miners-list');
@@ -768,7 +773,7 @@
                             div.appendChild(dot);
                             const name = document.createElement('span');
                             name.className = 'miner-name';
-                            name.textContent = v.username || '?';
+                            name.textContent = v.username || v.miner || '?';
                             div.appendChild(name);
                             const stake = document.createElement('span');
                             stake.className = 'miner-device';
@@ -785,12 +790,6 @@
             } catch (e) {
                 console.warn('Network monitor update failed:', e.message);
             }
-        }
-
-        function escapeHTML(str) {
-            const div = document.createElement('div');
-            div.appendChild(document.createTextNode(str));
-            return div.innerHTML;
         }
 
         function setHumaneGreeting(name) {
@@ -874,7 +873,7 @@
                 await Promise.allSettled([updateBalanceAction(), updateNetworkMonitor()]);
                 // Thiết lập interval với thời gian dài hơn để giảm tải
                 setInterval(updateBalanceAction, 5000);
-                setInterval(updateNetworkMonitor, 15000); // tăng từ 10s lên 15s
+                setInterval(updateNetworkMonitor, 15000);
             }
 
             const authBtn = document.getElementById('auth-btn');
