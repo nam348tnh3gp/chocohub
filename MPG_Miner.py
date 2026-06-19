@@ -536,14 +536,22 @@ class ChocoMiner:
             if resp.status_code != 200:
                 return None
             data = resp.json()
-            if not data.get('bounty_id'):
+            # 🔁 Hỗ trợ cả hai định dạng (cũ và mới)
+            job_id = data.get('bounty_id') or data.get('job_id')
+            last_hash = data.get('last_hash') or data.get('prev_hash')
+            target_hex = data.get('target_hex')
+            difficulty = float(data.get('difficulty', 1.0))
+            reward = data.get('reward', '?')
+            
+            if not job_id or not last_hash or not target_hex:
                 return None
+                
             return {
-                "id": data['bounty_id'],
-                "last_hash": data['last_hash'],
-                "target_hex": data['target_hex'],
-                "difficulty": float(data.get('difficulty', 1.0)),
-                "reward": data.get('reward', '?')
+                "id": job_id,
+                "last_hash": last_hash,
+                "target_hex": target_hex,
+                "difficulty": difficulty,
+                "reward": reward
             }
         except Exception as e:
             self.log("ERR", f"Fetch job error: {e}")
