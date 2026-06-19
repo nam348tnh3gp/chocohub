@@ -6,12 +6,7 @@
     <title>ChocoHub · Web Miner</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,600;14..32,700;14..32,800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: #0D0B0A;
             background-image: radial-gradient(circle at 20% 30%, rgba(245, 138, 0, 0.08) 0%, transparent 70%);
@@ -20,12 +15,7 @@
             min-height: 100vh;
             padding: 2rem 1rem;
         }
-
-        .miner-container {
-            max-width: 680px;
-            margin: 0 auto;
-        }
-
+        .miner-container { max-width: 680px; margin: 0 auto; }
         .header {
             display: flex;
             justify-content: space-between;
@@ -57,11 +47,7 @@
             font-weight: 500;
             transition: 0.2s;
         }
-        .back-link:hover {
-            border-color: #F58A00;
-            color: #F58A00;
-        }
-
+        .back-link:hover { border-color: #F58A00; color: #F58A00; }
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -90,7 +76,6 @@
             letter-spacing: 1px;
             color: #8B8296;
         }
-
         .job-card {
             background: rgba(18, 16, 15, 0.85);
             backdrop-filter: blur(12px);
@@ -149,7 +134,6 @@
             transition: width 0.3s ease;
             border-radius: 10px;
         }
-
         .control-panel {
             background: rgba(18, 16, 15, 0.85);
             backdrop-filter: blur(8px);
@@ -196,7 +180,6 @@
             cursor: not-allowed;
             transform: none;
         }
-
         .console {
             background: #0A0A0A;
             border-radius: 20px;
@@ -216,7 +199,6 @@
         .log-warn { color: #F5A623; }
         .log-err  { color: #FF8888; }
         .log-win  { color: #7FE0A0; font-weight: 600; }
-
         .toast {
             position: fixed;
             bottom: 20px;
@@ -298,12 +280,7 @@
             overflow: hidden;
             margin: 0 auto;
         }
-        @media (max-width: 768px) {
-            .ad-sidebar {
-                display: none;
-            }
-        }
-
+        @media (max-width: 768px) { .ad-sidebar { display: none; } }
         @media (max-width: 560px) {
             .stats-grid { gap: 8px; }
             .stat-value { font-size: 1.2rem; }
@@ -392,7 +369,7 @@
 
 <script>
     (function() {
-        // ---------- Auth ----------
+        // ---------- Lấy username từ localStorage ----------
         const workerName = localStorage.getItem('choco_user');
 
         // ---------- DOM elements ----------
@@ -417,6 +394,7 @@
             while (consoleDiv.children.length > 100) consoleDiv.removeChild(consoleDiv.firstChild);
         }
 
+        // Nếu chưa đăng nhập, không cho mining
         if (!workerName) {
             log('Not logged in. Please log in to start mining.', 'warn');
             startBtn.disabled = true;
@@ -434,10 +412,9 @@
         let currentHashCount = 0;
         let lastTimestamp = Date.now();
         let currentHashrate = 0;
-
-        // Web Worker (mining core)
         let worker = null;
 
+        // ---------- UI helpers ----------
         function showToast(msg, isError = false) {
             const toast = document.getElementById('toast');
             toast.textContent = msg;
@@ -485,7 +462,7 @@
             }, 1000);
         }
 
-        // ---------- Job handling (supports both old and new formats) ----------
+        // ---------- Job handling (hỗ trợ cả server cũ và mới) ----------
         async function fetchNewJob() {
             try {
                 const res = await fetch('/get_job', {
@@ -495,7 +472,6 @@
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const job = await res.json();
-                // Accept job if it has bounty_id OR job_id
                 if (!job || !(job.bounty_id || job.job_id)) {
                     throw new Error('Invalid job response (missing id)');
                 }
@@ -510,7 +486,6 @@
             if (!job) return false;
             currentJob = job;
 
-            // Determine job ID
             const jobId = job.bounty_id || job.job_id;
             jobIdSpan.textContent = jobId.substring(0, 12) + '...';
             const reward = (job.reward !== undefined && job.reward !== null) ? parseFloat(job.reward).toFixed(4) : '?';
@@ -519,16 +494,19 @@
             document.getElementById('jobCard').classList.add('mining');
             progressFill.style.width = '0%';
 
-            // Send the whole job object to the worker – worker.js expects all fields
+            // Tạo Worker nếu chưa có
             if (!worker) {
                 worker = new Worker('/static/js/cpu.js');
                 worker.onmessage = handleWorkerMessage;
                 worker.onerror = (e) => log(`Worker error: ${e.message}`, 'err');
             }
 
+            // ⚠️ QUAN TRỌNG: truyền username vào worker để hash khớp với server
             worker.postMessage({
                 type: 'start',
-                ...job
+                ...job,
+                username: workerName,
+                worker_name: workerName
             });
 
             miningActive = true;
@@ -561,19 +539,21 @@
             updateUI();
         }
 
-        // Handle worker messages
+        // ---------- Xử lý tin nhắn từ Worker ----------
         function handleWorkerMessage(e) {
             const data = e.data;
             switch (data.type) {
                 case 'ready':
                     log('Worker ready', 'info');
                     break;
+                case 'debug':
+                    log(`[Worker] ${data.message}`, 'info');
+                    break;
                 case 'progress':
                     const newHashes = data.hashes || 0;
                     totalHashes += newHashes;
                     currentHashCount += newHashes;
                     updateUI();
-                    // Progress bar: approximate based on difficulty
                     const targetTotal = currentJob?.difficulty ? parseInt(currentJob.difficulty) : 50000;
                     const percent = Math.min(95, (totalHashes / targetTotal) * 100);
                     progressFill.style.width = percent + '%';
@@ -583,7 +563,6 @@
                     progressFill.style.width = '100%';
                     miningActive = false;
                     if (worker) worker.postMessage({ type: 'stop' });
-                    // Use job_id (or bounty_id) from worker response
                     const jobId = data.job_id || data.bounty_id;
                     if (jobId) {
                         submitSolution(jobId, data.nonce, workerName);
@@ -592,14 +571,13 @@
                     }
                     break;
                 case 'pong':
-                    // heartbeat
                     break;
                 default:
                     break;
             }
         }
 
-        // Submit solution (uses 'bounty_id' parameter as expected by server)
+        // ---------- Gửi solution ----------
         async function submitSolution(jobId, nonce, wName) {
             log(`Submitting solution for #${jobId.substring(0,8)}...`, 'info');
             try {
@@ -607,7 +585,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        bounty_id: jobId,   // server still expects 'bounty_id'
+                        bounty_id: jobId,
                         nonce: nonce,
                         worker_name: wName,
                         device_type: 'web_miner'
@@ -640,7 +618,7 @@
             }
         }
 
-        // Main mining loop
+        // ---------- Vòng lặp mining tự động ----------
         async function startMiningLoop() {
             if (!autoMineEnabled) return;
             stopMiningProcess(true);
@@ -662,14 +640,12 @@
         // ---------- UI actions ----------
         function onStart() {
             if (miningActive) {
-                // Pause
                 autoMineEnabled = false;
                 stopMiningProcess(true);
                 startBtn.textContent = '▶ Start Mining';
                 stopBtn.disabled = true;
                 log('Mining paused.', 'info');
             } else {
-                // Start/resume
                 autoMineEnabled = true;
                 startBtn.textContent = '⏸ Pause';
                 stopBtn.disabled = false;
@@ -686,12 +662,12 @@
             log('Miner stopped completely.', 'warn');
         }
 
-        // ---------- Initialize ----------
+        // ---------- Khởi tạo ----------
         function init() {
             startBtn.addEventListener('click', onStart);
             stopBtn.addEventListener('click', onStop);
             log(`Logged in as: ${workerName}`, 'info');
-            // Auto-start after 1 second
+            // Tự động bắt đầu sau 1 giây
             setTimeout(() => {
                 autoMineEnabled = true;
                 startMiningLoop();
