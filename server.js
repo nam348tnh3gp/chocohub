@@ -1,4 +1,5 @@
 // server.js – Hybrid PoW + PoS + Diffie-Hellman + HTTP/2 + TLS 1.3 + Session Token (JWT) + Rate Limit + Trust Proxy + SWAP + Admin Web Interface (Full)
+// 🆕 Tích hợp mempool và phí giao dịch tự động (node_fees)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -17,6 +18,7 @@ const snake = require('./snake');
 const backupClient = require('./backupSync');
 const DHExchange = require('./dh');
 const SwapRouter = require('./routes/swap');
+const NodeFeesRouter = require('./routes/node_fees'); // 🆕
 
 // admin users
 const ADMIN_USERS = ['chocoetom', 'Nam2010'];
@@ -270,6 +272,9 @@ app.use(verifyDHSignature);
 // Swap Module
 app.use('/swap', SwapRouter);
 
+// 🆕 Node Fees Module (quản lý phí giao dịch)
+app.use('/node_fees', NodeFeesRouter.router);
+
 // AUTH endpoint
 app.post('/auth', authLimiter, (req, res) => {
   const { username, pin } = req.body;
@@ -379,6 +384,7 @@ app.get('/pos/info', (req, res) => {
 });
 
 // ─── Các route yêu cầu token ─────────────────────────
+// 🆕 SỬA: /send_cc – chuyển sang mempool, trừ tiền ngay và giữ tạm trong mempool_holding
 app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
   const { to_username, amount } = req.body;
   const from_username = req.user.username;
@@ -390,18 +396,54 @@ app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
     if (isNaN(sendAmount) || sendAmount <= 0) {
       return res.status(400).json({ status: 'error', message: 'Invalid amount' });
     }
+    // Kiểm tra người gửi
     const sender = db.getUser(from_username);
     if (!sender) return res.status(404).json({ status: 'error', message: 'Sender not found' });
-    if (sender.balance < sendAmount) {
-      return res.status(400).json({ status: 'error', message: 'Insufficient balance' });
-    }
+    // Kiểm tra người nhận
     const receiver = db.getUser(to_username);
     if (!receiver) return res.status(404).json({ status: 'error', message: 'Receiver not found' });
-    db.updateBalance(from_username, -sendAmount);
-    db.updateBalance(to_username, sendAmount);
-    db.addTransaction(from_username, to_username, sendAmount);
-    const newBalance = db.getUser(from_username).balance;
-    res.json({ status: 'success', message: `Sent ${sendAmount} CC to ${to_username}`, new_balance: newBalance });
+
+    // Tính phí (lấy từ node_fees config – mặc định 1%)
+    const feePercent = NodeFeesRouter.TRANSACTION_FEE_PERCENT || 1;
+    const fee = parseFloat((sendAmount * feePercent / 100).toFixed(8));
+    const totalDeducted = parseFloat((sendAmount + fee).toFixed(8));
+
+    // Kiểm tra số dư
+    if (sender.balance < totalDeducted) {
+      return res.status(400).json({ status: 'error', message: `Insufficient balance. Need ${totalDeducted} CC (including ${fee} CC fee)` });
+    }
+
+    // Trừ tiền người gửi (chuyển vào mempool_holding)
+    db.updateBalance(from_username, -totalDeducted);
+    db.updateBalance('mempool_holding', totalDeducted);
+
+    // Tạo giao dịch mempool
+    const txId = 'tx_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
+    const mempoolTx = {
+      id: txId,
+      from_username: from_username,
+      to_username: to_username,
+      amount: sendAmount,
+      fee: fee,
+      total_deducted: totalDeducted
+    };
+    db.addToMempool(mempoolTx);
+
+    // Ghi log tạm (tuỳ chọn)
+    try {
+      db.addTransaction(from_username, 'mempool_holding', totalDeducted);
+    } catch (e) {}
+
+    console.log(`📥 [Mempool] ${from_username} sent ${sendAmount} CC to ${to_username} (fee ${fee} CC), pending confirmation`);
+
+    res.json({
+      status: 'pending',
+      message: `Transaction added to mempool. ${sendAmount} CC will be sent to ${to_username} after confirmation (fee ${fee} CC)`,
+      tx_id: txId,
+      fee: fee,
+      total_deducted: totalDeducted,
+      new_balance: sender.balance - totalDeducted
+    });
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
   }
@@ -650,7 +692,7 @@ process.on('SIGTERM', () => {
 
 // ─── KHỞI ĐỘNG CÁC DỊCH VỤ ──────────────────────────
 blockchain.startPoSMinting();  // PoS vẫn chạy
-// Không còn startAutoBounty vì không dùng bounties nữa
+NodeFeesRouter.initNodeFees(); // 🆕 Khởi tạo node_fees và mempool_holding
 
 app.listen(PORT, () => {
   console.log('');
@@ -661,6 +703,7 @@ app.listen(PORT, () => {
   console.log(`║  HTTP/2 TLS: https://localhost:${HTTPS_PORT} ║`);
   console.log('║  Admin web : http://localhost:' + PORT + '/admin ║');
   console.log('║  Blockchain: Genesis created        ║');
+  console.log('║  Mempool + Node Fees: Enabled       ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
   backupClient.start();
