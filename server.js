@@ -2,7 +2,7 @@
 // 🆕 Tích hợp mempool và phí giao dịch tự động (node_fees)
 // 🆕 Quản lý user (thêm, xoá, ban) trong admin dashboard
 // 🆕 Sửa lỗi lịch sử giao dịch (hiển thị cả confirmed và pending)
-// 🆕 Admin panel: thay nút hành động bằng icon bánh răng với dropdown menu
+// 🆕 Sử dụng các hàm admin từ db.js (deleteUser, setUserBanned)
 
 require('dotenv').config();
 const express = require('express');
@@ -197,17 +197,6 @@ function verifyToken(req, res, next) {
   }
 }
 
-// ─── Thêm cột banned vào bảng users nếu chưa có ──────
-try {
-  const hasBanned = db.db.prepare("PRAGMA table_info(users)").all().some(col => col.name === 'banned');
-  if (!hasBanned) {
-    db.db.exec("ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0");
-    console.log('✅ Added banned column to users table');
-  }
-} catch (e) {
-  console.warn('Could not add banned column:', e.message);
-}
-
 // ════════════════════════════════════════════════════
 //  ADMIN WEB INTERFACE (SESSION-BASED)
 // ════════════════════════════════════════════════════
@@ -348,16 +337,7 @@ app.delete('/admin/api/users/:username', requireAdminSession, async (req, res) =
     if (isAdmin(username)) {
       return res.status(403).json({ status: 'error', message: 'Cannot delete admin user' });
     }
-    const user = db.getUser(username);
-    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
-    // Xóa user khỏi bảng users
-    db.db.prepare('DELETE FROM users WHERE username = ?').run(username);
-    // Cũng xóa các dữ liệu liên quan (stakes, transactions, snake_claims, mempool, blocks_mined)
-    db.db.prepare('DELETE FROM stakes WHERE username = ?').run(username);
-    db.db.prepare('DELETE FROM transactions WHERE from_username = ? OR to_username = ?').run(username, username);
-    db.db.prepare('DELETE FROM snake_claims WHERE username = ?').run(username);
-    db.db.prepare('DELETE FROM mempool WHERE from_username = ? OR to_username = ?').run(username, username);
-    // blocks_mined giữ lại để thống kê (không xóa)
+    db.deleteUser(username);
     res.json({ status: 'success', message: `User ${username} deleted` });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
@@ -372,10 +352,7 @@ app.post('/admin/api/users/:username/ban', requireAdminSession, async (req, res)
     if (isAdmin(username)) {
       return res.status(403).json({ status: 'error', message: 'Cannot ban admin user' });
     }
-    const user = db.getUser(username);
-    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
-    // Cập nhật trạng thái banned
-    db.db.prepare('UPDATE users SET banned = ? WHERE username = ?').run(banned ? 1 : 0, username);
+    db.setUserBanned(username, banned);
     res.json({ status: 'success', message: `User ${username} ${banned ? 'banned' : 'unbanned'}` });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
@@ -515,8 +492,6 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             .btn-unban:hover { background: #5ce06e; }
             .btn-add-user { background: #f58a00; color: #0a0a12; border: none; padding: 8px 16px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
             .btn-add-user:hover { background: #ff9e20; transform: scale(1.02); }
-            .gear-icon { font-size: 1.2rem; cursor: pointer; padding: 4px 8px; border-radius: 6px; transition: background 0.2s; display: inline-block; }
-            .gear-icon:hover { background: rgba(255,255,255,0.1); }
             .empty-row td { text-align: center; color: #888; padding: 2rem; }
             .refresh { float: right; font-size: 0.8rem; color: #888; margin-top: 0.5rem; cursor: pointer; }
             .refresh:hover { color: #f58a00; }
@@ -534,13 +509,6 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
             .stat-card { background: #2a2a36; padding: 1rem; border-radius: 16px; text-align: center; }
             .stat-card strong { display: block; font-size: 1.5rem; color: #f58a00; margin-top: 0.5rem; }
-            .dropdown { position: relative; display: inline-block; }
-            .dropdown-content { display: none; position: absolute; right: 0; background: #1e1e2a; min-width: 160px; box-shadow: 0 8px 16px rgba(0,0,0,0.5); z-index: 1; border-radius: 12px; border: 1px solid var(--border-mid); }
-            .dropdown-content a { color: #eee4d8; padding: 10px 16px; text-decoration: none; display: block; font-size: 0.85rem; cursor: pointer; transition: background 0.2s; }
-            .dropdown-content a:hover { background: #2a2a36; }
-            .dropdown-content .danger { color: #ff4444; }
-            .dropdown-content .success { color: #40c057; }
-            .dropdown.show .dropdown-content { display: block; }
             @media (max-width: 768px) {
                 body { padding: 1rem; }
                 th, td { font-size: 0.7rem; padding: 8px 6px; }
@@ -597,7 +565,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     </div>
                     <div style="overflow-x: auto;">
                         <table id="usersTable">
-                            <thead><tr><th>Username</th><th>Balance (CC)</th><th>Status</th><th>Actions</th></tr></thead>
+                            <thead><tr><th>Username</th><th>Balance (CC)</th><th>Banned</th><th>Actions</th></tr></thead>
                             <tbody id="usersBody"><tr class="empty-row"><td colspan="4">Loading...</td></tr></tbody>
                         </table>
                     </div>
