@@ -1,5 +1,5 @@
 // routes/node_fees.js – Quản lý phí giao dịch tự động
-// Sửa lỗi: dùng các hàm có sẵn từ db.js, không truy cập db.db trực tiếp
+// Đảm bảo đầy đủ chức năng, export các hàm cần thiết
 
 const express = require('express');
 const crypto = require('crypto');
@@ -21,6 +21,7 @@ function ensureHoldingAccount() {
         db.authenticate('mempool_holding', randomPin);
         console.log('🏦 Created mempool_holding account with random pin');
     }
+    return db.getUser('mempool_holding');
 }
 
 function ensureNodeFeesAccount() {
@@ -30,6 +31,7 @@ function ensureNodeFeesAccount() {
         db.authenticate('node_fees', randomPin);
         console.log('🏦 Created node_fees account with random pin');
     }
+    return db.getUser('node_fees');
 }
 
 // ─── Helper ──────────────────────────────────────────────────────────────
@@ -391,12 +393,17 @@ function initNodeFees() {
 module.exports = {
     router,
     initNodeFees,
+    // Hàm dùng cho blockchain.js và server.js
+    ensureHoldingAccount,
+    ensureNodeFeesAccount,
     confirmMempoolTransactions,
     cleanupExpiredMempool,
     getNodeFeesBalance,
     getHoldingBalance,
     distributeNodeFees,
     addNodeFees,
+    refundMempoolTransaction,
+    // Cấu hình
     NODE_FEES_ADMINS,
     NODE_FEES_RETENTION,
     MEMPOOL_EXPIRE_SECONDS
