@@ -3,6 +3,7 @@
 // 🆕 Quản lý user (thêm, xoá, ban) trong admin dashboard
 // 🆕 Sửa lỗi lịch sử giao dịch (hiển thị cả confirmed và pending)
 // 🆕 Sử dụng các hàm admin từ db.js (deleteUser, setUserBanned)
+// 🆕 Cải thiện giao diện admin: icon bánh răng với dropdown, hiển thị Unban/Ban đúng trạng thái
 
 require('dotenv').config();
 const express = require('express');
@@ -492,6 +493,19 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             .btn-unban:hover { background: #5ce06e; }
             .btn-add-user { background: #f58a00; color: #0a0a12; border: none; padding: 8px 16px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
             .btn-add-user:hover { background: #ff9e20; transform: scale(1.02); }
+            .gear-icon {
+                font-size: 1.2rem;
+                cursor: pointer;
+                padding: 4px 8px;
+                border-radius: 6px;
+                transition: background 0.2s, transform 0.2s;
+                display: inline-block;
+                user-select: none;
+            }
+            .gear-icon:hover {
+                background: rgba(255,255,255,0.08);
+                transform: scale(1.05);
+            }
             .empty-row td { text-align: center; color: #888; padding: 2rem; }
             .refresh { float: right; font-size: 0.8rem; color: #888; margin-top: 0.5rem; cursor: pointer; }
             .refresh:hover { color: #f58a00; }
@@ -509,6 +523,52 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
             .stat-card { background: #2a2a36; padding: 1rem; border-radius: 16px; text-align: center; }
             .stat-card strong { display: block; font-size: 1.5rem; color: #f58a00; margin-top: 0.5rem; }
+            .dropdown {
+                position: relative;
+                display: inline-block;
+            }
+            .dropdown-content {
+                display: none;
+                position: absolute;
+                right: 0;
+                background: #1e1e2a;
+                min-width: 180px;
+                box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+                z-index: 1000;
+                border-radius: 12px;
+                border: 1px solid rgba(255,255,255,0.08);
+                padding: 4px 0;
+                backdrop-filter: blur(8px);
+            }
+            .dropdown-content a {
+                color: #eee4d8;
+                padding: 10px 16px;
+                text-decoration: none;
+                display: block;
+                font-size: 0.85rem;
+                cursor: pointer;
+                transition: background 0.15s;
+                border-radius: 6px;
+                margin: 2px 4px;
+            }
+            .dropdown-content a:hover {
+                background: rgba(255,255,255,0.06);
+            }
+            .dropdown-content .danger {
+                color: #ff6b6b;
+            }
+            .dropdown-content .danger:hover {
+                background: rgba(255,70,70,0.12);
+            }
+            .dropdown-content .success {
+                color: #40c057;
+            }
+            .dropdown-content .success:hover {
+                background: rgba(64,192,87,0.12);
+            }
+            .dropdown.show .dropdown-content {
+                display: block;
+            }
             @media (max-width: 768px) {
                 body { padding: 1rem; }
                 th, td { font-size: 0.7rem; padding: 8px 6px; }
