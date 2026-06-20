@@ -1,6 +1,7 @@
 // db.js – Full fix + PoS Staking + Leaderboard + Backup full snapshot + Transactions
 // 🆕 Thêm bảng worker_difficulty cho per-worker dynamic difficulty
 // 🆕 Thêm blockchain tables: blocks, mining_jobs
+// 🆕 Thêm mempool và node_fees
 
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
@@ -101,7 +102,8 @@ db.exec(`
     timestamp INTEGER NOT NULL,
     reward REAL NOT NULL,
     difficulty REAL NOT NULL,
-    tx_count INTEGER DEFAULT 0
+    tx_count INTEGER DEFAULT 0,
+    total_fees REAL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS mining_jobs (
@@ -116,9 +118,34 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 
+  -- 🆕 Bảng mempool
+  CREATE TABLE IF NOT EXISTS mempool (
+    id TEXT PRIMARY KEY,
+    from_username TEXT NOT NULL,
+    to_username TEXT NOT NULL,
+    amount REAL NOT NULL,
+    fee REAL NOT NULL,
+    total_deducted REAL NOT NULL,
+    status TEXT DEFAULT 'pending',
+    created_at TEXT DEFAULT (datetime('now')),
+    confirmed_at TEXT,
+    block_height INTEGER DEFAULT NULL
+  );
+
+  -- 🆕 Bảng node_fees (lưu số dư và tổng phí thu)
+  CREATE TABLE IF NOT EXISTS node_fees (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    balance REAL NOT NULL DEFAULT 0,
+    total_collected REAL NOT NULL DEFAULT 0,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  INSERT OR IGNORE INTO node_fees (id, balance, total_collected) VALUES (1, 0, 0);
+
   -- Tạo index cho hiệu suất
   CREATE INDEX IF NOT EXISTS idx_mining_jobs_assigned_to_status ON mining_jobs(assigned_to, status);
   CREATE INDEX IF NOT EXISTS idx_blocks_height ON blocks(height DESC);
+  CREATE INDEX IF NOT EXISTS idx_mempool_status ON mempool(status);
+  CREATE INDEX IF NOT EXISTS idx_mempool_created_at ON mempool(created_at);
 `);
 
 console.log('✅ Database ready (better-sqlite3)');
@@ -469,11 +496,15 @@ function getBlockByHash(hash) {
 }
 
 function insertBlock(block) {
-  const { height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count } = block;
+  const { height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count, total_fees } = block;
   db.prepare(`
-    INSERT INTO blocks (height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count || 0);
+    INSERT INTO blocks (height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count, total_fees)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count || 0, total_fees || 0);
+}
+
+function updateBlockFees(height, totalFees) {
+  db.prepare('UPDATE blocks SET total_fees = ? WHERE height = ?').run(totalFees, height);
 }
 
 function getActiveJob(jobId) {
@@ -521,6 +552,132 @@ function getBlocks(limit = 10, offset = 0) {
   return db.prepare('SELECT * FROM blocks ORDER BY height DESC LIMIT ? OFFSET ?').all(limit, offset);
 }
 
+// ═══════════════════════════════════════════════════
+// 🆕 MEMPOOL FUNCTIONS
+// ═══════════════════════════════════════════════════
+
+// Thêm giao dịch vào mempool
+function addToMempool(tx) {
+  const { id, from_username, to_username, amount, fee, total_deducted } = tx;
+  db.prepare(`
+    INSERT INTO mempool (id, from_username, to_username, amount, fee, total_deducted, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', datetime('now'))
+  `).run(id, from_username, to_username, amount, fee, total_deducted);
+  return id;
+}
+
+// Lấy các giao dịch pending (sắp xếp theo thời gian cũ nhất trước)
+function getPendingMempool(limit = 50) {
+  return db.prepare(`
+    SELECT * FROM mempool 
+    WHERE status = 'pending' 
+    ORDER BY created_at ASC 
+    LIMIT ?
+  `).all(limit);
+}
+
+// Đếm số lượng giao dịch pending
+function getMempoolCount() {
+  const row = db.prepare('SELECT COUNT(*) as count FROM mempool WHERE status = ?').get('pending');
+  return row ? row.count : 0;
+}
+
+// Đánh dấu giao dịch đã xác nhận
+function markMempoolConfirmed(txId, blockHeight) {
+  db.prepare(`
+    UPDATE mempool 
+    SET status = 'confirmed', confirmed_at = datetime('now'), block_height = ?
+    WHERE id = ?
+  `).run(blockHeight, txId);
+}
+
+// Đánh dấu giao dịch thất bại (do không đủ balance)
+function markMempoolFailed(txId) {
+  db.prepare(`
+    UPDATE mempool SET status = 'failed', confirmed_at = datetime('now')
+    WHERE id = ?
+  `).run(txId);
+}
+
+// Đánh dấu giao dịch đã được hoàn tiền
+function markMempoolRefunded(txId) {
+  db.prepare(`
+    UPDATE mempool SET status = 'refunded', confirmed_at = datetime('now')
+    WHERE id = ?
+  `).run(txId);
+}
+
+// Lấy thông tin một giao dịch theo ID
+function getMempoolTx(txId) {
+  return db.prepare('SELECT * FROM mempool WHERE id = ?').get(txId);
+}
+
+// Dọn dẹp các giao dịch pending quá hạn (trả về danh sách các tx để hoàn tiền)
+function getExpiredMempool(expireSeconds) {
+  return db.prepare(`
+    SELECT * FROM mempool 
+    WHERE status = 'pending' 
+    AND (strftime('%s', 'now') - strftime('%s', created_at)) > ?
+  `).all(expireSeconds);
+}
+
+// ═══════════════════════════════════════════════════
+// 🆕 NODE FEES FUNCTIONS
+// ═══════════════════════════════════════════════════
+
+// Lấy số dư node_fees
+function getNodeFeesBalance() {
+  const row = db.prepare('SELECT balance FROM node_fees WHERE id = 1').get();
+  return row ? row.balance : 0;
+}
+
+// Cộng phí vào node_fees
+function addNodeFees(amount) {
+  const fee = Number(amount) || 0;
+  if (fee <= 0) return 0;
+  db.prepare(`
+    UPDATE node_fees 
+    SET balance = balance + ?, 
+        total_collected = total_collected + ?,
+        updated_at = datetime('now')
+    WHERE id = 1
+  `).run(fee, fee);
+  return fee;
+}
+
+// Trừ tiền từ node_fees (khi rút)
+function deductNodeFees(amount) {
+  const fee = Number(amount) || 0;
+  if (fee <= 0) return 0;
+  const current = getNodeFeesBalance();
+  if (current < fee) throw new Error('Insufficient node_fees balance');
+  db.prepare(`
+    UPDATE node_fees 
+    SET balance = balance - ?,
+        updated_at = datetime('now')
+    WHERE id = 1
+  `).run(fee);
+  return fee;
+}
+
+// Cập nhật trực tiếp số dư node_fees (để đặt lại balance)
+function setNodeFeesBalance(newBalance) {
+  const bal = Number(newBalance) || 0;
+  db.prepare(`
+    UPDATE node_fees 
+    SET balance = ?,
+        updated_at = datetime('now')
+    WHERE id = 1
+  `).run(bal);
+  return bal;
+}
+
+// Lấy tổng phí đã thu
+function getTotalNodeFeesCollected() {
+  const row = db.prepare('SELECT total_collected FROM node_fees WHERE id = 1').get();
+  return row ? row.total_collected : 0;
+}
+
 // ─── Exports ─────────────────────────────────────
 module.exports = {
   authenticate,
@@ -557,6 +714,7 @@ module.exports = {
   getBlockByHeight,
   getBlockByHash,
   insertBlock,
+  updateBlockFees,
   getActiveJob,
   getJobForWorker,
   createJob,
@@ -564,5 +722,20 @@ module.exports = {
   deleteJobsForWorker,
   cleanupExpiredJobs,
   getBlockCount,
-  getBlocks
+  getBlocks,
+  // Mempool
+  addToMempool,
+  getPendingMempool,
+  getMempoolCount,
+  markMempoolConfirmed,
+  markMempoolFailed,
+  markMempoolRefunded,
+  getMempoolTx,
+  getExpiredMempool,
+  // Node fees
+  getNodeFeesBalance,
+  addNodeFees,
+  deductNodeFees,
+  setNodeFeesBalance,
+  getTotalNodeFeesCollected
 };
