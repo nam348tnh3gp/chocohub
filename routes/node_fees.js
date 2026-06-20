@@ -1,17 +1,19 @@
 // routes/node_fees.js – Quản lý phí giao dịch tự động
+// Đầy đủ, không rút gọn
+
 const express = require('express');
 const crypto = require('crypto');
 const db = require('../db');
 
 const router = express.Router();
 
-// ─── Cấu hình ────────────────────────────────────
-const NODE_FEES_ADMINS = ['chocoetom', 'Nam2010'];
-const NODE_FEES_RETENTION = 0.20; // Giữ lại 20% cho node_fees
-const ADMIN_SHARE = 0.40; // 80% còn lại chia đều cho 2 admin (40% mỗi người)
-const MEMPOOL_EXPIRE_SECONDS = 3600; // 1 giờ
+// ─── Cấu hình ──────────────────────────────────────────────────────────────
+const NODE_FEES_ADMINS = ['chocoetom', 'Nam2010'];   // Danh sách admin nhận phí
+const NODE_FEES_RETENTION = 0.20;                   // Giữ lại 20% cho node_fees
+const ADMIN_SHARE = 0.40;                           // 80% còn lại chia đều cho 2 admin (40% mỗi người)
+const MEMPOOL_EXPIRE_SECONDS = 3600;                // 1 giờ
 
-// ─── Tài khoản mempool_holding ───────────────────
+// ─── Tài khoản mempool_holding ──────────────────────────────────────────
 function ensureHoldingAccount() {
     const holding = db.getUser('mempool_holding');
     if (!holding) {
@@ -21,7 +23,7 @@ function ensureHoldingAccount() {
     }
 }
 
-// ─── Tài khoản node_fees ─────────────────────────
+// ─── Tài khoản node_fees ────────────────────────────────────────────────
 function ensureNodeFeesAccount() {
     const nodeFees = db.getUser('node_fees');
     if (!nodeFees) {
@@ -31,7 +33,7 @@ function ensureNodeFeesAccount() {
     }
 }
 
-// ─── Hàm hỗ trợ ──────────────────────────────────
+// ─── Hàm hỗ trợ ──────────────────────────────────────────────────────────
 function roundAmount(value) {
     return Number((Number(value) || 0).toFixed(8));
 }
@@ -46,7 +48,7 @@ function getHoldingBalance() {
     return holding ? holding.balance : 0;
 }
 
-// ─── Thêm phí vào node_fees ──────────────────────
+// ─── Thêm phí vào node_fees ─────────────────────────────────────────────
 function addNodeFees(amount) {
     const fee = roundAmount(amount);
     if (fee <= 0) return 0;
@@ -61,7 +63,7 @@ function addNodeFees(amount) {
     return fee;
 }
 
-// ─── Phân phối phí tự động ──────────────────────
+// ─── Phân phối phí tự động ──────────────────────────────────────────────
 function distributeNodeFees() {
     const balance = getNodeFeesBalance();
     if (balance <= 0.0001) return { distributed: 0, retained: 0 };
@@ -98,20 +100,19 @@ function distributeNodeFees() {
     };
 }
 
-// ─── Thêm giao dịch vào mempool ──────────────────
+// ─── Thêm giao dịch vào mempool ─────────────────────────────────────────
 function addToMempool(fromUser, toUser, amount, fee, totalDeducted) {
     const txId = 'tx_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
     
     // Lưu vào bảng mempool (nếu có)
     try {
-        const dbInst = require('../db');
         // Kiểm tra bảng mempool tồn tại
-        const tableCheck = dbInst.db.prepare(`
+        const tableCheck = db.db.prepare(`
             SELECT name FROM sqlite_master WHERE type='table' AND name='mempool'
         `).get();
         
         if (tableCheck) {
-            dbInst.db.prepare(`
+            db.db.prepare(`
                 INSERT INTO mempool (id, from_username, to_username, amount, fee, total_deducted, status, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, 'pending', datetime('now'))
             `).run(txId, fromUser, toUser, amount, fee, totalDeducted);
@@ -126,11 +127,10 @@ function addToMempool(fromUser, toUser, amount, fee, totalDeducted) {
     return txId;
 }
 
-// ─── Lấy giao dịch pending từ mempool ────────────
+// ─── Lấy giao dịch pending từ mempool ──────────────────────────────────
 function getPendingMempool(limit = 50) {
     try {
-        const dbInst = require('../db');
-        const rows = dbInst.db.prepare(`
+        const rows = db.db.prepare(`
             SELECT * FROM mempool 
             WHERE status = 'pending' 
             ORDER BY created_at ASC 
@@ -145,8 +145,7 @@ function getPendingMempool(limit = 50) {
 
 function getMempoolCount() {
     try {
-        const dbInst = require('../db');
-        const row = dbInst.db.prepare(`
+        const row = db.db.prepare(`
             SELECT COUNT(*) as count FROM mempool WHERE status = 'pending'
         `).get();
         return row ? row.count : 0;
@@ -155,7 +154,7 @@ function getMempoolCount() {
     }
 }
 
-// ─── Xác nhận giao dịch (khi block được tạo) ────
+// ─── Xác nhận giao dịch (khi block được tạo) ──────────────────────────
 function confirmMempoolTransactions(txIds, blockHeight) {
     if (!txIds || txIds.length === 0) return { confirmed: 0, failed: 0 };
     
@@ -163,21 +162,20 @@ function confirmMempoolTransactions(txIds, blockHeight) {
     let failed = 0;
     
     try {
-        const dbInst = require('../db');
-        const tx = dbInst.db.transaction(() => {
+        const tx = db.db.transaction(() => {
             for (const txId of txIds) {
                 // Lấy thông tin tx
-                const row = dbInst.db.prepare(`
+                const row = db.db.prepare(`
                     SELECT * FROM mempool WHERE id = ? AND status = 'pending'
                 `).get(txId);
                 
                 if (!row) continue;
                 
                 // Kiểm tra sender có đủ balance không
-                const sender = dbInst.getUser(row.from_username);
+                const sender = db.getUser(row.from_username);
                 if (!sender || sender.balance < row.total_deducted) {
                     // Không đủ balance → đánh dấu failed
-                    dbInst.db.prepare(`
+                    db.db.prepare(`
                         UPDATE mempool SET status = 'failed', confirmed_at = datetime('now')
                         WHERE id = ?
                     `).run(txId);
@@ -186,15 +184,15 @@ function confirmMempoolTransactions(txIds, blockHeight) {
                 }
                 
                 // Trừ tiền sender
-                dbInst.updateBalance(row.from_username, -row.total_deducted);
+                db.updateBalance(row.from_username, -row.total_deducted);
                 // Cộng tiền receiver
-                dbInst.updateBalance(row.to_username, row.amount);
+                db.updateBalance(row.to_username, row.amount);
                 
                 // Cộng phí vào node_fees (thay vì mempool_holding)
                 addNodeFees(row.fee);
                 
                 // Đánh dấu confirmed
-                dbInst.db.prepare(`
+                db.db.prepare(`
                     UPDATE mempool 
                     SET status = 'confirmed', confirmed_at = datetime('now'), block_height = ?
                     WHERE id = ?
@@ -218,11 +216,10 @@ function confirmMempoolTransactions(txIds, blockHeight) {
     }
 }
 
-// ─── Dọn dẹp mempool (xoá tx hết hạn, hoàn tiền) ──
+// ─── Dọn dẹp mempool (xoá tx hết hạn, hoàn tiền) ──────────────────────
 function cleanupExpiredMempool() {
     try {
-        const dbInst = require('../db');
-        const expired = dbInst.db.prepare(`
+        const expired = db.db.prepare(`
             SELECT * FROM mempool 
             WHERE status = 'pending' 
             AND (strftime('%s', 'now') - strftime('%s', created_at)) > ?
@@ -231,17 +228,17 @@ function cleanupExpiredMempool() {
         if (expired.length === 0) return { refunded: 0 };
         
         let refunded = 0;
-        const tx = dbInst.db.transaction(() => {
+        const tx = db.db.transaction(() => {
             for (const row of expired) {
                 // Hoàn tiền cho sender (cả amount + fee) từ mempool_holding
                 // Lấy từ mempool_holding (đã bị trừ khi vào mempool)
-                const holding = dbInst.getUser('mempool_holding');
+                const holding = db.getUser('mempool_holding');
                 if (holding && holding.balance >= row.total_deducted) {
-                    dbInst.updateBalance('mempool_holding', -row.total_deducted);
-                    dbInst.updateBalance(row.from_username, row.total_deducted);
+                    db.updateBalance('mempool_holding', -row.total_deducted);
+                    db.updateBalance(row.from_username, row.total_deducted);
                     
                     // Đánh dấu refunded
-                    dbInst.db.prepare(`
+                    db.db.prepare(`
                         UPDATE mempool SET status = 'refunded', confirmed_at = datetime('now')
                         WHERE id = ?
                     `).run(row.id);
@@ -250,7 +247,7 @@ function cleanupExpiredMempool() {
                     console.log(`🔄 Refunded ${row.total_deducted} CC to ${row.from_username} (expired tx ${row.id})`);
                 } else {
                     // Nếu mempool_holding không đủ, đánh dấu failed
-                    dbInst.db.prepare(`
+                    db.db.prepare(`
                         UPDATE mempool SET status = 'failed', confirmed_at = datetime('now')
                         WHERE id = ?
                     `).run(row.id);
@@ -267,26 +264,25 @@ function cleanupExpiredMempool() {
     }
 }
 
-// ─── Hoàn tiền cho user (khi admin xoá request) ──
+// ─── Hoàn tiền cho user (khi admin xoá request) ────────────────────────
 function refundMempoolTransaction(txId) {
     try {
-        const dbInst = require('../db');
-        const row = dbInst.db.prepare(`
+        const row = db.db.prepare(`
             SELECT * FROM mempool WHERE id = ? AND status = 'pending'
         `).get(txId);
         
         if (!row) return { success: false, message: 'Transaction not found or already processed' };
         
         // Hoàn tiền từ mempool_holding
-        const holding = dbInst.getUser('mempool_holding');
+        const holding = db.getUser('mempool_holding');
         if (!holding || holding.balance < row.total_deducted) {
             return { success: false, message: 'Insufficient holding balance' };
         }
         
-        dbInst.updateBalance('mempool_holding', -row.total_deducted);
-        dbInst.updateBalance(row.from_username, row.total_deducted);
+        db.updateBalance('mempool_holding', -row.total_deducted);
+        db.updateBalance(row.from_username, row.total_deducted);
         
-        dbInst.db.prepare(`
+        db.db.prepare(`
             UPDATE mempool SET status = 'refunded', confirmed_at = datetime('now')
             WHERE id = ?
         `).run(txId);
@@ -299,7 +295,7 @@ function refundMempoolTransaction(txId) {
     }
 }
 
-// ─── Middleware xác thực admin ──────────────────
+// ─── Middleware xác thực admin ──────────────────────────────────────────
 function verifyAdmin(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -320,7 +316,7 @@ function verifyAdmin(req, res, next) {
     }
 }
 
-// ─── API ROUTES ──────────────────────────────────
+// ─── API ROUTES ─────────────────────────────────────────────────────────
 
 // GET /node_fees/balance – Xem số dư node_fees và mempool_holding
 router.get('/balance', verifyAdmin, (req, res) => {
@@ -448,8 +444,7 @@ router.get('/mempool/status', (req, res) => {
 // GET /mempool/tx/:txid – Tra cứu transaction (công khai)
 router.get('/mempool/tx/:txid', (req, res) => {
     try {
-        const dbInst = require('../db');
-        const row = dbInst.db.prepare(`
+        const row = db.db.prepare(`
             SELECT * FROM mempool WHERE id = ?
         `).get(req.params.txid);
         
@@ -507,7 +502,7 @@ router.delete('/mempool/tx/:txid', verifyAdmin, (req, res) => {
     }
 });
 
-// ─── Khởi tạo ────────────────────────────────────
+// ─── Khởi tạo ────────────────────────────────────────────────────────────
 function initNodeFees() {
     ensureHoldingAccount();
     ensureNodeFeesAccount();
@@ -539,7 +534,7 @@ function initNodeFees() {
     console.log('🏦 Node fees module initialized');
 }
 
-// ─── Exports ─────────────────────────────────────
+// ─── Exports ─────────────────────────────────────────────────────────────
 module.exports = {
     router,
     initNodeFees,
