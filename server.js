@@ -1,5 +1,8 @@
 // server.js – Hybrid PoW + PoS + Diffie-Hellman + HTTP/2 + TLS 1.3 + Session Token (JWT) + Rate Limit + Trust Proxy + SWAP + Admin Web Interface (Full)
 // 🆕 Tích hợp mempool và phí giao dịch tự động (node_fees)
+// 🆕 Quản lý user (thêm, xoá, ban) trong admin dashboard
+// 🆕 Sửa lỗi lịch sử giao dịch (hiển thị cả confirmed và pending)
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -193,6 +196,17 @@ function verifyToken(req, res, next) {
   }
 }
 
+// ─── Thêm cột banned vào bảng users nếu chưa có ──────
+try {
+  const hasBanned = db.db.prepare("PRAGMA table_info(users)").all().some(col => col.name === 'banned');
+  if (!hasBanned) {
+    db.db.exec("ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0");
+    console.log('✅ Added banned column to users table');
+  }
+} catch (e) {
+  console.warn('Could not add banned column:', e.message);
+}
+
 // ════════════════════════════════════════════════════
 //  ADMIN WEB INTERFACE (SESSION-BASED)
 // ════════════════════════════════════════════════════
@@ -297,7 +311,79 @@ function requireAdminSession(req, res, next) {
   res.status(401).json({ status: 'error', message: 'Admin session required' });
 }
 
-// API proxy cho admin
+// ─── Các API admin quản lý user ──────────────────────
+
+// Lấy danh sách user (đã có)
+app.get('/admin/api/all-users', requireAdminSession, async (req, res) => {
+  try {
+    const users = db.getAllUsers();
+    res.json({ status: 'success', users });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// Thêm user mới (admin)
+app.post('/admin/api/users', requireAdminSession, async (req, res) => {
+  try {
+    const { username, pin } = req.body;
+    if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing username or pin' });
+    if (username.length < 3 || pin.length < 4) return res.status(400).json({ status: 'error', message: 'Username min 3, PIN min 4' });
+    // Kiểm tra user đã tồn tại
+    const existing = db.getUser(username);
+    if (existing) return res.status(400).json({ status: 'error', message: 'User already exists' });
+    // Tạo user bằng authenticate (sẽ tạo mới nếu chưa có)
+    const result = db.authenticate(username, pin);
+    res.json({ status: 'success', message: `User ${username} created`, user: { username, balance: result.balance || 0 } });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// Xoá user (admin) - chỉ cho phép xóa user thường, không xóa admin
+app.delete('/admin/api/users/:username', requireAdminSession, async (req, res) => {
+  try {
+    const username = req.params.username;
+    if (isAdmin(username)) {
+      return res.status(403).json({ status: 'error', message: 'Cannot delete admin user' });
+    }
+    const user = db.getUser(username);
+    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+    // Xóa user khỏi bảng users
+    db.db.prepare('DELETE FROM users WHERE username = ?').run(username);
+    // Cũng xóa các dữ liệu liên quan (stakes, transactions, snake_claims, mempool, blocks_mined)
+    db.db.prepare('DELETE FROM stakes WHERE username = ?').run(username);
+    db.db.prepare('DELETE FROM transactions WHERE from_username = ? OR to_username = ?').run(username, username);
+    db.db.prepare('DELETE FROM snake_claims WHERE username = ?').run(username);
+    db.db.prepare('DELETE FROM mempool WHERE from_username = ? OR to_username = ?').run(username, username);
+    // blocks_mined giữ lại để thống kê (không xóa)
+    res.json({ status: 'success', message: `User ${username} deleted` });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// Ban/Unban user (admin)
+app.post('/admin/api/users/:username/ban', requireAdminSession, async (req, res) => {
+  try {
+    const username = req.params.username;
+    const { banned } = req.body; // true hoặc false
+    if (isAdmin(username)) {
+      return res.status(403).json({ status: 'error', message: 'Cannot ban admin user' });
+    }
+    const user = db.getUser(username);
+    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+    // Cập nhật trạng thái banned
+    db.db.prepare('UPDATE users SET banned = ? WHERE username = ?').run(banned ? 1 : 0, username);
+    res.json({ status: 'success', message: `User ${username} ${banned ? 'banned' : 'unbanned'}` });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// ─── Các API admin cũ ────────────────────────────────
+
+// API proxy cho admin (giữ nguyên)
 app.get('/admin/api/all-swaps', requireAdminSession, async (req, res) => {
   try {
     const token = req.session.adminToken;
@@ -306,15 +392,6 @@ app.get('/admin/api/all-swaps', requireAdminSession, async (req, res) => {
     });
     const data = await response.json();
     res.json(data);
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-});
-
-app.get('/admin/api/all-users', requireAdminSession, async (req, res) => {
-  try {
-    const users = db.getAllUsers();
-    res.json({ status: 'success', users });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }
@@ -393,6 +470,7 @@ app.delete('/admin/api/delete/:id', requireAdminSession, async (req, res) => {
   }
 });
 
+// ─── Admin Dashboard (đã cập nhật giao diện quản lý user) ───
 app.get('/admin/dashboard', requireAdminSession, (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -430,6 +508,12 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             .btn-delete:hover { background: #ff6666; transform: scale(1.02); }
             .btn-edit { background: #2a2a36; color: #f58a00; border: 1px solid #f58a00; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
             .btn-edit:hover { background: #f58a00; color: #0a0a12; }
+            .btn-ban { background: #ff4444; color: white; border: none; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+            .btn-ban:hover { background: #ff6666; }
+            .btn-unban { background: #40c057; color: white; border: none; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+            .btn-unban:hover { background: #5ce06e; }
+            .btn-add-user { background: #f58a00; color: #0a0a12; border: none; padding: 8px 16px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+            .btn-add-user:hover { background: #ff9e20; transform: scale(1.02); }
             .empty-row td { text-align: center; color: #888; padding: 2rem; }
             .refresh { float: right; font-size: 0.8rem; color: #888; margin-top: 0.5rem; cursor: pointer; }
             .refresh:hover { color: #f58a00; }
@@ -441,7 +525,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             .modal-buttons button { flex: 1; padding: 10px; border-radius: 30px; cursor: pointer; }
             .btn-save { background: #f58a00; color: #0a0a12; border: none; }
             .btn-cancel { background: #2a2a36; color: #eee4d8; border: 1px solid #ff4444; }
-            .search-box { margin-bottom: 1rem; display: flex; gap: 0.5rem; }
+            .search-box { margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
             .search-box input { flex: 1; padding: 10px; background: #2a2a36; border: 1px solid #3a3a46; border-radius: 12px; color: white; }
             .search-box button { background: #f58a00; color: #0a0a12; border: none; padding: 10px 20px; border-radius: 30px; cursor: pointer; }
             .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
@@ -494,14 +578,17 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             <div id="users-tab" class="tab-content">
                 <div class="card">
                     <h2>👥 User Management</h2>
-                    <div class="search-box">
-                        <input type="text" id="userSearch" placeholder="Search username...">
-                        <button onclick="searchUsers()">🔍 Search</button>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+                        <div class="search-box">
+                            <input type="text" id="userSearch" placeholder="Search username...">
+                            <button onclick="searchUsers()">🔍 Search</button>
+                        </div>
+                        <button class="btn-add-user" onclick="openAddUserModal()">➕ Add User</button>
                     </div>
                     <div style="overflow-x: auto;">
                         <table id="usersTable">
-                            <thead><tr><th>Username</th><th>Balance (CC)</th><th>Actions</th></tr></thead>
-                            <tbody id="usersBody"><tr class="empty-row"><td colspan="3">Loading...</td></tr></tbody>
+                            <thead><tr><th>Username</th><th>Balance (CC)</th><th>Banned</th><th>Actions</th></tr></thead>
+                            <tbody id="usersBody"><tr class="empty-row"><td colspan="4">Loading...</td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -515,6 +602,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             </div>
         </div>
         
+        <!-- Edit Balance Modal -->
         <div id="editModal" class="modal">
             <div class="modal-content">
                 <h3>✏️ Edit User Balance</h3>
@@ -529,6 +617,22 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             </div>
         </div>
         
+        <!-- Add User Modal -->
+        <div id="addUserModal" class="modal">
+            <div class="modal-content">
+                <h3>➕ Add New User</h3>
+                <label>Username</label>
+                <input type="text" id="newUsername" placeholder="Username (min 3 chars)">
+                <label>PIN (4-8 digits)</label>
+                <input type="password" id="newPin" placeholder="PIN" maxlength="8">
+                <div class="modal-buttons">
+                    <button class="btn-save" onclick="addUser()">➕ Create</button>
+                    <button class="btn-cancel" onclick="closeAddUserModal()">Cancel</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Fulfill XNO Modal -->
         <div id="fulfillXnoModal" class="modal">
             <div class="modal-content">
                 <h3>🟦 Complete XNO Swap</h3>
@@ -687,6 +791,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                 closeXnoModal();
             }
             
+            // ─── Users Management ─────────────────────────────────────
             async function loadUsers() {
                 try {
                     const resp = await fetch('/admin/api/all-users');
@@ -701,7 +806,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             function renderUsers(users) {
                 const tbody = document.getElementById('usersBody');
                 if (users.length === 0) {
-                    tbody.innerHTML = '<tr class="empty-row"><td colspan="3">👻 No users found</td></tr>';
+                    tbody.innerHTML = '<tr class="empty-row"><td colspan="4">👻 No users found</td></tr>';
                     return;
                 }
                 tbody.innerHTML = '';
@@ -709,12 +814,27 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     const row = tbody.insertRow();
                     row.insertCell(0).innerText = user.username;
                     row.insertCell(1).innerHTML = '<span style="color:#f58a00">' + user.balance.toFixed(4) + ' CC</span>';
+                    row.insertCell(2).innerHTML = user.banned ? '<span style="color:#ff4444;">🚫 Banned</span>' : '<span style="color:#40c057;">✅ Active</span>';
                     const actions = row.insertCell(2);
                     const editBtn = document.createElement('button');
-                    editBtn.innerText = '✏️ Edit Balance';
+                    editBtn.innerText = '✏️ Balance';
                     editBtn.className = 'btn-edit';
                     editBtn.onclick = () => openEditModal(user.username, user.balance);
                     actions.appendChild(editBtn);
+                    
+                    if (!isAdmin(user.username)) {
+                        const banBtn = document.createElement('button');
+                        banBtn.innerText = user.banned ? '🔓 Unban' : '🚫 Ban';
+                        banBtn.className = user.banned ? 'btn-unban' : 'btn-ban';
+                        banBtn.onclick = () => toggleBan(user.username, !user.banned);
+                        actions.appendChild(banBtn);
+                        
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.innerText = '🗑️ Delete';
+                        deleteBtn.className = 'btn-delete';
+                        deleteBtn.onclick = () => deleteUser(user.username);
+                        actions.appendChild(deleteBtn);
+                    }
                 }
             }
             
@@ -724,33 +844,73 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                 renderUsers(filtered);
             }
             
-            async function loadStats() {
-                try {
-                    const resp = await fetch('/admin/api/all-swaps');
-                    const data = await resp.json();
-                    const usersResp = await fetch('/admin/api/all-users');
-                    const usersData = await usersResp.json();
-                    if (data.status === 'success' && usersData.status === 'success') {
-                        const totalSwaps = data.swaps.length;
-                        const pendingSwaps = data.swaps.filter(s => s.status === 'pending').length;
-                        const completedSwaps = data.swaps.filter(s => s.status === 'completed').length;
-                        const xnoSwaps = data.swaps.filter(s => s.swap_type === 'xno_to_cc' || s.swap_type === 'cc_to_xno').length;
-                        const totalUsers = usersData.users.length;
-                        const totalBalance = usersData.users.reduce((sum, u) => sum + u.balance, 0);
-                        
-                        document.getElementById('statsContent').innerHTML = 
-                            '<div class="stats-grid">' +
-                            '<div class="stat-card">📊 Total Swaps<br><strong>' + totalSwaps + '</strong></div>' +
-                            '<div class="stat-card">⏳ Pending Swaps<br><strong>' + pendingSwaps + '</strong></div>' +
-                            '<div class="stat-card">✅ Completed Swaps<br><strong>' + completedSwaps + '</strong></div>' +
-                            '<div class="stat-card">🟦 XNO Swaps<br><strong>' + xnoSwaps + '</strong></div>' +
-                            '<div class="stat-card">👥 Total Users<br><strong>' + totalUsers + '</strong></div>' +
-                            '<div class="stat-card">💰 Total CC Supply<br><strong>' + totalBalance.toFixed(4) + ' CC</strong></div>' +
-                            '</div>';
-                    }
-                } catch(e) { console.error(e); }
+            // ─── Add User ─────────────────────────────────────────────
+            function openAddUserModal() {
+                document.getElementById('newUsername').value = '';
+                document.getElementById('newPin').value = '';
+                document.getElementById('addUserModal').style.display = 'flex';
             }
             
+            function closeAddUserModal() {
+                document.getElementById('addUserModal').style.display = 'none';
+            }
+            
+            async function addUser() {
+                const username = document.getElementById('newUsername').value.trim();
+                const pin = document.getElementById('newPin').value.trim();
+                if (username.length < 3) return alert('Username must be at least 3 characters');
+                if (pin.length < 4) return alert('PIN must be at least 4 characters');
+                try {
+                    const resp = await fetch('/admin/api/users', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username, pin })
+                    });
+                    const data = await resp.json();
+                    if (data.status === 'success') {
+                        alert('User created successfully');
+                        closeAddUserModal();
+                        loadUsers();
+                    } else {
+                        alert('Error: ' + data.message);
+                    }
+                } catch(e) { alert(e.message); }
+            }
+            
+            // ─── Delete User ──────────────────────────────────────────
+            async function deleteUser(username) {
+                if (!confirm('Delete user ' + username + '? This cannot be undone!')) return;
+                try {
+                    const resp = await fetch('/admin/api/users/' + encodeURIComponent(username), { method: 'DELETE' });
+                    const data = await resp.json();
+                    if (data.status === 'success') {
+                        alert('User deleted');
+                        loadUsers();
+                    } else {
+                        alert('Error: ' + data.message);
+                    }
+                } catch(e) { alert(e.message); }
+            }
+            
+            // ─── Toggle Ban ───────────────────────────────────────────
+            async function toggleBan(username, banned) {
+                try {
+                    const resp = await fetch('/admin/api/users/' + encodeURIComponent(username) + '/ban', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ banned })
+                    });
+                    const data = await resp.json();
+                    if (data.status === 'success') {
+                        alert(data.message);
+                        loadUsers();
+                    } else {
+                        alert('Error: ' + data.message);
+                    }
+                } catch(e) { alert(e.message); }
+            }
+            
+            // ─── Edit Balance ─────────────────────────────────────────
             function openEditModal(username, currentBalance) {
                 currentEditUser = username;
                 document.getElementById('editUsername').innerText = username;
@@ -787,6 +947,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                 } catch(e) { alert(e.message); }
             }
             
+            // ─── Swap Actions ────────────────────────────────────────
             async function completeSwap(id, xnoTxid = null) {
                 if (!confirm('Mark this swap as completed?')) return;
                 try {
@@ -822,7 +983,38 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                 } catch(e) { alert(e.message); }
             }
             
+            // ─── Statistics ──────────────────────────────────────────
+            async function loadStats() {
+                try {
+                    const resp = await fetch('/admin/api/all-swaps');
+                    const data = await resp.json();
+                    const usersResp = await fetch('/admin/api/all-users');
+                    const usersData = await usersResp.json();
+                    if (data.status === 'success' && usersData.status === 'success') {
+                        const totalSwaps = data.swaps.length;
+                        const pendingSwaps = data.swaps.filter(s => s.status === 'pending').length;
+                        const completedSwaps = data.swaps.filter(s => s.status === 'completed').length;
+                        const xnoSwaps = data.swaps.filter(s => s.swap_type === 'xno_to_cc' || s.swap_type === 'cc_to_xno').length;
+                        const totalUsers = usersData.users.length;
+                        const totalBalance = usersData.users.reduce((sum, u) => sum + u.balance, 0);
+                        
+                        document.getElementById('statsContent').innerHTML = 
+                            '<div class="stats-grid">' +
+                            '<div class="stat-card">📊 Total Swaps<br><strong>' + totalSwaps + '</strong></div>' +
+                            '<div class="stat-card">⏳ Pending Swaps<br><strong>' + pendingSwaps + '</strong></div>' +
+                            '<div class="stat-card">✅ Completed Swaps<br><strong>' + completedSwaps + '</strong></div>' +
+                            '<div class="stat-card">🟦 XNO Swaps<br><strong>' + xnoSwaps + '</strong></div>' +
+                            '<div class="stat-card">👥 Total Users<br><strong>' + totalUsers + '</strong></div>' +
+                            '<div class="stat-card">💰 Total CC Supply<br><strong>' + totalBalance.toFixed(4) + ' CC</strong></div>' +
+                            '</div>';
+                    }
+                } catch(e) { console.error(e); }
+            }
+            
+            // ─── Init ──────────────────────────────────────────────────
             loadAllSwaps();
+            loadUsers();
+            loadStats();
             setInterval(() => {
                 loadAllSwaps();
                 loadStats();
@@ -911,11 +1103,16 @@ app.use('/swap', SwapRouter);
 // 🆕 Node Fees Module (quản lý phí giao dịch)
 app.use('/node_fees', NodeFeesRouter.router);
 
-// AUTH endpoint
+// AUTH endpoint (kiểm tra banned)
 app.post('/auth', authLimiter, (req, res) => {
   const { username, pin } = req.body;
   if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing fields' });
   try {
+    // Kiểm tra user có bị ban không
+    const user = db.getUser(username);
+    if (user && user.banned) {
+      return res.status(403).json({ status: 'error', message: 'Account is banned' });
+    }
     const result = db.authenticate(username, pin);
     if (result.status === 'success' && result.token) {
       const decoded = jwt.verify(result.token, process.env.JWT_SECRET || 'secret');
@@ -932,6 +1129,9 @@ app.get('/get_user/:username', (req, res) => {
   try {
     const user = db.getUser(req.params.username);
     if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+    if (user.banned) {
+      return res.status(403).json({ status: 'error', message: 'Account is banned' });
+    }
     res.json({ status: 'success', balance: user.balance, username: user.username });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
@@ -944,6 +1144,9 @@ app.get('/get_balance', (req, res) => {
   try {
     const user = db.getUser(username);
     if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+    if (user.banned) {
+      return res.status(403).json({ status: 'error', message: 'Account is banned' });
+    }
     res.json({ status: 'success', balance: user.balance });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
@@ -954,6 +1157,9 @@ app.get('/get_transactions', (req, res) => {
   const username = req.query.username;
   if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
   try {
+    const user = db.getUser(username);
+    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+    // Nếu bị ban vẫn có thể xem lịch sử? Tùy chọn, tôi vẫn cho phép.
     const transactions = db.getTransactions(username, 20);
     res.json({ status: 'success', transactions });
   } catch (e) {
@@ -1020,7 +1226,6 @@ app.get('/pos/info', (req, res) => {
 });
 
 // ─── Các route yêu cầu token ─────────────────────────
-// 🆕 SỬA: /send_cc – chuyển sang mempool, trừ tiền ngay và giữ tạm trong mempool_holding
 app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
   const { to_username, amount } = req.body;
   const from_username = req.user.username;
@@ -1035,9 +1240,15 @@ app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
     // Kiểm tra người gửi
     const sender = db.getUser(from_username);
     if (!sender) return res.status(404).json({ status: 'error', message: 'Sender not found' });
+    if (sender.banned) {
+      return res.status(403).json({ status: 'error', message: 'Account is banned' });
+    }
     // Kiểm tra người nhận
     const receiver = db.getUser(to_username);
     if (!receiver) return res.status(404).json({ status: 'error', message: 'Receiver not found' });
+    if (receiver.banned) {
+      return res.status(403).json({ status: 'error', message: 'Cannot send to banned account' });
+    }
 
     // Tính phí (lấy từ node_fees config – mặc định 1%)
     const feePercent = NodeFeesRouter.TRANSACTION_FEE_PERCENT || 1;
@@ -1064,9 +1275,6 @@ app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
       total_deducted: totalDeducted
     };
     db.addToMempool(mempoolTx);
-
-    // ❌ KHÔNG ghi transaction vào bảng transactions ở đây nữa
-    // Giao dịch sẽ được ghi sau khi block được xác nhận
 
     console.log(`📥 [Mempool] ${from_username} sent ${sendAmount} CC to ${to_username} (fee ${fee} CC), pending confirmation`);
 
@@ -1095,6 +1303,11 @@ app.post('/snake/claim', snakeLimiter, (req, res) => {
     const authResult = db.authenticate(username, pin);
     if (authResult.status !== 'success') {
       return res.status(401).json({ status: 'error', message: 'Invalid username or pin' });
+    }
+    // Kiểm tra banned
+    const user = db.getUser(username);
+    if (user && user.banned) {
+      return res.status(403).json({ status: 'error', message: 'Account is banned' });
     }
     const result = snake.processClaim(username, null, apples, mode);
     res.json(result);
@@ -1273,6 +1486,16 @@ app.post('/api/backup/sync', (req, res) => {
       console.log('📥 Receiving full DB snapshot from backup client...');
       db.importFullState(data.state);
       console.log('✅ Full database restored from backup client');
+      // Đảm bảo các tài khoản đặc biệt tồn tại sau khi restore
+      NodeFeesRouter.ensureHoldingAccount();
+      NodeFeesRouter.ensureNodeFeesAccount();
+      // swap_holding
+      let swapHolding = db.getUser('swap_holding');
+      if (!swapHolding) {
+        const randomPin = crypto.randomBytes(16).toString('hex');
+        db.authenticate('swap_holding', randomPin);
+        console.log('🏦 Re-created swap_holding account after restore');
+      }
       return res.json({ type: 'SNAPSHOT_ACK', status: 'success' });
     }
     if (data.type === 'READY') {
@@ -1336,6 +1559,7 @@ app.listen(PORT, () => {
   console.log('║  Admin web : http://localhost:' + PORT + '/admin ║');
   console.log('║  Blockchain: Genesis created        ║');
   console.log('║  Mempool + Node Fees: Enabled       ║');
+  console.log('║  User Management: Enabled           ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
   backupClient.start();
