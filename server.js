@@ -2,6 +2,7 @@
 // 🆕 Tích hợp mempool và phí giao dịch tự động (node_fees)
 // 🆕 Quản lý user (thêm, xoá, ban) trong admin dashboard
 // 🆕 Sửa lỗi lịch sử giao dịch (hiển thị cả confirmed và pending)
+// 🆕 Admin panel: thay nút hành động bằng icon bánh răng với dropdown menu
 
 require('dotenv').config();
 const express = require('express');
@@ -470,7 +471,7 @@ app.delete('/admin/api/delete/:id', requireAdminSession, async (req, res) => {
   }
 });
 
-// ─── Admin Dashboard (đã cập nhật giao diện quản lý user) ───
+// ─── Admin Dashboard ───
 app.get('/admin/dashboard', requireAdminSession, (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -514,6 +515,8 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             .btn-unban:hover { background: #5ce06e; }
             .btn-add-user { background: #f58a00; color: #0a0a12; border: none; padding: 8px 16px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
             .btn-add-user:hover { background: #ff9e20; transform: scale(1.02); }
+            .gear-icon { font-size: 1.2rem; cursor: pointer; padding: 4px 8px; border-radius: 6px; transition: background 0.2s; display: inline-block; }
+            .gear-icon:hover { background: rgba(255,255,255,0.1); }
             .empty-row td { text-align: center; color: #888; padding: 2rem; }
             .refresh { float: right; font-size: 0.8rem; color: #888; margin-top: 0.5rem; cursor: pointer; }
             .refresh:hover { color: #f58a00; }
@@ -531,6 +534,13 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
             .stat-card { background: #2a2a36; padding: 1rem; border-radius: 16px; text-align: center; }
             .stat-card strong { display: block; font-size: 1.5rem; color: #f58a00; margin-top: 0.5rem; }
+            .dropdown { position: relative; display: inline-block; }
+            .dropdown-content { display: none; position: absolute; right: 0; background: #1e1e2a; min-width: 160px; box-shadow: 0 8px 16px rgba(0,0,0,0.5); z-index: 1; border-radius: 12px; border: 1px solid var(--border-mid); }
+            .dropdown-content a { color: #eee4d8; padding: 10px 16px; text-decoration: none; display: block; font-size: 0.85rem; cursor: pointer; transition: background 0.2s; }
+            .dropdown-content a:hover { background: #2a2a36; }
+            .dropdown-content .danger { color: #ff4444; }
+            .dropdown-content .success { color: #40c057; }
+            .dropdown.show .dropdown-content { display: block; }
             @media (max-width: 768px) {
                 body { padding: 1rem; }
                 th, td { font-size: 0.7rem; padding: 8px 6px; }
@@ -587,7 +597,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     </div>
                     <div style="overflow-x: auto;">
                         <table id="usersTable">
-                            <thead><tr><th>Username</th><th>Balance (CC)</th><th>Banned</th><th>Actions</th></tr></thead>
+                            <thead><tr><th>Username</th><th>Balance (CC)</th><th>Status</th><th>Actions</th></tr></thead>
                             <tbody id="usersBody"><tr class="empty-row"><td colspan="4">Loading...</td></tr></tbody>
                         </table>
                     </div>
@@ -815,28 +825,74 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     row.insertCell(0).innerText = user.username;
                     row.insertCell(1).innerHTML = '<span style="color:#f58a00">' + user.balance.toFixed(4) + ' CC</span>';
                     row.insertCell(2).innerHTML = user.banned ? '<span style="color:#ff4444;">🚫 Banned</span>' : '<span style="color:#40c057;">✅ Active</span>';
-                    const actions = row.insertCell(2);
-                    const editBtn = document.createElement('button');
-                    editBtn.innerText = '✏️ Balance';
-                    editBtn.className = 'btn-edit';
-                    editBtn.onclick = () => openEditModal(user.username, user.balance);
-                    actions.appendChild(editBtn);
+                    const actions = row.insertCell(3);
                     
-                    if (!isAdmin(user.username)) {
-                        const banBtn = document.createElement('button');
-                        banBtn.innerText = user.banned ? '🔓 Unban' : '🚫 Ban';
-                        banBtn.className = user.banned ? 'btn-unban' : 'btn-ban';
-                        banBtn.onclick = () => toggleBan(user.username, !user.banned);
-                        actions.appendChild(banBtn);
+                    // Gear icon with dropdown
+                    const dropdownDiv = document.createElement('div');
+                    dropdownDiv.className = 'dropdown';
+                    const gearSpan = document.createElement('span');
+                    gearSpan.className = 'gear-icon';
+                    gearSpan.innerHTML = '⚙️';
+                    gearSpan.onclick = function(e) {
+                        e.stopPropagation();
+                        const parent = this.parentElement;
+                        parent.classList.toggle('show');
+                    };
+                    dropdownDiv.appendChild(gearSpan);
+                    
+                    const dropdownContent = document.createElement('div');
+                    dropdownContent.className = 'dropdown-content';
+                    
+                    // Edit Balance
+                    const editLink = document.createElement('a');
+                    editLink.textContent = '✏️ Edit Balance';
+                    editLink.onclick = function(e) {
+                        e.stopPropagation();
+                        openEditModal(user.username, user.balance);
+                        this.closest('.dropdown').classList.remove('show');
+                    };
+                    dropdownContent.appendChild(editLink);
+                    
+                    // Only show ban/unban and delete for non-admin users
+                    const isAdminUser = window.isAdmin ? window.isAdmin(user.username) : false;
+                    if (!isAdminUser) {
+                        const banLink = document.createElement('a');
+                        const isBanned = user.banned;
+                        banLink.textContent = isBanned ? '🔓 Unban' : '🚫 Ban';
+                        banLink.className = isBanned ? 'success' : 'danger';
+                        banLink.onclick = function(e) {
+                            e.stopPropagation();
+                            toggleBan(user.username, !isBanned);
+                            this.closest('.dropdown').classList.remove('show');
+                        };
+                        dropdownContent.appendChild(banLink);
                         
-                        const deleteBtn = document.createElement('button');
-                        deleteBtn.innerText = '🗑️ Delete';
-                        deleteBtn.className = 'btn-delete';
-                        deleteBtn.onclick = () => deleteUser(user.username);
-                        actions.appendChild(deleteBtn);
+                        const deleteLink = document.createElement('a');
+                        deleteLink.textContent = '🗑️ Delete';
+                        deleteLink.className = 'danger';
+                        deleteLink.onclick = function(e) {
+                            e.stopPropagation();
+                            deleteUser(user.username);
+                            this.closest('.dropdown').classList.remove('show');
+                        };
+                        dropdownContent.appendChild(deleteLink);
                     }
+                    
+                    dropdownDiv.appendChild(dropdownContent);
+                    actions.appendChild(dropdownDiv);
                 }
+                
+                // Close dropdown when clicking outside
+                document.addEventListener('click', function() {
+                    document.querySelectorAll('.dropdown.show').forEach(d => d.classList.remove('show'));
+                });
             }
+            
+            // Helper to check admin (from server)
+            window.isAdmin = function(username) {
+                const adminUsers = ['chocoetom', 'Nam2010'];
+                return adminUsers.includes(username);
+            };
             
             function searchUsers() {
                 const searchTerm = document.getElementById('userSearch').value.toLowerCase();
