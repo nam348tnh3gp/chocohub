@@ -15,7 +15,6 @@ def ensure_libraries(gpu=False):
         print("requests installed – please restart the miner.")
         sys.exit(1)
 
-    # Only check numpy if GPU is enabled
     if gpu:
         try:
             import numpy
@@ -64,9 +63,9 @@ DEFAULT_THREADS = None
 DEFAULT_GPU     = False
 DEFAULT_POLL    = 10
 
-# ---------------------------------------------------------------------------
-# OPENCL KERNEL for SHA256 (adapted from working GPU miner)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# NEW OPENCL KERNEL – uses hex last_hash (64 bytes) + nonce + worker name
+# ===========================================================================
 OPENCL_KERNEL_SHA256 = """
 #define UINT32_MAX 0xFFFFFFFF
 #define ROTR(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
@@ -89,6 +88,7 @@ __constant uint K[64] = {
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
 };
 
+// SHA-256 compression for a single 64-byte block
 void sha256_transform(uint *state, const uchar *data) {
     uint W[64];
     uint i, t1, t2;
@@ -116,9 +116,51 @@ void sha256_transform(uint *state, const uchar *data) {
     state[4] += e; state[5] += f; state[6] += g; state[7] += h;
 }
 
+// Compute SHA-256 of a message of arbitrary length (up to ~128 bytes)
+void sha256_hash(const uchar *msg, uint len, uchar *hash) {
+    uint state[8] = {
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+    };
+    uchar block[64];
+    uint block_len = 0;
+    uint i;
+
+    // Process full blocks
+    for (i = 0; i < len; i++) {
+        block[block_len++] = msg[i];
+        if (block_len == 64) {
+            sha256_transform(state, block);
+            block_len = 0;
+        }
+    }
+
+    // Padding
+    uint total_bits = len * 8;
+    block[block_len++] = 0x80;
+    if (block_len > 56) {
+        while (block_len < 64) block[block_len++] = 0;
+        sha256_transform(state, block);
+        block_len = 0;
+    }
+    while (block_len < 56) block[block_len++] = 0;
+    // Append length as 64-bit big-endian
+    for (i = 0; i < 8; i++) {
+        block[56 + i] = (uchar)((total_bits >> (56 - i*8)) & 0xFF);
+    }
+    sha256_transform(state, block);
+
+    // Output hash
+    for (i = 0; i < 32; i++) {
+        hash[i] = (state[i/4] >> (24 - (i%4)*8)) & 0xFF;
+    }
+}
+
 __kernel void sha256_gpu_miner(
-    __global const uchar *last_hash,
-    __global const uchar *target_hex,
+    __global const uchar *hex_last_hash,   // 64 bytes (ASCII hex)
+    __global const uchar *worker_name,     // bytes of worker name
+    uint worker_len,
+    __global const uchar *target_hex,      // 32 bytes (binary target)
     uint start_nonce,
     uint work_items,
     __global uint *result_nonce,
@@ -129,9 +171,10 @@ __kernel void sha256_gpu_miner(
     
     uint nonce = start_nonce + gid;
     
-    // Build message: last_hash (32 bytes) + 20-digit nonce + worker name (placeholder)
-    uchar message[128] = {0};
-    for (int i = 0; i < 32; i++) message[i] = last_hash[i];
+    // Build message: hex_last_hash (64) + nonce (20-digit zero-padded) + worker_name
+    uchar message[128];
+    uint idx = 0;
+    for (int i = 0; i < 64; i++) message[idx++] = hex_last_hash[i];
     
     // Convert nonce to 20-digit string with leading zeros
     uchar nonce_str[20];
@@ -140,68 +183,34 @@ __kernel void sha256_gpu_miner(
         nonce_str[i] = (uchar)('0' + (tmp % 10));
         tmp /= 10;
     }
-    for (int i = 0; i < 20; i++) message[32 + i] = nonce_str[i];
+    for (int i = 0; i < 20; i++) message[idx++] = nonce_str[i];
     
-    // Padding for SHA256
-    uint msg_len = 52; // 32 bytes hash + 20 bytes nonce
-    ulong bit_len = (ulong)msg_len * 8;
-    message[msg_len] = 0x80;
-    message[56] = (uchar)(bit_len >> 56);
-    message[57] = (uchar)(bit_len >> 48);
-    message[58] = (uchar)(bit_len >> 40);
-    message[59] = (uchar)(bit_len >> 32);
-    message[60] = (uchar)(bit_len >> 24);
-    message[61] = (uchar)(bit_len >> 16);
-    message[62] = (uchar)(bit_len >> 8);
-    message[63] = (uchar)bit_len;
+    // Append worker name
+    for (int i = 0; i < worker_len; i++) message[idx++] = worker_name[i];
     
-    uint state[8] = {
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
-    };
+    // Compute SHA-256 hash of message
+    uchar hash[32];
+    sha256_hash(message, idx, hash);
     
-    sha256_transform(state, message);
-    
-    // Second block if needed (64 bytes)
-    if (msg_len + 1 > 56) {
-        uint state2[8];
-        for (int i = 0; i < 8; i++) state2[i] = state[i];
-        uchar second_block[64] = {0};
-        for (int i = 0; i < 8; i++) {
-            second_block[i*4] = (state[i] >> 24) & 0xFF;
-            second_block[i*4+1] = (state[i] >> 16) & 0xFF;
-            second_block[i*4+2] = (state[i] >> 8) & 0xFF;
-            second_block[i*4+3] = state[i] & 0xFF;
-        }
-        uint final_state[8] = {
-            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-            0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
-        };
-        sha256_transform(final_state, second_block);
-        for (int i = 0; i < 8; i++) state[i] = final_state[i];
-    }
-    
-    // Check if hash meets target
+    // Compare with target (binary)
     bool match = true;
     for (int i = 0; i < 32; i++) {
-        uchar hash_byte = (state[i/4] >> (24 - (i%4)*8)) & 0xFF;
-        if (hash_byte != target_hex[i]) {
+        if (hash[i] != target_hex[i]) {
             match = false;
             break;
         }
     }
-    
     if (match) {
         atomic_cmpxchg(result_nonce, UINT32_MAX, nonce);
         for (int i = 0; i < 32; i++) {
-            result_hash[i] = (state[i/4] >> (24 - (i%4)*8)) & 0xFF;
+            result_hash[i] = hash[i];
         }
     }
 }
 """
 
 # ---------------------------------------------------------------------------
-# GPU Miner Class (adapted from working code)
+# GPU Miner Class (rewritten)
 # ---------------------------------------------------------------------------
 class GPUMiner:
     def __init__(self, cl_mod):
@@ -213,10 +222,9 @@ class GPUMiner:
         self.max_work = 0
         self.device = None
         self.platform = None
-        self.np = None  # Will be set when needed
+        self.np = None
         
     def _import_numpy(self):
-        """Lazy import numpy only when needed"""
         if self.np is None:
             import numpy as np
             self.np = np
@@ -227,83 +235,65 @@ class GPUMiner:
             platforms = self.cl.get_platforms()
             if not platforms:
                 return False
-                
-            # Select platform
             if platform_idx is not None and platform_idx < len(platforms):
                 self.platform = platforms[platform_idx]
             else:
-                # Find first platform with GPU
                 for p in platforms:
                     if p.get_devices(device_type=self.cl.device_type.GPU):
                         self.platform = p
                         break
                 if not self.platform:
                     return False
-                    
-            # Get GPU devices
             devices = self.platform.get_devices(device_type=self.cl.device_type.GPU)
             if not devices:
                 return False
-                
-            # Select device
             if device_idx is not None and device_idx < len(devices):
                 self.device = devices[device_idx]
             else:
                 self.device = devices[0]
-                
-            # Calculate max work items
             self.max_work = self.device.max_work_group_size * self.device.max_compute_units * 4
-            
-            # Create context and queue
             self.ctx = self.cl.Context([self.device])
             self.queue = self.cl.CommandQueue(self.ctx)
-            
-            # Build program
             self.prog = self.cl.Program(self.ctx, OPENCL_KERNEL_SHA256).build()
             self.kernel = self.cl.Kernel(self.prog, "sha256_gpu_miner")
-            
             return True
         except Exception as e:
             print(f"GPU init error: {e}")
             return False
             
-    def solve_job(self, last_hash_hex: str, target_hex: str, worker_name: str, 
+    def solve_job(self, last_hash_hex: str, target_hex: str, worker_name: str,
                   gpu_load_percent: int = 25) -> Tuple[Optional[int], float, float]:
-        """
-        Solve a mining job using GPU
-        Returns: (nonce, hashrate, elapsed_time)
-        """
         np = self._import_numpy()
         
-        last_bytes = bytes.fromhex(last_hash_hex)
-        target_bytes = bytes.fromhex(target_hex)
-        
-        # Ensure correct lengths
-        if len(last_bytes) != 32:
-            last_bytes = last_bytes.ljust(32, b'\0')[:32]
-        if len(target_bytes) != 32:
-            target_bytes = target_bytes.ljust(32, b'\0')[:32]
+        # Prepare buffers
+        hex_bytes = np.array(list(last_hash_hex.encode('ascii')), dtype=np.uint8)  # 64 bytes
+        worker_bytes = np.array(list(worker_name.encode('utf-8')), dtype=np.uint8)
+        worker_len = np.uint32(len(worker_bytes))
+        target_bytes = bytes.fromhex(target_hex)  # 32 bytes
+        target_np = np.array(list(target_bytes), dtype=np.uint8)
         
         chunk_items = max(64, int(self.max_work * gpu_load_percent / 100))
-        max_nonce = 10000000  # Adjust based on difficulty
+        max_nonce = 10000000
         
-        # Create buffers
-        buf_last = self.cl.Buffer(self.ctx, self.cl.mem_flags.READ_ONLY | self.cl.mem_flags.COPY_HOST_PTR, 
-                                  hostbuf=np.array(list(last_bytes), dtype=np.uint8))
+        # Buffers
+        buf_hex = self.cl.Buffer(self.ctx, self.cl.mem_flags.READ_ONLY | self.cl.mem_flags.COPY_HOST_PTR,
+                                 hostbuf=hex_bytes)
+        buf_worker = self.cl.Buffer(self.ctx, self.cl.mem_flags.READ_ONLY | self.cl.mem_flags.COPY_HOST_PTR,
+                                    hostbuf=worker_bytes)
         buf_target = self.cl.Buffer(self.ctx, self.cl.mem_flags.READ_ONLY | self.cl.mem_flags.COPY_HOST_PTR,
-                                    hostbuf=np.array(list(target_bytes), dtype=np.uint8))
+                                    hostbuf=target_np)
         buf_result = self.cl.Buffer(self.ctx, self.cl.mem_flags.READ_WRITE, 4)
         buf_hash = self.cl.Buffer(self.ctx, self.cl.mem_flags.WRITE_ONLY, 32)
         
-        # Initialize result with UINT32_MAX
         init_val = np.full(1, 0xFFFFFFFF, dtype=np.uint32)
         self.cl.enqueue_copy(self.queue, buf_result, init_val)
         
-        # Set kernel arguments
-        self.kernel.set_arg(0, buf_last)
-        self.kernel.set_arg(1, buf_target)
-        self.kernel.set_arg(4, buf_result)
-        self.kernel.set_arg(5, buf_hash)
+        self.kernel.set_arg(0, buf_hex)
+        self.kernel.set_arg(1, buf_worker)
+        self.kernel.set_arg(2, worker_len)
+        self.kernel.set_arg(3, buf_target)
+        self.kernel.set_arg(6, buf_result)
+        self.kernel.set_arg(7, buf_hash)
         
         start_time = time.time()
         total_checked = 0
@@ -314,8 +304,8 @@ class GPUMiner:
             local = min(64, current_items)
             global_size = ((current_items + local - 1) // local) * local
             
-            self.kernel.set_arg(2, np.uint32(start_nonce))
-            self.kernel.set_arg(3, np.uint32(current_items))
+            self.kernel.set_arg(4, np.uint32(start_nonce))
+            self.kernel.set_arg(5, np.uint32(current_items))
             
             try:
                 self.cl.enqueue_nd_range_kernel(self.queue, self.kernel, (global_size,), (local,)).wait()
@@ -324,8 +314,6 @@ class GPUMiner:
                 return None, 0.0, time.time() - start_time
                 
             total_checked += current_items
-            
-            # Check result
             res = np.zeros(1, dtype=np.uint32)
             self.cl.enqueue_copy(self.queue, res, buf_result).wait()
             
@@ -414,7 +402,7 @@ def suggest_threads(device_type, gpu_enabled):
             return cpu_cnt
 
 # ---------------------------------------------------------------------------
-# Core miner class (modified for GPU)
+# Core miner class (CPU + GPU)
 # ---------------------------------------------------------------------------
 class ChocoMiner:
     def __init__(self, args):
@@ -435,7 +423,6 @@ class ChocoMiner:
         self.found_event = threading.Event()
         self.solution = None
         
-        # GPU miner instance - only if GPU enabled and available
         self.gpu_miner = None
         if self.args.gpu and _gpu_available:
             self.gpu_miner = GPUMiner(cl)
@@ -450,7 +437,7 @@ class ChocoMiner:
  ╚██████╗██║  ██║╚██████╔╝╚██████╗╚██████╔╝
   ╚═════╝╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═════╝{ANSI.RST}
 {ANSI.YEL}        ⚡ Python miner v2 (GPU ready) ⚡{ANSI.RST}
-{ANSI.GRY}    SHA256(last_hash + 20-digit-nonce + worker){ANSI.RST}
+{ANSI.GRY}    SHA256(hex_last_hash + 20-digit-nonce + worker){ANSI.RST}
 {ANSI.CYN}    Mode: {gpu_status}{ANSI.RST}
 """)
 
@@ -536,16 +523,13 @@ class ChocoMiner:
             if resp.status_code != 200:
                 return None
             data = resp.json()
-            # 🔁 Hỗ trợ cả hai định dạng (cũ và mới)
             job_id = data.get('bounty_id') or data.get('job_id')
             last_hash = data.get('last_hash') or data.get('prev_hash')
             target_hex = data.get('target_hex')
             difficulty = float(data.get('difficulty', 1.0))
             reward = data.get('reward', '?')
-            
             if not job_id or not last_hash or not target_hex:
                 return None
-                
             return {
                 "id": job_id,
                 "last_hash": last_hash,
@@ -571,7 +555,7 @@ class ChocoMiner:
                 continue
 
             jid = job["id"]
-            lhb = job["last_hash"].encode()
+            lhb = job["last_hash"].encode()          # hex string → bytes (64)
             target_hex = job["target_hex"]
 
             if jid != local_jid:
@@ -581,6 +565,7 @@ class ChocoMiner:
             while self.running and not self.found_event.is_set() and self.stats["current_job"]["id"] == jid:
                 for _ in range(batch_size):
                     nonce_padded = str(nonce).zfill(20)
+                    # hash of (hex_last_hash + nonce + worker)
                     hash_hex = sha256(lhb + nonce_padded.encode() + worker_b).hexdigest()
                     if hash_hex < target_hex:
                         if not self.found_event.is_set() and self.stats["current_job"]["id"] == jid:
@@ -593,44 +578,42 @@ class ChocoMiner:
                     self.stats["hashes"] += batch_size
 
     def mine_gpu(self):
-        """GPU mining thread using OpenCL kernel"""
         if not self.gpu_miner:
             return
-            
-        # Initialize GPU
         if not self.gpu_miner.init_gpu():
             self.log("ERR", "Failed to initialize GPU miner", direct=True)
             return
-            
         self.log("GPU", f"GPU initialized: {self.gpu_miner.device.name}", direct=True)
-        
+
         while self.running:
             job = self.stats["current_job"]
             if not job:
                 time.sleep(0.5)
                 continue
-                
+
             jid = job["id"]
             last_hash = job["last_hash"]
             target_hex = job["target_hex"]
-            
-            # Solve using GPU
+
             nonce, hashrate, elapsed = self.gpu_miner.solve_job(
                 last_hash, target_hex, self.args.worker,
                 gpu_load_percent=90
             )
-            
+
             if nonce is not None and not self.found_event.is_set():
                 if self.stats["current_job"] and self.stats["current_job"]["id"] == jid:
+                    # verify with CPU
                     nonce_padded = str(nonce).zfill(20)
                     sha256 = hashlib.sha256
                     worker_b = self.args.worker.encode()
                     hash_hex = sha256(last_hash.encode() + nonce_padded.encode() + worker_b).hexdigest()
-                    self.solution = (jid, nonce, hash_hex)
-                    self.found_event.set()
-                    self.log("GPU", f"GPU found solution! Nonce: {nonce} (HR: {hashrate/1e3:.2f} KH/s)", direct=True)
-            
-            # Update stats
+                    if hash_hex < target_hex:
+                        self.solution = (jid, nonce, hash_hex)
+                        self.found_event.set()
+                        self.log("GPU", f"GPU found valid nonce! Nonce: {nonce} (HR: {hashrate/1e3:.2f} KH/s)", direct=True)
+                    else:
+                        self.log("WARN", f"GPU returned invalid nonce, ignoring", direct=True)
+
             with self.stats_lock:
                 self.stats["hashes"] += int(hashrate * elapsed) if hashrate > 0 else 0
 
@@ -658,11 +641,9 @@ class ChocoMiner:
         threading.Thread(target=self.display_loop, daemon=True).start()
         threading.Thread(target=self.periodic_report, daemon=True).start()
 
-        # Start CPU threads
         for i in range(self.args.threads):
             threading.Thread(target=self.mine_cpu, args=(i, self.args.threads), daemon=True).start()
 
-        # Start GPU thread if enabled
         if self.args.gpu and self.gpu_miner:
             threading.Thread(target=self.mine_gpu, daemon=True).start()
         elif self.args.gpu and not self.gpu_miner:
@@ -707,7 +688,6 @@ class ChocoMiner:
 # ---------------------------------------------------------------------------
 def interactive_setup():
     global DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL
-
     os.system("clear" if os.name != "nt" else "cls")
     print(f"{ANSI.BOLD}{ANSI.CYN}╔══════════════════════════════════════════════════════════╗{ANSI.RST}")
     print(f"{ANSI.BOLD}{ANSI.CYN}║           CHOCOHUB MINER - INTERACTIVE SETUP             ║{ANSI.RST}")
@@ -770,7 +750,6 @@ def parse_arguments():
 def main():
     global DEFAULT_SERVER, DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL
 
-    # Load persisted settings
     config = load_config()
     DEFAULT_SERVER  = config.get("server", DEFAULT_SERVER)
     DEFAULT_WORKER  = config.get("worker", DEFAULT_WORKER)
@@ -800,10 +779,8 @@ def main():
     if args.threads is None:
         args.threads = suggest_threads("pc" if not args.gpu else "pc", args.gpu)
 
-    # Install required libraries (only numpy if GPU enabled)
     ensure_libraries(gpu=args.gpu)
 
-    # Save configuration
     save_config({
         "server": args.server,
         "worker": args.worker,
