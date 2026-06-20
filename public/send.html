@@ -639,6 +639,8 @@
                 return pending;
             } catch (e) {
                 console.warn('Failed to load pending:', e.message);
+                // Nếu lỗi, vẫn hiển thị badge ẩn
+                pendingBadge.style.display = 'none';
                 return [];
             }
         }
@@ -652,8 +654,8 @@
             }
 
             try {
-                // Load confirmed transactions
-                const res = await fetch('/get_transactions?username=' + encodeURIComponent(user));
+                // Load confirmed transactions (tăng limit lên 50)
+                const res = await fetch('/get_transactions?username=' + encodeURIComponent(user) + '&limit=50');
                 if (!res.ok) throw new Error('Failed to fetch history');
                 const data = await res.json();
                 const transactions = data.transactions || [];
@@ -758,7 +760,7 @@
                 historyContainer.appendChild(list);
             } catch (e) {
                 console.error('History load failed:', e.message);
-                historyContainer.innerHTML = '<p class="empty-history">Could not load history.</p>';
+                historyContainer.innerHTML = '<p class="empty-history">Could not load history. <span style="color:var(--amber);cursor:pointer;" onclick="loadHistory()">↻ Retry</span></p>';
             }
         }
 
@@ -799,30 +801,24 @@
 
                 const data = await res.json();
 
-                // 🆕 Xử lý response mới với status: 'pending'
                 if (data.status === 'pending' || data.status === 'success') {
                     const txId = data.tx_id || 'pending';
                     const totalDeducted = data.total_deducted || (amount + fee);
                     const newBalance = data.new_balance || (currentBalance - totalDeducted);
 
-                    // Cập nhật số dư
                     currentBalance = newBalance;
                     balanceEl.textContent = currentBalance.toFixed(4) + ' CC';
 
-                    // Hiển thị thông báo
                     const msg = `✅ ${amount.toFixed(4)} CC sent to ${recipient} (fee: ${fee.toFixed(4)} CC). Pending confirmation.`;
                     showToast(msg, 'pending');
 
-                    // Reset form
                     recipientEl.value = '';
                     amountEl.value = '';
                     feeDisplay.textContent = '0.0000 CC';
 
-                    // Reload history để hiển thị pending
+                    // Reload history ngay lập tức và sau 2s
                     await loadHistory();
-
-                    // Tự động kiểm tra sau 2 giây
-                    setTimeout(() => { loadHistory(); }, 2000);
+                    setTimeout(() => loadHistory(), 2000);
                 } else {
                     let errMsg = data.message || 'Transfer failed';
                     if (res.status === 429) errMsg = 'Too many requests. Please wait.';
@@ -841,7 +837,6 @@
         function startPendingCheck() {
             if (pendingCheckInterval) clearInterval(pendingCheckInterval);
             pendingCheckInterval = setInterval(() => {
-                // Only reload if page is visible
                 if (!document.hidden) {
                     loadPendingTransactions();
                     loadHistory();
@@ -864,7 +859,6 @@
             await loadHistory();
             startPendingCheck();
 
-            // Reload on visibility change (user comes back to tab)
             document.addEventListener('visibilitychange', () => {
                 if (!document.hidden) {
                     loadBalance();
@@ -875,7 +869,6 @@
 
         init();
 
-        // ─── Cleanup interval on page unload ─────────────────────────
         window.addEventListener('beforeunload', () => {
             if (pendingCheckInterval) clearInterval(pendingCheckInterval);
         });
