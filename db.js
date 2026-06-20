@@ -2,6 +2,7 @@
 // 🆕 Thêm bảng worker_difficulty cho per-worker dynamic difficulty
 // 🆕 Thêm blockchain tables: blocks, mining_jobs
 // 🆕 Thêm mempool và node_fees
+// 🆕 Thêm admin functions: deleteUser, setUserBanned, ensureBannedColumn
 
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
@@ -678,6 +679,47 @@ function getTotalNodeFeesCollected() {
   return row ? row.total_collected : 0;
 }
 
+// ═══════════════════════════════════════════════════
+// 🆕 ADMIN FUNCTIONS
+// ═══════════════════════════════════════════════════
+
+// Đảm bảo cột banned tồn tại
+function ensureBannedColumn() {
+  try {
+    db.prepare("ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0").run();
+    console.log('✅ Banned column ensured');
+  } catch (e) {
+    // Cột đã tồn tại hoặc lỗi khác, bỏ qua
+    if (!e.message.includes('duplicate column name')) {
+      console.warn('Could not ensure banned column:', e.message);
+    }
+  }
+}
+
+// Xóa user và các dữ liệu liên quan
+function deleteUser(username) {
+  const user = getUser(username);
+  if (!user) throw new Error('User not found');
+  db.prepare('DELETE FROM users WHERE username = ?').run(username);
+  db.prepare('DELETE FROM stakes WHERE username = ?').run(username);
+  db.prepare('DELETE FROM transactions WHERE from_username = ? OR to_username = ?').run(username, username);
+  db.prepare('DELETE FROM snake_claims WHERE username = ?').run(username);
+  db.prepare('DELETE FROM mempool WHERE from_username = ? OR to_username = ?').run(username, username);
+  // blocks_mined giữ lại để thống kê
+  console.log(`🗑️ Deleted user ${username} and related data`);
+}
+
+// Cập nhật trạng thái banned
+function setUserBanned(username, banned) {
+  const user = getUser(username);
+  if (!user) throw new Error('User not found');
+  db.prepare('UPDATE users SET banned = ? WHERE username = ?').run(banned ? 1 : 0, username);
+  console.log(`🔒 User ${username} ${banned ? 'banned' : 'unbanned'}`);
+}
+
+// Gọi ensureBannedColumn khi module load
+ensureBannedColumn();
+
 // ─── Exports ─────────────────────────────────────
 module.exports = {
   authenticate,
@@ -737,5 +779,9 @@ module.exports = {
   addNodeFees,
   deductNodeFees,
   setNodeFeesBalance,
-  getTotalNodeFeesCollected
+  getTotalNodeFeesCollected,
+  // Admin functions
+  ensureBannedColumn,
+  deleteUser,
+  setUserBanned
 };
