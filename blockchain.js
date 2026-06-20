@@ -83,11 +83,11 @@ function getJobForWorker(workerName) {
   const jobId = 'job_' + crypto.randomBytes(6).toString('hex');
   db.createJob({
     id: jobId,
-    height,
+    height: height,
     prev_hash: prevHash,
     difficulty: diff,
     target_hex: targetHex,
-    reward,
+    reward: reward,
     assigned_to: workerName
   });
 
@@ -171,13 +171,15 @@ function processMempoolForBlock(blockHeight) {
     console.log(`✅ Mempool tx ${tx.id} confirmed in block ${blockHeight}: ${tx.amount} CC to ${tx.to_username}, fee ${tx.fee} CC`);
   }
 
-  return { processed, totalFees };
+  return { processed: processed, totalFees: totalFees };
 }
 
 // ─── Submit solution ────────────────────────────
 function submitSolution(jobId, nonce, workerName, deviceType) {
   const job = db.getActiveJob(jobId);
-  if (!job) throw new Error('Job not found or already solved');
+  if (!job) {
+    throw new Error('Job not found or already solved');
+  }
   if (job.assigned_to && job.assigned_to !== workerName) {
     throw new Error('This job is assigned to another worker');
   }
@@ -198,7 +200,7 @@ function submitSolution(jobId, nonce, workerName, deviceType) {
     prev_hash: job.prev_hash,
     miner: workerName,
     nonce: String(nonce),
-    timestamp,
+    timestamp: timestamp,
     reward: job.reward,
     difficulty: job.difficulty,
     tx_count: 0,
@@ -334,18 +336,18 @@ initBlockchain();
 // ─── Export các hàm ─────────────────────────────
 module.exports = {
   // PoW mới
-  getLastBlock,
-  getJobForWorker,
-  submitSolution,
+  getLastBlock: getLastBlock,
+  getJobForWorker: getJobForWorker,
+  submitSolution: submitSolution,
   // PoS
-  startPoSMinting,
-  distributePoSRewards,
-  getCurrentValidator,
-  getCurrentDifficulty: () => INITIAL_DIFFICULTY,
+  startPoSMinting: startPoSMinting,
+  distributePoSRewards: distributePoSRewards,
+  getCurrentValidator: getCurrentValidator,
+  getCurrentDifficulty: function() { return INITIAL_DIFFICULTY; },
   // Hàm cũ (để tương thích – có thể bỏ dần)
-  getActiveBounties: () => ({}),
-  getJob: (id) => null,
-  startAutoBounty: () => {},
-  checkAndRefillBounties: () => {},
-  cleanupOldBounties: () => {}
+  getActiveBounties: function() { return {}; },
+  getJob: function(id) { return null; },
+  startAutoBounty: function() {},
+  checkAndRefillBounties: function() {},
+  cleanupOldBounties: function() {}
 };
