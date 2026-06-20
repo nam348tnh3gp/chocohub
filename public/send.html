@@ -34,6 +34,7 @@
             --green:       #40c057;
             --red:         #fa5252;
             --pink:        #f06292;
+            --pending:     #f5a623;
 
             --bg: var(--void);
             --radius-sm: 12px;
@@ -82,6 +83,10 @@
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
         }
+        @keyframes pulsePending {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
 
         .liquid-bg {
             position: fixed; top: -25%; left: -25%; width: 150%; height: 150%;
@@ -92,7 +97,7 @@
 
         /* Send Container */
         .send-container {
-            width: min(520px, 94vw);
+            width: min(560px, 94vw);
             margin: 40px auto 60px;
             padding: 0 16px;
             position: relative;
@@ -190,7 +195,7 @@
             z-index: 1;
         }
 
-        /* Balance display */
+        /* Balance row */
         .balance-row {
             display: flex;
             align-items: center;
@@ -214,6 +219,23 @@
             color: var(--amber);
             font-weight: 700;
             font-size: 1rem;
+        }
+
+        /* Fee info */
+        .fee-info {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0 16px 0;
+            font-size: 0.75rem;
+            color: var(--dim);
+            position: relative;
+            z-index: 1;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+        .fee-info .fee-value {
+            color: var(--mid);
+            font-family: 'Space Mono', monospace;
         }
 
         /* Field */
@@ -296,10 +318,32 @@
             display: flex;
             align-items: center;
             gap: 8px;
+            justify-content: space-between;
         }
+        .history-card h3 .pending-badge {
+            font-size: 0.6rem;
+            font-weight: 700;
+            color: var(--pending);
+            background: rgba(245, 166, 35, 0.15);
+            padding: 4px 12px;
+            border-radius: var(--radius-full);
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .history-card h3 .pending-badge .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--pending);
+            animation: pulsePending 1.5s ease-in-out infinite;
+            display: inline-block;
+        }
+
         .history-list {
             list-style: none;
-            max-height: 260px;
+            max-height: 300px;
             overflow-y: auto;
             font-family: 'Space Mono', monospace;
             font-size: 0.78rem;
@@ -316,26 +360,66 @@
             background: rgba(255,255,255,0.02);
             border: 1px solid var(--border);
             border-radius: var(--radius-sm);
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+        .history-item.pending-item {
+            border-color: rgba(245, 166, 35, 0.3);
+            background: rgba(245, 166, 35, 0.05);
         }
         .history-item .tx-type {
             font-weight: 700;
             color: var(--amber);
             min-width: 45px;
+            font-size: 0.7rem;
         }
         .history-item .tx-type.receive {
             color: var(--green);
         }
+        .history-item .tx-type.pending-type {
+            color: var(--pending);
+        }
         .history-item .tx-details {
             flex: 1;
-            text-align: center;
+            text-align: left;
             color: var(--text);
+            font-size: 0.75rem;
+            padding: 0 6px;
         }
         .history-item .tx-amount {
             font-weight: 700;
+            font-size: 0.8rem;
+        }
+        .history-item .tx-amount.negative {
+            color: var(--red);
+        }
+        .history-item .tx-amount.positive {
+            color: var(--green);
+        }
+        .history-item .tx-amount.pending-amount {
+            color: var(--pending);
         }
         .history-item .tx-time {
-            font-size: 0.7rem;
+            font-size: 0.6rem;
             color: var(--dim);
+            min-width: 60px;
+            text-align: right;
+        }
+        .history-item .tx-status {
+            font-size: 0.55rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 2px 8px;
+            border-radius: var(--radius-full);
+        }
+        .history-item .tx-status.pending-status {
+            color: var(--pending);
+            background: rgba(245, 166, 35, 0.15);
+        }
+        .history-item .tx-status.confirmed-status {
+            color: var(--green);
+            background: rgba(64, 192, 87, 0.15);
         }
         .empty-history {
             color: var(--dim);
@@ -350,16 +434,21 @@
             transform: translateX(-50%) translateY(20px);
             background: #111; padding: 14px 28px; border-radius: 50px;
             border: 1px solid var(--amber); color: #fff; font-weight: 600;
-            font-size: 0.9rem; opacity: 0; transition: 0.3s; z-index: 10005;
+            font-size: 0.85rem; opacity: 0; transition: 0.3s; z-index: 10005;
             pointer-events: none;
+            max-width: 90vw;
+            text-align: center;
         }
         #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
         #toast.success { border-color: var(--green); color: var(--green); }
         #toast.error { border-color: var(--red); color: var(--red); }
+        #toast.pending { border-color: var(--pending); color: var(--pending); }
 
         @media (max-width: 400px) {
             .send-card { padding: 22px 16px; }
             .history-card { padding: 20px 16px; }
+            .history-item { flex-wrap: wrap; gap: 4px; }
+            .history-item .tx-details { width: 100%; text-align: left; }
         }
     </style>
 </head>
@@ -379,12 +468,18 @@
         <!-- Send Card -->
         <div class="send-card">
             <h1 class="send-title">Transfer Choco Coins</h1>
-            <p class="send-subtitle">Send CC to any ChocoHub user instantly.</p>
+            <p class="send-subtitle">Send CC to any ChocoHub user. <span style="color:var(--dim);font-size:0.7rem;">Fee: 1%</span></p>
 
             <!-- Current Balance -->
             <div class="balance-row">
                 <span class="balance-label">Your Balance</span>
                 <span class="balance-value" id="current-balance">— CC</span>
+            </div>
+
+            <!-- Fee Info -->
+            <div class="fee-info">
+                <span>Transaction Fee (1%)</span>
+                <span class="fee-value" id="fee-display">0.0000 CC</span>
             </div>
 
             <!-- Recipient -->
@@ -401,7 +496,12 @@
 
         <!-- Transaction History -->
         <div class="history-card">
-            <h3>📋 Transaction History</h3>
+            <h3>
+                📋 Transaction History
+                <span class="pending-badge" id="pending-badge" style="display:none;">
+                    <span class="dot"></span> <span id="pending-count">0</span> pending
+                </span>
+            </h3>
             <div id="history-container">
                 <p class="empty-history">Loading history...</p>
             </div>
@@ -412,30 +512,40 @@
     <div id="toast" role="status" aria-live="polite"></div>
 
     <script>
+        // ─── Configuration ──────────────────────────────────────────────
+        const PENDING_CHECK_INTERVAL = 10000; // 10 giây
+
+        // ─── DOM Elements ──────────────────────────────────────────────
         const sendBtn = document.getElementById('send-btn');
         const recipientEl = document.getElementById('recipient');
         const amountEl = document.getElementById('amount');
         const balanceEl = document.getElementById('current-balance');
+        const feeDisplay = document.getElementById('fee-display');
         const historyContainer = document.getElementById('history-container');
+        const pendingBadge = document.getElementById('pending-badge');
+        const pendingCountEl = document.getElementById('pending-count');
 
         let currentBalance = 0;
+        let pendingTxIds = new Set();
+        let pendingCheckInterval = null;
 
-        function showToast(msg, type) {
+        // ─── Toast Helper ──────────────────────────────────────────────
+        function showToast(msg, type = '') {
             const t = document.getElementById('toast');
             if (!t) return;
             t.textContent = msg;
             t.className = 'show ' + (type || '');
             clearTimeout(t._timeout);
-            t._timeout = setTimeout(() => { t.className = ''; }, 3000);
+            t._timeout = setTimeout(() => { t.className = ''; }, 4000);
         }
 
+        // ─── Date Formatting ──────────────────────────────────────────
         function formatDate(dateStr) {
             if (!dateStr) return '—';
             try {
                 const date = new Date(dateStr);
                 if (isNaN(date.getTime())) return '—';
                 return date.toLocaleString('en-US', {
-                    year: 'numeric',
                     month: '2-digit',
                     day: '2-digit',
                     hour: '2-digit',
@@ -447,6 +557,35 @@
             }
         }
 
+        function formatTimeAgo(dateStr) {
+            if (!dateStr) return '—';
+            try {
+                const date = new Date(dateStr);
+                if (isNaN(date.getTime())) return '—';
+                const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+                if (diff < 60) return diff + 's ago';
+                if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+                if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+                return Math.floor(diff / 86400) + 'd ago';
+            } catch {
+                return '—';
+            }
+        }
+
+        // ─── Fee Calculator ───────────────────────────────────────────
+        function calculateFee(amount) {
+            if (!amount || isNaN(amount) || amount <= 0) return 0;
+            return parseFloat((amount * 0.01).toFixed(8));
+        }
+
+        // ─── Update Fee Display ──────────────────────────────────────
+        amountEl.addEventListener('input', function() {
+            const amount = parseFloat(this.value);
+            const fee = calculateFee(amount);
+            feeDisplay.textContent = fee > 0 ? fee.toFixed(4) + ' CC' : '0.0000 CC';
+        });
+
+        // ─── Load Balance ─────────────────────────────────────────────
         async function loadBalance() {
             const user = localStorage.getItem('choco_user');
             const token = localStorage.getItem('choco_token');
@@ -479,19 +618,97 @@
             }
         }
 
+        // ─── Load Pending Transactions ────────────────────────────────
+        async function loadPendingTransactions() {
+            try {
+                const res = await fetch('/node_fees/mempool/status');
+                if (!res.ok) throw new Error('Failed to fetch mempool');
+                const data = await res.json();
+                const pending = data.transactions || [];
+
+                // Update badge
+                if (pending.length > 0) {
+                    pendingBadge.style.display = 'flex';
+                    pendingCountEl.textContent = pending.length;
+                } else {
+                    pendingBadge.style.display = 'none';
+                }
+
+                // Store pending tx ids for display
+                pendingTxIds = new Set(pending.map(tx => tx.id));
+                return pending;
+            } catch (e) {
+                console.warn('Failed to load pending:', e.message);
+                return [];
+            }
+        }
+
+        // ─── Load Transaction History ─────────────────────────────────
         async function loadHistory() {
             const user = localStorage.getItem('choco_user');
             if (!user) {
                 historyContainer.innerHTML = '<p class="empty-history">Login to see history.</p>';
                 return;
             }
+
             try {
+                // Load confirmed transactions
                 const res = await fetch('/get_transactions?username=' + encodeURIComponent(user));
-                if (!res.ok) throw new Error('Failed to fetch');
+                if (!res.ok) throw new Error('Failed to fetch history');
                 const data = await res.json();
                 const transactions = data.transactions || [];
 
-                if (transactions.length === 0) {
+                // Load pending transactions
+                const pending = await loadPendingTransactions();
+
+                // Combine: pending first (with status), then confirmed
+                const allItems = [];
+
+                // Add pending transactions (only those involving the user)
+                const userPending = pending.filter(tx =>
+                    tx.from === user || tx.to === user
+                );
+                for (const tx of userPending) {
+                    const isSender = tx.from === user;
+                    allItems.push({
+                        id: tx.id,
+                        from: tx.from,
+                        to: tx.to,
+                        amount: parseFloat(tx.amount),
+                        fee: parseFloat(tx.fee),
+                        total: parseFloat(tx.total),
+                        created_at: tx.created_at,
+                        status: 'pending',
+                        isSender: isSender,
+                        counterpart: isSender ? tx.to : tx.from,
+                        type: isSender ? 'Sent' : 'Received'
+                    });
+                }
+
+                // Add confirmed transactions
+                for (const tx of transactions) {
+                    const isSender = tx.from_username === user;
+                    allItems.push({
+                        id: tx.id || 'tx_' + Date.now(),
+                        from: tx.from_username,
+                        to: tx.to_username,
+                        amount: parseFloat(tx.amount),
+                        created_at: tx.created_at,
+                        status: 'confirmed',
+                        isSender: isSender,
+                        counterpart: isSender ? tx.to_username : tx.from_username,
+                        type: isSender ? 'Sent' : 'Received'
+                    });
+                }
+
+                // Sort: pending first (newest first), then confirmed (newest first)
+                allItems.sort((a, b) => {
+                    if (a.status === 'pending' && b.status !== 'pending') return -1;
+                    if (a.status !== 'pending' && b.status === 'pending') return 1;
+                    return new Date(b.created_at) - new Date(a.created_at);
+                });
+
+                if (allItems.length === 0) {
                     historyContainer.innerHTML = '<p class="empty-history">No transactions yet.</p>';
                     return;
                 }
@@ -499,24 +716,43 @@
                 const list = document.createElement('div');
                 list.className = 'history-list';
 
-                transactions.forEach(tx => {
-                    const isSender = tx.from_username === user;
-                    const type = isSender ? 'Sent' : 'Received';
-                    const counterpart = isSender ? tx.to_username : tx.from_username;
-                    const amount = parseFloat(tx.amount).toFixed(4);
-                    // SỬA: server đã trả về ISO string, không cần thêm ' UTC'
-                    const time = formatDate(tx.created_at);
+                for (const tx of allItems) {
+                    const isPending = tx.status === 'pending';
+                    const isSender = tx.isSender;
+                    const amount = tx.amount.toFixed(4);
+                    const time = formatTimeAgo(tx.created_at);
 
                     const item = document.createElement('div');
-                    item.className = 'history-item';
+                    item.className = 'history-item' + (isPending ? ' pending-item' : '');
+
+                    const typeClass = isPending ? 'pending-type' : (isSender ? '' : 'receive');
+                    const amountClass = isPending ? 'pending-amount' : (isSender ? 'negative' : 'positive');
+                    const amountPrefix = isSender ? '-' : '+';
+
+                    let statusHtml = '';
+                    if (isPending) {
+                        statusHtml = `<span class="tx-status pending-status">⏳ Pending</span>`;
+                    } else {
+                        statusHtml = `<span class="tx-status confirmed-status">✅ Done</span>`;
+                    }
+
+                    let feeHtml = '';
+                    if (isPending && tx.fee) {
+                        feeHtml = ` (fee: ${tx.fee.toFixed(4)} CC)`;
+                    }
+
                     item.innerHTML = `
-                        <span class="tx-type ${isSender ? '' : 'receive'}">${type}</span>
-                        <span class="tx-details">${isSender ? 'To' : 'From'} <strong>${counterpart}</strong></span>
-                        <span class="tx-amount" style="color: ${isSender ? 'var(--red)' : 'var(--green)'}">${isSender ? '-' : '+'}${amount} CC</span>
+                        <span class="tx-type ${typeClass}">${tx.type}</span>
+                        <span class="tx-details">
+                            ${isSender ? '→' : '←'} <strong>${tx.counterpart}</strong>
+                            ${feeHtml}
+                        </span>
+                        <span class="tx-amount ${amountClass}">${amountPrefix}${amount} CC</span>
                         <span class="tx-time">${time}</span>
+                        ${statusHtml}
                     `;
                     list.appendChild(item);
-                });
+                }
 
                 historyContainer.textContent = '';
                 historyContainer.appendChild(list);
@@ -526,6 +762,7 @@
             }
         }
 
+        // ─── Handle Send ──────────────────────────────────────────────
         async function handleSend() {
             const user = localStorage.getItem('choco_user');
             const token = localStorage.getItem('choco_token');
@@ -537,11 +774,12 @@
 
             const recipient = recipientEl.value.trim();
             const amount = parseFloat(amountEl.value);
+            const fee = calculateFee(amount);
 
             if (!recipient) return showToast('Enter recipient username', 'error');
             if (recipient === user) return showToast('Cannot send to yourself', 'error');
             if (isNaN(amount) || amount <= 0) return showToast('Enter a valid amount', 'error');
-            if (amount > currentBalance) return showToast('Insufficient balance', 'error');
+            if (amount + fee > currentBalance) return showToast(`Insufficient balance. Need ${(amount + fee).toFixed(4)} CC (incl. ${fee.toFixed(4)} CC fee)`, 'error');
 
             sendBtn.disabled = true;
             sendBtn.textContent = 'SENDING...';
@@ -560,20 +798,38 @@
                 });
 
                 const data = await res.json();
-                if (data.status === 'success') {
-                    showToast(`Sent ${amount} CC to ${recipient}!`, 'success');
-                    currentBalance = data.new_balance;
+
+                // 🆕 Xử lý response mới với status: 'pending'
+                if (data.status === 'pending' || data.status === 'success') {
+                    const txId = data.tx_id || 'pending';
+                    const totalDeducted = data.total_deducted || (amount + fee);
+                    const newBalance = data.new_balance || (currentBalance - totalDeducted);
+
+                    // Cập nhật số dư
+                    currentBalance = newBalance;
                     balanceEl.textContent = currentBalance.toFixed(4) + ' CC';
+
+                    // Hiển thị thông báo
+                    const msg = `✅ ${amount.toFixed(4)} CC sent to ${recipient} (fee: ${fee.toFixed(4)} CC). Pending confirmation.`;
+                    showToast(msg, 'pending');
+
+                    // Reset form
                     recipientEl.value = '';
                     amountEl.value = '';
-                    loadHistory();
+                    feeDisplay.textContent = '0.0000 CC';
+
+                    // Reload history để hiển thị pending
+                    await loadHistory();
+
+                    // Tự động kiểm tra sau 2 giây
+                    setTimeout(() => { loadHistory(); }, 2000);
                 } else {
                     let errMsg = data.message || 'Transfer failed';
                     if (res.status === 429) errMsg = 'Too many requests. Please wait.';
                     showToast(errMsg, 'error');
                 }
             } catch (e) {
-                showToast('Network error', 'error');
+                showToast('Network error: ' + e.message, 'error');
                 console.error(e);
             }
 
@@ -581,7 +837,19 @@
             sendBtn.textContent = 'SEND CC';
         }
 
-        // Auto redirect to login if no token
+        // ─── Auto check pending periodically ─────────────────────────
+        function startPendingCheck() {
+            if (pendingCheckInterval) clearInterval(pendingCheckInterval);
+            pendingCheckInterval = setInterval(() => {
+                // Only reload if page is visible
+                if (!document.hidden) {
+                    loadPendingTransactions();
+                    loadHistory();
+                }
+            }, PENDING_CHECK_INTERVAL);
+        }
+
+        // ─── Auth Check ──────────────────────────────────────────────
         (function checkAuth() {
             const token = localStorage.getItem('choco_token');
             if (!token) {
@@ -590,9 +858,27 @@
             }
         })();
 
-        // Init
-        loadBalance();
-        loadHistory();
+        // ─── Init ──────────────────────────────────────────────────────
+        async function init() {
+            await loadBalance();
+            await loadHistory();
+            startPendingCheck();
+
+            // Reload on visibility change (user comes back to tab)
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) {
+                    loadBalance();
+                    loadHistory();
+                }
+            });
+        }
+
+        init();
+
+        // ─── Cleanup interval on page unload ─────────────────────────
+        window.addEventListener('beforeunload', () => {
+            if (pendingCheckInterval) clearInterval(pendingCheckInterval);
+        });
     </script>
 </body>
 </html>
