@@ -1,4 +1,5 @@
 // blockchain.js - PoW chuẩn với blockchain liên tục, per-worker difficulty, reward 0.05 CC/block
+// Tích hợp mempool và phí giao dịch
 const crypto = require('crypto');
 const db = require('./db');
 
@@ -10,6 +11,10 @@ const MIN_DIFFICULTY = 1;
 const MAX_DIFFICULTY = 1000000;
 const DIFFICULTY_ADJUSTMENT_FACTOR = 0.5;       // hệ số điều chỉnh (0.5 = trung bình)
 const TARGET_SOLVE_TIME = 10;                   // giây mong muốn (cho per‑worker điều chỉnh)
+
+// ─── Cấu hình mempool ────────────────────────────
+const MAX_MEMPOOL_PER_BLOCK = 50;                // số giao dịch tối đa mỗi block
+const MEMPOOL_HOLDING_ACCOUNT = 'mempool_holding';
 
 // ─── Helper: chuyển difficulty → target hex ──
 function difficultyToTarget(difficulty) {
@@ -33,7 +38,8 @@ function initBlockchain() {
       timestamp: Math.floor(Date.now() / 1000),
       reward: 0,
       difficulty: INITIAL_DIFFICULTY,
-      tx_count: 0
+      tx_count: 0,
+      total_fees: 0
     };
     db.insertBlock(genesis);
     console.log('🌱 Genesis block created');
@@ -103,6 +109,71 @@ function mapJob(job) {
   };
 }
 
+// ─── Xử lý các giao dịch trong mempool khi tạo block ──
+function processMempoolForBlock(blockHeight) {
+  // Lấy tối đa MAX_MEMPOOL_PER_BLOCK giao dịch pending
+  const txs = db.getPendingMempool(MAX_MEMPOOL_PER_BLOCK);
+  if (!txs || txs.length === 0) {
+    return { processed: 0, totalFees: 0 };
+  }
+
+  let processed = 0;
+  let totalFees = 0;
+
+  // Kiểm tra tài khoản holding
+  const holding = db.getUser(MEMPOOL_HOLDING_ACCOUNT);
+  if (!holding) {
+    console.warn('⚠️ mempool_holding account does not exist!');
+    // Đánh dấu tất cả là failed
+    for (const tx of txs) {
+      db.markMempoolFailed(tx.id);
+    }
+    return { processed: 0, totalFees: 0 };
+  }
+
+  for (const tx of txs) {
+    // Kiểm tra người nhận có tồn tại không
+    const receiver = db.getUser(tx.to_username);
+    if (!receiver) {
+      db.markMempoolFailed(tx.id);
+      console.warn(`❌ Mempool tx ${tx.id}: receiver ${tx.to_username} not found`);
+      continue;
+    }
+
+    // Kiểm tra số dư holding
+    if (holding.balance < tx.total_deducted) {
+      db.markMempoolFailed(tx.id);
+      console.warn(`❌ Mempool tx ${tx.id}: insufficient holding balance (${holding.balance} < ${tx.total_deducted})`);
+      continue;
+    }
+
+    // Trừ từ holding
+    db.updateBalance(MEMPOOL_HOLDING_ACCOUNT, -tx.total_deducted);
+    // Cộng amount cho receiver
+    db.updateBalance(tx.to_username, tx.amount);
+    // Cộng fee vào node_fees
+    const feeAdded = db.addNodeFees(tx.fee);
+    if (feeAdded > 0) {
+      totalFees += feeAdded;
+    }
+
+    // Đánh dấu đã xác nhận
+    db.markMempoolConfirmed(tx.id, blockHeight);
+    processed++;
+
+    // Ghi log giao dịch (tuỳ chọn)
+    try {
+      db.addTransaction(tx.from_username, tx.to_username, tx.amount);
+    } catch (e) {
+      // Bỏ qua lỗi ghi log
+    }
+
+    console.log(`✅ Mempool tx ${tx.id} confirmed in block ${blockHeight}: ${tx.amount} CC to ${tx.to_username}, fee ${tx.fee} CC`);
+  }
+
+  return { processed, totalFees };
+}
+
 // ─── Submit solution ────────────────────────────
 function submitSolution(jobId, nonce, workerName, deviceType) {
   const job = db.getActiveJob(jobId);
@@ -119,7 +190,7 @@ function submitSolution(jobId, nonce, workerName, deviceType) {
     return { status: 'error', reason: `Invalid nonce: hash ${hashHex.substring(0,12)}... >= target` };
   }
 
-  // Tạo block
+  // Tạo block (chưa có tx_count và total_fees)
   const timestamp = Math.floor(Date.now() / 1000);
   const newBlock = {
     height: job.height,
@@ -130,7 +201,8 @@ function submitSolution(jobId, nonce, workerName, deviceType) {
     timestamp,
     reward: job.reward,
     difficulty: job.difficulty,
-    tx_count: 0
+    tx_count: 0,
+    total_fees: 0
   };
 
   // Lưu block
@@ -139,12 +211,21 @@ function submitSolution(jobId, nonce, workerName, deviceType) {
   // Thưởng cho miner
   db.updateBalance(workerName, job.reward);
 
+  // ─── Xử lý mempool ──────────────────────────────
+  const mempoolResult = processMempoolForBlock(newBlock.height);
+
+  // Cập nhật tx_count và total_fees cho block
+  if (mempoolResult.processed > 0 || mempoolResult.totalFees > 0) {
+    db.updateBlockDetails(newBlock.height, mempoolResult.processed, mempoolResult.totalFees);
+    newBlock.tx_count = mempoolResult.processed;
+    newBlock.total_fees = mempoolResult.totalFees;
+  }
+
   // Đánh dấu job solved và xóa job cũ của worker
   db.markJobSolved(jobId);
   db.deleteJobsForWorker(workerName, jobId);
 
   // Điều chỉnh difficulty cho worker dựa trên thời gian giải
-  // Lấy thời gian tạo job từ database
   const solveTime = (timestamp - new Date(job.created_at).getTime() / 1000);
   if (solveTime > 0) {
     adjustWorkerDifficulty(workerName, solveTime);
@@ -153,13 +234,15 @@ function submitSolution(jobId, nonce, workerName, deviceType) {
   // Gửi thông báo (webhook)
   sendMinerWebhook(workerName, newBlock.height, deviceType);
 
-  console.log(`⛏️ Block ${newBlock.height} solved by ${workerName} (${deviceType}) reward ${job.reward} CC`);
+  console.log(`⛏️ Block ${newBlock.height} solved by ${workerName} (${deviceType}) reward ${job.reward} CC, ${mempoolResult.processed} txs processed, fees ${mempoolResult.totalFees} CC`);
 
   return {
     status: 'success',
-    message: `Block ${newBlock.height} solved! Reward: ${job.reward} CC`,
+    message: `Block ${newBlock.height} solved! Reward: ${job.reward} CC, ${mempoolResult.processed} transactions processed`,
     reward: job.reward,
-    block_hash: hashHex
+    block_hash: hashHex,
+    tx_count: mempoolResult.processed,
+    total_fees: mempoolResult.totalFees
   };
 }
 
@@ -181,7 +264,7 @@ function adjustWorkerDifficulty(workerName, solveTime) {
   console.log(`👷 Worker ${workerName}: difficulty ${currentDiff.toFixed(1)} → ${newDiff.toFixed(1)} (solve time ${solveTime.toFixed(1)}s)`);
 }
 
-// ─── Webhook (giữ nguyên) ─────────────────────
+// ─── Webhook ─────────────────────────────────────
 async function sendMinerWebhook(worker, height, device) {
   try {
     await fetch(process.env.DISCORD_WEBHOOK_URL, {
@@ -248,7 +331,7 @@ function startPoSMinting() {
 // ─── Khởi tạo khi load module ──────────────────
 initBlockchain();
 
-// ─── Export các hàm (giữ tương thích với cũ) ──
+// ─── Export các hàm ─────────────────────────────
 module.exports = {
   // PoW mới
   getLastBlock,
@@ -260,9 +343,9 @@ module.exports = {
   getCurrentValidator,
   getCurrentDifficulty: () => INITIAL_DIFFICULTY,
   // Hàm cũ (để tương thích – có thể bỏ dần)
-  getActiveBounties: () => ({}),   // không dùng nữa
-  getJob: (id) => null,            // không dùng nữa
-  startAutoBounty: () => {},       // không dùng nữa
+  getActiveBounties: () => ({}),
+  getJob: (id) => null,
+  startAutoBounty: () => {},
   checkAndRefillBounties: () => {},
   cleanupOldBounties: () => {}
 };
