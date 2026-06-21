@@ -5,11 +5,11 @@
 // ── CONFIG ──
 const BOX = 15;
 const COLS = 20;
-const CC_NORMAL_APPLE = 0.5;
-const CC_HC_APPLE = 2;
-const CC_NORMAL_MAX = 100;
-const CC_HC_MAX = 150;
-const COOLDOWN_MS = 15 * 60 * 1000; // 15 phút
+const CC_NORMAL_APPLE = 0.05;   // ✅ nerf: 0.05 CC/apple
+const CC_HC_APPLE = 0.1;        // ✅ nerf: 0.1 CC/apple
+const CC_NORMAL_MAX = 50;       // ✅ max 50 CC cho cả hai chế độ
+const CC_HC_MAX = 50;           // ✅ max 50 CC
+const COOLDOWN_MS = 24 * 60 * 60 * 1000; // ✅ 24 giờ
 
 // ── STATE ──
 let canvas, ctx;
@@ -237,7 +237,7 @@ function spawnGoldMark() {
     }
 }
 
-// ── AUTH & START ── (Đồng bộ: gọi POST /auth)
+// ── AUTH & START ── (Bỏ kiểm tra cooldown để luôn cho chơi)
 async function checkUser() {
     const userInp = document.getElementById("player-user").value.trim();
     const pinInp  = document.getElementById("player-pin").value.trim();
@@ -245,11 +245,10 @@ async function checkUser() {
     if (!userInp || userInp.length < 2) return toast("❌ Enter a valid username!", "error");
     if (!pinInp) return toast("❌ Enter your PIN!", "error");
 
-    // Lưu user vào localStorage để lần sau tự điền
     localStorage.setItem('choco_user', userInp);
 
     try {
-        // Bước 1: Xác thực qua API
+        // ✅ Chỉ xác thực, không kiểm tra cooldown nữa
         const authRes = await fetch('/auth', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -261,15 +260,7 @@ async function checkUser() {
             return toast("❌ " + (authData.message || "Auth failed"), "error");
         }
 
-        // Bước 2: Kiểm tra cooldown
-        const cdRes = await fetch(`/snake/cooldown?username=${encodeURIComponent(userInp)}`);
-        const cdData = await cdRes.json();
-
-        if (cdData.cooldown) {
-            return toast(`⏳ Cooldown! Còn ${cdData.remaining_minutes} phút`, "error");
-        }
-
-        // OK → vào game
+        // ✅ Luôn cho vào game
         window.currentUser = userInp;
         window.currentPin  = pinInp;
 
@@ -336,6 +327,7 @@ function triggerGameOver() {
     document.getElementById("normalMusic").pause();
     document.getElementById("hardcoreMusic").pause();
 
+    // ✅ Tính reward với max = 50 cho cả hai chế độ
     const r = hardcoreMode
         ? Math.min(score * CC_HC_APPLE, CC_HC_MAX)
         : Math.min(score * CC_NORMAL_APPLE, CC_NORMAL_MAX);
@@ -368,13 +360,13 @@ function toggleHardcoreMode() {
     if (hardcoreMode) {
         wrap.classList.add("hc-on"); sw.classList.add("on");
         badges.style.display = "flex"; warn.style.display = "block";
-        vApple.textContent = "2.0 CC";
-        vMax.textContent = "150 CC";
+        vApple.textContent = "0.1 CC";   // ✅ hiển thị đúng
+        vMax.textContent = "50 CC";      // ✅ max 50
     } else {
         wrap.classList.remove("hc-on"); sw.classList.remove("on");
         badges.style.display = "none"; warn.style.display = "none";
-        vApple.textContent = "0.5 CC";
-        vMax.textContent = "100 CC";
+        vApple.textContent = "0.05 CC";
+        vMax.textContent = "50 CC";
     }
 }
 
@@ -393,7 +385,7 @@ function exitToDashboard() {
     window.location.href = "/";
 }
 
-// ── API CLAIM ── (Đồng bộ: POST /snake/claim)
+// ── API CLAIM ── (Backend sẽ kiểm tra cooldown và max)
 async function claimReward() {
     const btn = document.getElementById("btn-claim");
     btn.disabled    = true;
@@ -416,7 +408,6 @@ async function claimReward() {
         if (data.status === "success") {
             toast("✅ Claimed " + data.reward + " CC! Balance: " + data.new_balance + " CC", "success");
             btn.textContent = "✅ CLAIMED!";
-
             startCooldownUI();
 
             if ('Notification' in window && Notification.permission === 'granted') {
@@ -436,7 +427,7 @@ async function claimReward() {
     }
 }
 
-// ── COOLDOWN UI ── (15 phút)
+// ── COOLDOWN UI ── (24h)
 function startCooldownUI() {
     clearCooldownUI();
     const cdWrap  = document.getElementById("cooldown-wrap");
@@ -458,9 +449,10 @@ function startCooldownUI() {
             cooldownInterval = null;
             return;
         }
-        const m = Math.floor(remaining / 60000);
+        const h = Math.floor(remaining / 3600000);
+        const m = Math.floor((remaining % 3600000) / 60000);
         const s = Math.floor((remaining % 60000) / 1000);
-        cdLabel.textContent = `⏳ Cooldown: ${m}m ${s.toString().padStart(2, '0')}s`;
+        cdLabel.textContent = `⏳ Cooldown: ${h}h ${m}m ${s.toString().padStart(2, '0')}s`;
         cdFill.style.width  = ((COOLDOWN_MS - remaining) / COOLDOWN_MS * 100) + "%";
     };
 
