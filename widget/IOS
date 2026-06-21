@@ -1,0 +1,161 @@
+// ChocoHub Widget — Amber Theme (4 decimals for latest block)
+// iOS Scriptable — giống màu mining.html
+
+// ---------- CẤU HÌNH ----------
+const CH_USER = "node_fees"; //change your account
+const SERVER_URL = "https://chocohub-r011.onrender.com";
+const LOGO_URL = "https://raw.githubusercontent.com/nam348tnh3gp/chocohub/main/public/favicon.ico";
+
+// ---------- BẢNG MÀU ----------
+const COLORS = {
+  bg: { start: "#0a0a0c", end: "#14151a" },
+  text: { primary: "#ffb86c", muted: "#8b949e", accent: "#ffb86c" }
+};
+
+function getGradientColors() {
+  return [new Color(COLORS.bg.start), new Color(COLORS.bg.end)];
+}
+
+async function fetchJSON(url) {
+  return await new Request(url).loadJSON();
+}
+
+function addStyledText(parent, text, size, weight = "regular", opacity = 1, color = COLORS.text.primary) {
+  const wText = parent.addText(text);
+  wText.textColor = new Color(color);
+  wText.textOpacity = opacity;
+  if (weight === "bold") wText.font = Font.boldSystemFont(size);
+  else if (weight === "medium") wText.font = Font.mediumSystemFont(size);
+  else wText.font = Font.systemFont(size);
+  return wText;
+}
+
+async function fetchUserData(username) {
+  const balanceData = await fetchJSON(`${SERVER_URL}/get_balance?username=${username}`);
+  const network = await fetchJSON(`${SERVER_URL}/network_status`);
+  
+  const balance = balanceData?.balance ?? 0;
+  const validatorCount = network?.active_validators?.length ?? 0;
+  const recentBlocks = network?.recent_blocks ?? [];
+  const totalBlocks = network?.total_blocks ?? recentBlocks.length;
+  
+  return { balance, validatorCount, totalBlocks, recentBlocks, username };
+}
+
+async function createWidget(data) {
+  const appIcon = await new Request(LOGO_URL).loadImage().catch(() => null);
+  const widget = new ListWidget();
+
+  const gradient = new LinearGradient();
+  gradient.locations = [0, 1];
+  gradient.colors = getGradientColors();
+  gradient.startPoint = new Point(0.75, 1);
+  gradient.endPoint = new Point(0.05, 0);
+  widget.backgroundGradient = gradient;
+
+  const mainStack = widget.addStack();
+  mainStack.layoutVertically();
+  mainStack.setPadding(8, 14, 14, 14);
+
+  // Header: ChocoHub + icon cạnh nhau
+  const headerRow = mainStack.addStack();
+  headerRow.layoutHorizontally();
+  headerRow.centerAlignContent();
+  addStyledText(headerRow, "ChocoHub", 12, "medium", 0.7, COLORS.text.muted);
+  if (appIcon) {
+    const iconImg = headerRow.addImage(appIcon);
+    iconImg.imageSize = new Size(20, 20);
+    headerRow.addSpacer(4);
+  } else {
+    headerRow.addSpacer();
+  }
+  mainStack.addSpacer(6);
+  
+  // Tên người dùng
+  const userRow = mainStack.addStack();
+  userRow.centerAlignContent();
+  addStyledText(userRow, data.username, 16, "medium");
+  mainStack.addSpacer(4);
+  
+  // Số dư
+  addStyledText(mainStack, `${data.balance.toFixed(4)} CC`, 22, "bold");
+  mainStack.addSpacer(6);
+  
+  // Đường kẻ
+  const divider = mainStack.addStack();
+  divider.backgroundColor = new Color(COLORS.text.accent, 0.3);
+  divider.size = new Size(-1, 1);
+  mainStack.addSpacer(6);
+  
+  // Dòng thống kê
+  const statsRow = mainStack.addStack();
+  statsRow.layoutHorizontally();
+  statsRow.spacing = 12;
+  
+  const valStack = statsRow.addStack();
+  valStack.layoutVertically();
+  addStyledText(valStack, `${data.validatorCount}`, 15, "bold", 1, COLORS.text.accent);
+  addStyledText(valStack, "Validators", 10, "regular", 0.7, COLORS.text.muted);
+  
+  const bountyStack = statsRow.addStack();
+  bountyStack.layoutVertically();
+  addStyledText(bountyStack, `${data.totalBlocks}`, 15, "bold", 1, COLORS.text.accent);
+  addStyledText(bountyStack, "Blocks", 10, "regular", 0.7, COLORS.text.muted);
+  
+  statsRow.addSpacer();
+  
+  // Block gần nhất (latest) – hiển thị dạng "Latest: #11 by username"
+  const latestBlock = data.recentBlocks[0];
+  if (latestBlock) {
+    mainStack.addSpacer(6);
+    const blockRow = mainStack.addStack();
+    blockRow.layoutHorizontally();
+    
+    // "Latest:"
+    addStyledText(blockRow, "Latest:", 12, "regular", 0.7, COLORS.text.muted);
+    blockRow.addSpacer(4);
+    
+    // Lấy số block (height) hoặc id/hash fallback
+    let blockNumber = latestBlock.height;
+    let displayId;
+    if (blockNumber !== undefined && blockNumber !== null) {
+      displayId = `#${blockNumber}`;
+    } else {
+      // Fallback: dùng id hoặc hash
+      const rawId = latestBlock.id || latestBlock.hash || '?';
+      displayId = rawId.length > 8 ? rawId.substring(0, 8) + '…' : rawId;
+    }
+    addStyledText(blockRow, displayId, 12, "bold", 0.9, COLORS.text.accent);
+    
+    blockRow.addSpacer(4);
+    // "by"
+    addStyledText(blockRow, "by", 11, "regular", 0.6, COLORS.text.muted);
+    blockRow.addSpacer(4);
+    
+    // Tên miner – ưu tiên miner, username, solver_username
+    const miner = latestBlock.miner || latestBlock.username || latestBlock.solver_username || 'unknown';
+    addStyledText(blockRow, miner, 12, "medium", 0.9, COLORS.text.primary);
+    
+    // Thêm reward nếu có (tùy chọn, có thể bỏ nếu muốn gọn)
+    blockRow.addSpacer();
+    const reward = (latestBlock.reward || 0).toFixed(4);
+    addStyledText(blockRow, `${reward} CC`, 11, "regular", 0.7, COLORS.text.muted);
+  } else {
+    // Không có block nào
+    mainStack.addSpacer(6);
+    const noBlockRow = mainStack.addStack();
+    addStyledText(noBlockRow, "No blocks yet", 11, "regular", 0.5, COLORS.text.muted);
+  }
+  
+  return widget;
+}
+
+const userData = await fetchUserData(CH_USER);
+const widget = await createWidget(userData);
+
+if (config.runsInWidget) {
+  Script.setWidget(widget);
+} else {
+  await widget.presentMedium();
+}
+Script.complete();
