@@ -1,8 +1,8 @@
-// snake.js – Đã sửa lỗi ép lowercase
+// snake.js – Đã sửa lỗi ép lowercase và nerf phần thưởng
 const db = require('./db');
 
-const REWARD_NORMAL = 0.5;
-const REWARD_HARDCORE = 2.0;
+const REWARD_NORMAL = 0.05;      // 0.05 CC / apple
+const REWARD_HARDCORE = 0.1;     // 0.1 CC / apple
 const COOLDOWN_MS = 15 * 60 * 1000; // 15 phút
 
 function processClaim(username, pin, apples, mode) {
