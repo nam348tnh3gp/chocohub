@@ -34,6 +34,7 @@ const SPD_MIN     = 65;
 
 window.currentUser = "";
 window.currentPin  = "";
+window.currentGameSessionId = null;
 window._isLagGhost = false;
 let cooldownInterval = null;
 
@@ -260,7 +261,22 @@ async function checkUser() {
             return toast("❌ " + (authData.message || "Auth failed"), "error");
         }
 
-        // ✅ Luôn cho vào game
+        // ✅ Request game session (proof-of-play)
+        try {
+            const sessionRes = await fetch('/snake/start-game', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: userInp, pin: pinInp })
+            });
+            const sessionData = await sessionRes.json();
+            if (sessionData.status !== 'success') {
+                return toast("❌ " + (sessionData.message || "Session failed"), "error");
+            }
+            window.currentGameSessionId = sessionData.game_session_id;
+        } catch (e) {
+            return toast("⚠️ Could not start game session", "error");
+        }
+
         window.currentUser = userInp;
         window.currentPin  = pinInp;
 
@@ -400,7 +416,8 @@ async function claimReward() {
                 username: window.currentUser,
                 pin:      window.currentPin,
                 apples:   score,
-                mode:     mode
+                mode:     mode,
+                game_session_id: window.currentGameSessionId
             })
         });
         const data = await res.json();
