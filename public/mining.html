@@ -289,7 +289,23 @@
         .boost-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .boost-status { font-family: 'Space Mono', monospace; font-size: 0.75rem; color: #8B8296; margin-top: 10px; }
         .boost-status.active { color: #7FE0A0; }
-        @media (max-width: 768px) { .ad-sidebar { display: none; } }
+        @media (min-width: 769px) {
+            .miner-container { display: grid; grid-template-columns: 1fr auto; gap: 1.5rem; max-width: 960px; }
+            .miner-container > .header { grid-column: 1; }
+            .miner-container > .stats-grid { grid-column: 1; }
+            .miner-container > .boost-card { grid-column: 2; grid-row: 1 / 5; width: 200px; margin: 0; position: sticky; top: 2rem; align-self: start; padding: 1rem; }
+            .miner-container > .boost-card .boost-title { font-size: 0.85rem; }
+            .miner-container > .boost-card .boost-sub { font-size: 0.65rem; }
+            .miner-container > .boost-card .boost-btn { padding: 8px 16px; font-size: 0.75rem; }
+            .miner-container > .boost-card .boost-status { font-size: 0.65rem; }
+            .miner-container > .job-card { grid-column: 1; }
+            .miner-container > .control-panel { grid-column: 1; }
+        }
+        @media (max-width: 768px) {
+            .ad-sidebar { position: static; transform: none; width: 100%; max-width: 680px; margin: 1.5rem auto 0; padding: 0 1rem; font-size: 0; }
+            .ad-sidebar .ad-inner { width: 100%; }
+            .ad-sidebar .close-btn { display: none; }
+        }
         @media (max-width: 560px) {
             .stats-grid { gap: 8px; }
             .stat-value { font-size: 1.2rem; }
@@ -298,30 +314,6 @@
     </style>
 </head>
 <body>
-<!-- BEGIN AADS AD UNIT 2444734 -->
-<div class="ad-sidebar">
-    <input autocomplete="off" type="checkbox" id="aadsstickymqfltshv" hidden />
-    <div class="ad-inner">
-        <div style="width:100%;text-align:center;">
-            <a class="ad-frame-link"
-               target="_blank"
-               href="https://aads.com/campaigns/new?source_id=2444734&source_type=ad_unit&partner=2444734">
-                Advertise here
-            </a>
-        </div>
-        <iframe class="ad-iframe"
-                data-aa="2444734"
-                src="//acceptable.a-ads.com/2444734/?size=Adaptive&background_color=000000&link_color=00e3ff">
-        </iframe>
-    </div>
-    <label for="aadsstickymqfltshv" class="close-btn" title="Fechar anúncio">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 490 490">
-            <polygon points="456.851,0 245,212.564 33.149,0 0.708,32.337 212.669,245.004 0.708,457.678 33.149,490 245,277.443 456.851,490 489.292,457.678 277.331,245.004 489.292,32.337"/>
-        </svg>
-    </label>
-</div>
-<!-- END AADS AD UNIT 2444734 -->
-
 <div class="miner-container">
     <div class="header">
         <div class="logo-area">
@@ -381,6 +373,30 @@
         </div>
     </div>
 </div>
+
+<!-- BEGIN AADS AD UNIT 2444734 -->
+<div class="ad-sidebar">
+    <input autocomplete="off" type="checkbox" id="aadsstickymqfltshv" hidden />
+    <div class="ad-inner">
+        <div style="width:100%;text-align:center;">
+            <a class="ad-frame-link"
+               target="_blank"
+               href="https://aads.com/campaigns/new?source_id=2444734&source_type=ad_unit&partner=2444734">
+                Advertise here
+            </a>
+        </div>
+        <iframe class="ad-iframe"
+                data-aa="2444734"
+                src="//acceptable.a-ads.com/2444734/?size=Adaptive&background_color=000000&link_color=00e3ff">
+        </iframe>
+    </div>
+    <label for="aadsstickymqfltshv" class="close-btn" title="Fechar anúncio">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 490 490">
+            <polygon points="456.851,0 245,212.564 33.149,0 0.708,32.337 212.669,245.004 0.708,457.678 33.149,490 245,277.443 456.851,490 489.292,457.678 277.331,245.004 489.292,32.337"/>
+        </svg>
+    </label>
+</div>
+<!-- END AADS AD UNIT 2444734 -->
 
 <div id="toast" class="toast"></div>
 
