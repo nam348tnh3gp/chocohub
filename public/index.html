@@ -394,9 +394,8 @@
         }
 
         /* Network monitor */
-        .dashboard-bottom-grid { display: grid; grid-template-columns: 1fr; gap: 22px; margin-top: 32px; }
-        @media (min-width: 769px) { .dashboard-bottom-grid { grid-template-columns: 2fr 1fr; } }
-        .mining-activity-card { background: var(--raised); border-radius: var(--radius-lg); padding: 24px 28px; border: 1px solid var(--border); }
+        .mining-activity-card { background: var(--raised); border-radius: var(--radius-lg); padding: 24px 28px; border: 1px solid var(--border); margin-top: 32px; }
+        @media (min-width: 769px) { .mining-activity-card { width: 320px; margin-left: auto; } }
         .mining-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
         .mining-stat { text-align: center; }
         .mining-stat-value { display: block; font-family: 'Space Mono', monospace; font-size: 1.4rem; font-weight: 700; color: var(--amber); }
@@ -627,7 +626,6 @@
             </a>
         </div>
 
-        <div class="dashboard-bottom-grid">
         <div class="mining-activity-card">
             <h3 class="section-title">⛏️ Mining Activity</h3>
             <div class="mining-stats-grid">
@@ -663,7 +661,6 @@
                 </div>
             </div>
         </div>
-    </div>
     </div>
 
     <!-- Toast container -->
