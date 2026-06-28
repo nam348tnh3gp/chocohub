@@ -330,8 +330,18 @@
         /* Game grid */
         .game-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            grid-template-columns: repeat(4, 1fr);
             gap: 22px;
+        }
+        @media (max-width: 1200px) {
+            .game-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+        @media (max-width: 768px) {
+            .game-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
         }
 
         .game-card {
@@ -393,10 +403,27 @@
         }
 
         /* Network monitor */
-        .mining-activity-card { background: var(--raised); border-radius: var(--radius-lg); padding: 24px 28px; border: 1px solid var(--border); }
-        .services-wrap { display: flow-root; }
-        @media (min-width: 769px) { .mining-activity-card { float: right; width: 280px; margin-left: 22px; } }
-        @media (max-width: 768px) { .mining-activity-card { float: none; width: auto; margin-top: 32px; } }
+        .mining-activity-card { 
+            background: var(--raised); 
+            border-radius: var(--radius-lg); 
+            padding: 24px 28px; 
+            border: 1px solid var(--border);
+            position: absolute;
+            right: 0;
+            top: 0;
+            width: 240px;
+        }
+        .services-wrap { 
+            display: block;
+            position: relative;
+        }
+        @media (max-width: 768px) { 
+            .mining-activity-card { 
+                position: static;
+                width: auto; 
+                margin-top: 32px; 
+            } 
+        }
         .mining-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
         .mining-stat { text-align: center; }
         .mining-stat-value { display: block; font-family: 'Space Mono', monospace; font-size: 1.4rem; font-weight: 700; color: var(--amber); }
