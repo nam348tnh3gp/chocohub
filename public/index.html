@@ -330,11 +330,10 @@
         .services-wrap { 
             display: flex;
             gap: 22px;
-            flex-wrap: wrap;
+            align-items: flex-start;
         }
         .game-grid {
             flex: 1;
-            min-width: 600px;
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 22px;
@@ -346,16 +345,17 @@
             border: 1px solid var(--border);
             width: 280px;
             height: fit-content;
+            flex-shrink: 0;
         }
-        @media (max-width: 1100px) {
+        @media (max-width: 1200px) {
             .services-wrap {
                 flex-direction: column;
             }
             .game-grid {
-                min-width: auto;
+                width: 100%;
             }
             .mining-activity-card {
-                width: auto;
+                width: 100%;
             }
         }
 
