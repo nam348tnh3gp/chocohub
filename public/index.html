@@ -327,20 +327,32 @@
             content: ''; flex: 1; height: 1px; background: var(--border); min-width: 30px;
         }
 
-        /* Game grid */
-        .game-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
+        .services-wrap { 
+            display: flex;
             gap: 22px;
+            flex-wrap: wrap;
         }
-        @media (max-width: 1200px) {
-            .game-grid {
-                grid-template-columns: repeat(2, 1fr);
+        .game-grid {
+            flex: 1;
+            min-width: 600px;
+        }
+        .mining-activity-card { 
+            background: var(--raised); 
+            border-radius: var(--radius-lg); 
+            padding: 20px 24px; 
+            border: 1px solid var(--border);
+            width: 280px;
+            height: fit-content;
+        }
+        @media (max-width: 1100px) {
+            .services-wrap {
+                flex-direction: column;
             }
-        }
-        @media (max-width: 768px) {
             .game-grid {
-                grid-template-columns: repeat(1, 1fr);
+                min-width: auto;
+            }
+            .mining-activity-card {
+                width: auto;
             }
         }
 
@@ -402,18 +414,6 @@
             font-size: 0.85rem; color: var(--mid); line-height: 1.5; margin: 0;
         }
 
-        /* Network monitor */
-        .mining-activity-card { 
-            background: var(--raised); 
-            border-radius: var(--radius-lg); 
-            padding: 20px 24px; 
-            border: 1px solid var(--border);
-            max-width: 280px;
-            margin-top: 32px;
-        }
-        .services-wrap { 
-            display: block;
-        }
         .mining-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
         .mining-stat { text-align: center; }
         .mining-stat-value { display: block; font-family: 'Space Mono', monospace; font-size: 1.4rem; font-weight: 700; color: var(--amber); }
@@ -644,7 +644,6 @@
                 <p class="game-desc">Convert CC to DUCO or CC PoC at fixed rates. Fast & secure.</p>
             </a>
         </div>
-        </div>
 
         <div class="mining-activity-card">
             <h3 class="section-title">⛏️ Mining Activity</h3>
@@ -662,6 +661,7 @@
                     <span class="mining-stat-label">CC</span>
                 </div>
             </div>
+        </div>
         </div>
 
         <div class="network-monitor">
