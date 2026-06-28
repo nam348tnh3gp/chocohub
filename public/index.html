@@ -280,9 +280,6 @@
         .balance-info .amount .currency {
             font-size: 1.1rem; color: var(--mid); font-weight: 400; letter-spacing: 0.05em;
         }
-        .balance-info .usd-value {
-            font-size: 0.85rem; color: var(--mid); margin-top: 4px; font-weight: 300;
-        }
 
         .account-meta {
             position: relative; z-index: 1; text-align: right;
@@ -394,15 +391,7 @@
         }
 
         /* Network monitor */
-        .dashboard-bottom-grid { display: grid; grid-template-columns: 1fr; gap: 22px; margin-top: 32px; }
-        @media (min-width: 769px) { .dashboard-bottom-grid { grid-template-columns: 2fr 1fr; } }
-        .mining-activity-card { background: var(--raised); border-radius: var(--radius-lg); padding: 24px 28px; border: 1px solid var(--border); }
-        .mining-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
-        .mining-stat { text-align: center; }
-        .mining-stat-value { display: block; font-family: 'Space Mono', monospace; font-size: 1.4rem; font-weight: 700; color: var(--amber); }
-        .mining-stat-label { display: block; font-size: 0.7rem; color: var(--mid); text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
-
-        .network-monitor { }
+        .network-monitor { margin-top: 10px; }
         .monitor-grid {
             display: grid;
             grid-template-columns: 2fr 1fr;
@@ -574,7 +563,6 @@
             <div class="balance-info">
                 <div class="label">Total Vault Balance</div>
                 <div class="amount" id="balance-val">0000 <span class="currency">CC</span></div>
-                <div class="usd-value" id="usd-val"></div>
             </div>
             <div class="account-meta">
                 <span class="meta-label">Account Status</span>
@@ -627,25 +615,6 @@
             </a>
         </div>
 
-        <div class="dashboard-bottom-grid">
-        <div class="mining-activity-card">
-            <h3 class="section-title">⛏️ Mining Activity</h3>
-            <div class="mining-stats-grid">
-                <div class="mining-stat">
-                    <span class="mining-stat-value" id="workers-count">0</span>
-                    <span class="mining-stat-label">Active Workers</span>
-                </div>
-                <div class="mining-stat">
-                    <span class="mining-stat-value" id="blocks-today">0</span>
-                    <span class="mining-stat-label">Blocks Today</span>
-                </div>
-                <div class="mining-stat">
-                    <span class="mining-stat-value" id="daily-profit">0.0000</span>
-                    <span class="mining-stat-label">CC</span>
-                </div>
-            </div>
-        </div>
-
         <div class="network-monitor">
             <h3 class="section-title">Network Activity</h3>
             <div class="monitor-grid">
@@ -663,7 +632,6 @@
                 </div>
             </div>
         </div>
-    </div>
     </div>
 
     <!-- Toast container -->
@@ -721,36 +689,6 @@
             balanceAnimationId = requestAnimationFrame(step);
         }
 
-        async function fetchDucoPrice() {
-            try {
-                const r = await fetch('https://server.duinocoin.com/statistics');
-                const data = await r.json();
-                return parseFloat(data['Duco price']) || 0;
-            } catch (e) {
-                return null;
-            }
-        }
-
-        let cachedDucoPrice = null;
-        let lastPriceFetch = 0;
-
-        async function getDucoPrice() {
-            const now = Date.now();
-            if (cachedDucoPrice !== null && now - lastPriceFetch < 60000) return cachedDucoPrice;
-            cachedDucoPrice = await fetchDucoPrice();
-            lastPriceFetch = now;
-            return cachedDucoPrice;
-        }
-
-        async function updateUsdValue() {
-            const el = document.getElementById('usd-val');
-            if (!el) return;
-            const price = await getDucoPrice();
-            if (price === null) { el.textContent = ''; return; }
-            const usd = currentBalance * 0.1 * price;
-            el.textContent = `≈ $${usd.toFixed(4)} USD`;
-        }
-
         async function updateBalanceAction() {
             const user = localStorage.getItem('choco_user');
             const token = localStorage.getItem('choco_token');
@@ -766,24 +704,10 @@
                         animateValue('balance-val', currentBalance, data.balance, 1200);
                         currentBalance = data.balance;
                     }
-                    updateUsdValue();
                 }
             } catch (e) {
                 console.warn('Balance update failed:', e.message);
             }
-        }
-
-        async function updateMiningStats() {
-            const user = localStorage.getItem('choco_user');
-            if (!user) return;
-            try {
-                const r = await fetch('/mining/user-stats?username=' + encodeURIComponent(user));
-                const data = await r.json();
-                if (data.status !== 'success') return;
-                document.getElementById('workers-count').textContent = data.worker_count || 0;
-                document.getElementById('blocks-today').textContent = data.blocks_today || 0;
-                document.getElementById('daily-profit').textContent = (data.daily_profit || 0).toFixed(4);
-            } catch (e) {}
         }
 
         // Cập nhật network monitor với caching và xử lý linh hoạt
@@ -946,11 +870,10 @@
                 }
                 setHumaneGreeting(user.charAt(0).toUpperCase() + user.slice(1));
                 // Load dữ liệu lần đầu
-                await Promise.allSettled([updateBalanceAction(), updateNetworkMonitor(), updateMiningStats()]);
-                // Thiết lập interval
+                await Promise.allSettled([updateBalanceAction(), updateNetworkMonitor()]);
+                // Thiết lập interval với thời gian dài hơn để giảm tải
                 setInterval(updateBalanceAction, 5000);
                 setInterval(updateNetworkMonitor, 15000);
-                setInterval(updateMiningStats, 30000);
             }
 
             const authBtn = document.getElementById('auth-btn');
