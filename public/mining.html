@@ -699,60 +699,58 @@
         const boostBtn = document.getElementById('boostBtn');
         const boostStatus = document.getElementById('boostStatus');
 
-        let boostActive = false;
+        let boostExpiresAt = 0;
         let adVisibleDuration = 0;
-        let adObserver = null;
         let adWatchInterval = null;
+        let boostPollInterval = null;
+
+        function formatTime(sec) {
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            return h > 0 ? `${h}h ${m}m` : `${m}m`;
+        }
 
         function updateBoostUI() {
-            if (boostActive) {
-                boostBtn.disabled = true;
-                boostBtn.textContent = '✅ Boost Active';
-                boostStatus.textContent = '✅ 1.3× multiplier active until deactivated';
+            const now = Math.floor(Date.now() / 1000);
+            const active = boostExpiresAt > now;
+
+            if (adWatchInterval) {
+                const pct = Math.min(100, Math.round((adVisibleDuration / 15) * 100));
+                boostStatus.textContent = `⏳ Ad visible ${adVisibleDuration}s / 15s (${pct}%) — keep the ad in view`;
+                boostBtn.disabled = adVisibleDuration < 15;
+                boostBtn.textContent = adVisibleDuration >= 15 ? '⚡ Activate Boost' : '⏳ Watching ad...';
+                boostStatus.className = 'boost-status';
+                document.getElementById('boostCard').classList.remove('active');
+            } else if (active) {
+                const rem = boostExpiresAt - now;
+                boostBtn.disabled = false;
+                boostBtn.textContent = '▶ Watch Ad (+1h)';
+                boostStatus.textContent = `✅ 1.3× boost active — ${formatTime(rem)} remaining`;
                 boostStatus.className = 'boost-status active';
                 document.getElementById('boostCard').classList.add('active');
-                return;
-            }
-            boostBtn.textContent = '▶ Watch Ad';
-            boostStatus.className = 'boost-status';
-            document.getElementById('boostCard').classList.remove('active');
-            const pct = Math.min(100, Math.round((adVisibleDuration / 15) * 100));
-            boostStatus.textContent = `⏳ Ad visible ${adVisibleDuration.toFixed(0)}s / 15s (${pct}%)`;
-            boostBtn.disabled = adVisibleDuration < 15;
-            if (adVisibleDuration >= 15) {
-                boostBtn.textContent = '⚡ Activate Boost';
-                boostStatus.textContent = '✅ Ad watched! Click "Activate Boost" to claim your 1.3× multiplier';
+            } else {
+                boostBtn.disabled = false;
+                boostBtn.textContent = '▶ Watch Ad';
+                boostStatus.textContent = 'Click "Watch Ad" and keep the ad in view for 15s to activate a 1.3× mining boost';
+                boostStatus.className = 'boost-status';
+                document.getElementById('boostCard').classList.remove('active');
             }
         }
 
-        async function activateBoost() {
-            if (boostActive) return;
-            try {
-                const r1 = await fetch('/mining/boost/challenge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: workerName }) });
-                if (!r1.ok) { log('Boost: challenge failed', 'error'); return; }
-                const { challenge_id } = await r1.json();
-                boostBtn.disabled = true;
-                boostBtn.textContent = '⏳ Waiting 10s...';
-                boostStatus.textContent = '⏳ Server verifying wait time...';
-                await new Promise(r => setTimeout(r, 10000));
-                const r2 = await fetch('/mining/boost/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: workerName, challenge_id }) });
-                if (!r2.ok) { log('Boost: activation failed', 'error'); updateBoostUI(); return; }
-                const data = await r2.json();
-                if (data.success) {
-                    boostActive = true;
-                    log('Mining Boost 1.3× activated!', 'info');
-                    updateBoostUI();
-                }
-            } catch (e) {
-                log('Boost: ' + e.message, 'error');
-                updateBoostUI();
+        function stopAdTracking() {
+            if (adWatchInterval) {
+                clearInterval(adWatchInterval);
+                adWatchInterval = null;
             }
+            adVisibleDuration = 0;
+            updateBoostUI();
         }
 
-        function setupAdObserver() {
+        function startAdTracking() {
+            if (adWatchInterval) return;
             adVisibleDuration = 0;
             const adIframe = document.querySelector('.ad-iframe');
-            if (!adIframe) { log('Boost: ad iframe not found', 'warn'); return; }
+            if (!adIframe) { log('Boost: ad not found', 'warn'); return; }
             adWatchInterval = setInterval(() => {
                 const rect = adIframe.getBoundingClientRect();
                 const vw = window.innerWidth;
@@ -760,22 +758,76 @@
                 const visible = rect.left < vw && rect.right > 0 && rect.top < vh && rect.bottom > 0;
                 if (visible && rect.width > 0 && rect.height > 0) {
                     const area = rect.width * rect.height;
-                    const winArea = vw * vh;
-                    if (area / winArea > 0.02) {
+                    if (area / (vw * vh) > 0.02) {
                         adVisibleDuration = Math.min(15, adVisibleDuration + 1);
                         updateBoostUI();
+                        if (adVisibleDuration >= 15) {
+                            clearInterval(adWatchInterval);
+                            adWatchInterval = null;
+                            updateBoostUI();
+                        }
+                        return;
                     }
                 }
+                updateBoostUI();
             }, 1000);
+            updateBoostUI();
         }
 
-        boostBtn.addEventListener('click', activateBoost);
+        async function activateBoost() {
+            try {
+                const r1 = await fetch('/mining/boost/challenge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: workerName }) });
+                if (!r1.ok) { log('Boost: challenge failed', 'error'); return; }
+                const { challenge_id } = await r1.json();
+                boostBtn.disabled = true;
+                boostBtn.textContent = '⏳ Verifying 10s...';
+                boostStatus.textContent = '⏺ Server verifying ad view time...';
+                await new Promise(r => setTimeout(r, 10000));
+                const r2 = await fetch('/mining/boost/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: workerName, challenge_id }) });
+                const data = await r2.json();
+                if (!r2.ok || data.status !== 'success') {
+                    log('Boost: ' + (data.message || 'activation failed'), 'error');
+                    updateBoostUI();
+                    return;
+                }
+                boostExpiresAt = data.expires_at;
+                log(`Mining Boost 1.3× activated! Expires at ${new Date(data.expires_at * 1000).toLocaleTimeString()}`, 'info');
+                updateBoostUI();
+                fetchBoostStatus();
+            } catch (e) {
+                log('Boost: ' + (e.message || e), 'error');
+                updateBoostUI();
+            }
+        }
+
+        async function fetchBoostStatus() {
+            try {
+                const r = await fetch('/mining/boost/status?username=' + encodeURIComponent(workerName));
+                const data = await r.json();
+                boostExpiresAt = (data.status === 'success' && data.active) ? data.expires_at : 0;
+                updateBoostUI();
+            } catch (e) {}
+        }
+
+        function startBoostPolling() {
+            fetchBoostStatus();
+            boostPollInterval = setInterval(fetchBoostStatus, 30000);
+        }
+
+        boostBtn.addEventListener('click', async () => {
+            if (adWatchInterval && adVisibleDuration >= 15) {
+                await activateBoost();
+                stopAdTracking();
+            } else if (!adWatchInterval) {
+                startAdTracking();
+            }
+        });
 
         // ---------- Khởi tạo ----------
         function init() {
             startBtn.addEventListener('click', onStart);
             stopBtn.addEventListener('click', onStop);
-            setupAdObserver();
+            startBoostPolling();
             updateBoostUI();
             log(`Logged in as: ${workerName}`, 'info');
             // Tự động bắt đầu sau 1 giây
