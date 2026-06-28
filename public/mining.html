@@ -723,6 +723,12 @@
                 boostBtn.textContent = adVisibleDuration >= 15 ? '⚡ Activate Boost' : '⏳ Watching ad...';
                 boostStatus.className = 'boost-status';
                 document.getElementById('boostCard').classList.remove('active');
+            } else if (adVisibleDuration >= 15) {
+                boostBtn.disabled = false;
+                boostBtn.textContent = '⚡ Activate Boost';
+                boostStatus.textContent = '✅ Ad watched! Activate your 1.3× multiplier';
+                boostStatus.className = 'boost-status';
+                document.getElementById('boostCard').classList.remove('active');
             } else if (active) {
                 const rem = boostExpiresAt - now;
                 boostBtn.disabled = false;
@@ -820,7 +826,7 @@
         }
 
         boostBtn.addEventListener('click', async () => {
-            if (adWatchInterval && adVisibleDuration >= 15) {
+            if (adVisibleDuration >= 15) {
                 await activateBoost();
                 stopAdTracking();
             } else if (!adWatchInterval) {
