@@ -73,8 +73,8 @@ const stakeLimiter = rateLimit({
 });
 
 const snakeLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 2,
+  windowMs: 15 * 60 * 1000,
+  max: 3,
   message: { status: 'error', message: 'Please wait before claiming again.' },
 });
 
@@ -82,6 +82,12 @@ const swapLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 5,
   message: { status: 'error', message: 'Too many swap requests, please slow down.' },
+});
+
+const boostLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 6,
+  message: { status: 'error', message: 'Too many boost activations, please slow down.' },
 });
 
 // ─── Cấu hình port ──────────────────────────────────
@@ -1375,28 +1381,51 @@ app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
   }
 });
 
-app.post('/snake/claim', snakeLimiter, (req, res) => {
-  const { username, pin, apples, mode } = req.body;
+app.post('/snake/start-game', snakeLimiter, (req, res) => {
+  const { username, pin } = req.body;
   if (!username || !pin) {
     return res.status(401).json({ status: 'error', message: 'Missing username or pin' });
-  }
-  if (apples == null) {
-    return res.status(400).json({ status: 'error', message: 'Missing apples' });
   }
   try {
     const authResult = db.authenticate(username, pin);
     if (authResult.status !== 'success') {
       return res.status(401).json({ status: 'error', message: 'Invalid username or pin' });
     }
-    // Kiểm tra banned
     const user = db.getUser(username);
     if (user && user.banned) {
       return res.status(403).json({ status: 'error', message: 'Account is banned' });
     }
-    const result = snake.processClaim(username, null, apples, mode);
+    const session = snake.createGameSession(username);
+    res.json({ status: 'success', game_session_id: session.id, expires_at: session.expires_at });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+app.post('/snake/claim', snakeLimiter, (req, res) => {
+  const { username, pin, apples, mode, game_session_id } = req.body;
+  if (!username || !pin) {
+    return res.status(401).json({ status: 'error', message: 'Missing username or pin' });
+  }
+  if (apples == null) {
+    return res.status(400).json({ status: 'error', message: 'Missing apples' });
+  }
+  if (!game_session_id) {
+    return res.status(400).json({ status: 'error', message: 'Missing game session' });
+  }
+  try {
+    const authResult = db.authenticate(username, pin);
+    if (authResult.status !== 'success') {
+      return res.status(401).json({ status: 'error', message: 'Invalid username or pin' });
+    }
+    const user = db.getUser(username);
+    if (user && user.banned) {
+      return res.status(403).json({ status: 'error', message: 'Account is banned' });
+    }
+    const result = snake.processClaim(username, game_session_id, apples, mode);
     res.json(result);
   } catch (e) {
-    res.status(401).json({ status: 'error', message: 'Invalid username or pin' });
+    res.status(400).json({ status: 'error', message: e.message });
   }
 });
 
@@ -1421,6 +1450,94 @@ app.post('/pos/unstake', verifyToken, stakeLimiter, (req, res) => {
     res.json({ status: 'success', message: 'Unstaked successfully. All funds returned.', staked: 0 });
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
+  }
+});
+
+// ════════════════════════════════════════════════════
+//  MINING BOOST (ad-click boost with view verification)
+// ════════════════════════════════════════════════════
+
+// In-memory challenges: { challenge_id: { username, issued_at, used } }
+const boostChallenges = new Map();
+const BOOST_CHALLENGE_TTL = 120; // segundos
+const BOOST_MIN_VIEW_SECONDS = 10; // mínimo de segundos entre challenge e activate
+
+setInterval(() => {
+  const now = Math.floor(Date.now() / 1000);
+  for (const [id, c] of boostChallenges) {
+    if (c.used || (now - c.issued_at) > BOOST_CHALLENGE_TTL) boostChallenges.delete(id);
+  }
+}, 60000);
+
+app.post('/mining/boost/challenge', (req, res) => {
+  const { username } = req.body;
+  if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
+  const id = 'ch_' + Date.now() + '_' + crypto.randomBytes(6).toString('hex');
+  const issued_at = Math.floor(Date.now() / 1000);
+  boostChallenges.set(id, { username: username.trim(), issued_at, used: false });
+  res.json({ status: 'success', challenge_id: id, issued_at });
+});
+
+app.post('/mining/boost/activate', boostLimiter, (req, res) => {
+  const { username, challenge_id } = req.body;
+  if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
+  if (!challenge_id) return res.status(400).json({ status: 'error', message: 'Missing challenge_id' });
+  try {
+    // Valida challenge (autenticação implícita)
+    const challenge = boostChallenges.get(challenge_id);
+    if (!challenge) return res.status(400).json({ status: 'error', message: 'Invalid or expired challenge' });
+    if (challenge.username !== username.trim()) return res.status(400).json({ status: 'error', message: 'Challenge belongs to another user' });
+    if (challenge.used) return res.status(400).json({ status: 'error', message: 'Challenge already used' });
+
+    // Valida tempo mínimo de visualização
+    const now = Math.floor(Date.now() / 1000);
+    const elapsed = now - challenge.issued_at;
+    if (elapsed < BOOST_MIN_VIEW_SECONDS) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Ad must be visible for at least ${BOOST_MIN_VIEW_SECONDS}s (only ${elapsed}s elapsed)`
+      });
+    }
+
+    const user = db.getUser(username);
+    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+    if (user && user.banned) return res.status(403).json({ status: 'error', message: 'Account is banned' });
+
+    // Marca challenge usado e ativa boost
+    challenge.used = true;
+    boostChallenges.set(challenge_id, challenge);
+    const result = db.activateMiningBoost(username, 1.3);
+    res.json({
+      status: 'success',
+      message: `1.3x mining boost activated! Expires at ${new Date(result.expires_at * 1000).toISOString()}`,
+      multiplier: result.multiplier,
+      expires_at: result.expires_at,
+      total_activations: result.total_activations
+    });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+app.get('/mining/boost/status', (req, res) => {
+  const username = req.query.username;
+  if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
+  try {
+    const boost = db.getMiningBoost(username);
+    if (!boost) {
+      return res.json({ status: 'success', active: false, multiplier: 1.0 });
+    }
+    const remainingMs = Math.max(0, (boost.expires_at * 1000) - Date.now());
+    res.json({
+      status: 'success',
+      active: true,
+      multiplier: boost.multiplier,
+      expires_at: boost.expires_at,
+      remaining_ms: remainingMs,
+      remaining_minutes: Math.ceil(remainingMs / 60000)
+    });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
   }
 });
 

@@ -210,15 +210,25 @@ function submitSolution(jobId, nonce, workerName, deviceType) {
   // Lưu block
   db.insertBlock(newBlock);
 
-  // Thưởng cho miner
-  db.updateBalance(workerName, job.reward);
+  // ─── Mining Boost: multiplicador 1.3x se ativo ──
+  const boostMultiplier = db.getMiningBoostMultiplier(workerName);
+  const boostedReward = parseFloat((job.reward * boostMultiplier).toFixed(8));
+  const bonusReward = parseFloat((boostedReward - job.reward).toFixed(8));
+
+  // Thưởng cho miner (com boost se ativo)
+  db.updateBalance(workerName, boostedReward);
+
+  // Se houve boost, registra no log e reabastece o pool
+  if (bonusReward > 0) {
+    console.log(`⚡ Mining boost active for ${workerName}: ${job.reward} → ${boostedReward} CC (${boostMultiplier}x)`);
+  }
 
   // ─── Xử lý mempool ──────────────────────────────
   const mempoolResult = processMempoolForBlock(newBlock.height);
 
   // Cập nhật tx_count và total_fees cho block
   if (mempoolResult.processed > 0 || mempoolResult.totalFees > 0) {
-    db.updateBlockDetails(newBlock.height, mempoolResult.processed, mempoolResult.totalFees);
+    db.updateBlockFees(newBlock.height, mempoolResult.totalFees);
     newBlock.tx_count = mempoolResult.processed;
     newBlock.total_fees = mempoolResult.totalFees;
   }
@@ -236,15 +246,16 @@ function submitSolution(jobId, nonce, workerName, deviceType) {
   // Gửi thông báo (webhook)
   sendMinerWebhook(workerName, newBlock.height, deviceType);
 
-  console.log(`⛏️ Block ${newBlock.height} solved by ${workerName} (${deviceType}) reward ${job.reward} CC, ${mempoolResult.processed} txs processed, fees ${mempoolResult.totalFees} CC`);
+  console.log(`⛏️ Block ${newBlock.height} solved by ${workerName} (${deviceType}) reward ${boostedReward} CC (boost: ${boostMultiplier}x), ${mempoolResult.processed} txs processed, fees ${mempoolResult.totalFees} CC`);
 
   return {
     status: 'success',
-    message: `Block ${newBlock.height} solved! Reward: ${job.reward} CC, ${mempoolResult.processed} transactions processed`,
-    reward: job.reward,
+    message: `Block ${newBlock.height} solved! Reward: ${boostedReward} CC${boostMultiplier > 1 ? ` (${boostMultiplier}x boost)` : ''}, ${mempoolResult.processed} transactions processed`,
+    reward: boostedReward,
     block_hash: hashHex,
     tx_count: mempoolResult.processed,
-    total_fees: mempoolResult.totalFees
+    total_fees: mempoolResult.totalFees,
+    boost_multiplier: boostMultiplier
   };
 }
 

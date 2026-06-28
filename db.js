@@ -142,11 +142,31 @@ db.exec(`
   );
   INSERT OR IGNORE INTO node_fees (id, balance, total_collected) VALUES (1, 0, 0);
 
+  -- 🆕 Bảng game_sessions (proof-of-play cho Snake)
+  CREATE TABLE IF NOT EXISTS game_sessions (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used INTEGER DEFAULT 0
+  );
+
+  -- 🆕 Bảng mining_boosts (ad-click boost)
+  CREATE TABLE IF NOT EXISTS mining_boosts (
+    worker_name TEXT PRIMARY KEY,
+    multiplier REAL NOT NULL DEFAULT 1.0,
+    expires_at INTEGER NOT NULL DEFAULT 0,
+    total_activations INTEGER DEFAULT 0,
+    last_activation_at INTEGER DEFAULT 0
+  );
+
   -- Tạo index cho hiệu suất
   CREATE INDEX IF NOT EXISTS idx_mining_jobs_assigned_to_status ON mining_jobs(assigned_to, status);
   CREATE INDEX IF NOT EXISTS idx_blocks_height ON blocks(height DESC);
   CREATE INDEX IF NOT EXISTS idx_mempool_status ON mempool(status);
   CREATE INDEX IF NOT EXISTS idx_mempool_created_at ON mempool(created_at);
+  CREATE INDEX IF NOT EXISTS idx_game_sessions_username ON game_sessions(username);
+  CREATE INDEX IF NOT EXISTS idx_mining_boosts_expires ON mining_boosts(expires_at);
 `);
 
 console.log('✅ Database ready (better-sqlite3)');
@@ -623,6 +643,71 @@ function getExpiredMempool(expireSeconds) {
 }
 
 // ═══════════════════════════════════════════════════
+// 🆕 GAME SESSION FUNCTIONS (proof-of-play)
+// ═══════════════════════════════════════════════════
+
+function createGameSession(id, username, expiresAt) {
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(`
+    INSERT INTO game_sessions (id, username, created_at, expires_at, used)
+    VALUES (?, ?, ?, ?, 0)
+  `).run(id, username.trim(), now, expiresAt);
+  return { id, username, expires_at: expiresAt };
+}
+
+function getGameSession(id) {
+  return db.prepare('SELECT * FROM game_sessions WHERE id = ?').get(id);
+}
+
+function consumeGameSession(id) {
+  db.prepare('UPDATE game_sessions SET used = 1 WHERE id = ?').run(id);
+}
+
+function cleanupExpiredGameSessions() {
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare('DELETE FROM game_sessions WHERE expires_at < ?').run(now);
+}
+
+// ═══════════════════════════════════════════════════
+// 🆕 MINING BOOST FUNCTIONS
+// ═══════════════════════════════════════════════════
+
+function getMiningBoost(workerName) {
+  const row = db.prepare('SELECT * FROM mining_boosts WHERE worker_name = ?').get(workerName.trim());
+  if (!row) return null;
+  const now = Math.floor(Date.now() / 1000);
+  if (row.expires_at <= now) return null;
+  return row;
+}
+
+function activateMiningBoost(workerName, multiplier) {
+  const now = Math.floor(Date.now() / 1000);
+  const extensionMs = 3600;
+  const existing = db.prepare('SELECT * FROM mining_boosts WHERE worker_name = ?').get(workerName.trim());
+  if (existing) {
+    const newExpiry = Math.max(existing.expires_at, now) + extensionMs;
+    db.prepare(`
+      UPDATE mining_boosts
+      SET multiplier = ?, expires_at = ?, total_activations = total_activations + 1, last_activation_at = ?
+      WHERE worker_name = ?
+    `).run(multiplier, newExpiry, now, workerName.trim());
+    return { worker_name: workerName, multiplier, expires_at: newExpiry, total_activations: existing.total_activations + 1 };
+  } else {
+    const expiresAt = now + extensionMs;
+    db.prepare(`
+      INSERT INTO mining_boosts (worker_name, multiplier, expires_at, total_activations, last_activation_at)
+      VALUES (?, ?, ?, 1, ?)
+    `).run(workerName.trim(), multiplier, expiresAt, now);
+    return { worker_name: workerName, multiplier, expires_at: expiresAt, total_activations: 1 };
+  }
+}
+
+function getMiningBoostMultiplier(workerName) {
+  const boost = getMiningBoost(workerName);
+  return boost ? boost.multiplier : 1.0;
+}
+
+// ═══════════════════════════════════════════════════
 // 🆕 NODE FEES FUNCTIONS
 // ═══════════════════════════════════════════════════
 
@@ -780,6 +865,15 @@ module.exports = {
   deductNodeFees,
   setNodeFeesBalance,
   getTotalNodeFeesCollected,
+  // Game sessions
+  createGameSession,
+  getGameSession,
+  consumeGameSession,
+  cleanupExpiredGameSessions,
+  // Mining boosts
+  getMiningBoost,
+  activateMiningBoost,
+  getMiningBoostMultiplier,
   // Admin functions
   ensureBannedColumn,
   deleteUser,
