@@ -1650,6 +1650,29 @@ app.get('/active_bounties_list', (req, res) => {
   }
 });
 
+// ─── Mining user stats ─────────────────────────────────
+app.get('/mining/user-stats', (req, res) => {
+  const username = req.query.username;
+  if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const dayAgo = now - 86400;
+    const blocks = db.getBlocksByMiner(username, dayAgo);
+    const workerNames = [...new Set(blocks.map(b => b.miner))];
+    const dailyProfit = blocks.reduce((sum, b) => sum + (b.reward || 0), 0);
+    res.json({
+      status: 'success',
+      workers: workerNames,
+      worker_count: workerNames.length,
+      daily_profit: parseFloat(dailyProfit.toFixed(8)),
+      blocks_today: blocks.length,
+      blocks
+    });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
 // ─── TEST / HEALTH ──────────────────────────────────────
 app.get('/api/test', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString(), message: 'ChocoHub API is running', uptime: process.uptime() });
