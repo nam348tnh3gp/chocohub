@@ -72,9 +72,15 @@ const stakeLimiter = rateLimit({
   message: { status: 'error', message: 'Too many stake/unstake actions.' },
 });
 
-const snakeLimiter = rateLimit({
+const snakeSessionLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 30,
+  message: { status: 'error', message: 'Too many game sessions, please slow down.' },
+});
+
+const snakeClaimLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 3,
+  max: 5,
   message: { status: 'error', message: 'Please wait before claiming again.' },
 });
 
@@ -1381,7 +1387,7 @@ app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
   }
 });
 
-app.post('/snake/start-game', snakeLimiter, (req, res) => {
+app.post('/snake/start-game', snakeSessionLimiter, (req, res) => {
   const { username, pin } = req.body;
   if (!username || !pin) {
     return res.status(401).json({ status: 'error', message: 'Missing username or pin' });
@@ -1402,7 +1408,7 @@ app.post('/snake/start-game', snakeLimiter, (req, res) => {
   }
 });
 
-app.post('/snake/claim', snakeLimiter, (req, res) => {
+app.post('/snake/claim', snakeClaimLimiter, (req, res) => {
   const { username, pin, apples, mode, game_session_id } = req.body;
   if (!username || !pin) {
     return res.status(401).json({ status: 'error', message: 'Missing username or pin' });
