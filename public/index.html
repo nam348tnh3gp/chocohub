@@ -327,37 +327,12 @@
             content: ''; flex: 1; height: 1px; background: var(--border); min-width: 30px;
         }
 
-        .services-wrap { 
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 22px;
-            position: relative;
-        }
+        /* Game grid */
         .game-grid {
-            grid-column: 1 / -1;
-            display: contents;
-        }
-        .mining-activity-card { 
-            background: var(--raised); 
-            border-radius: var(--radius-lg); 
-            padding: 20px 24px; 
-            border: 1px solid var(--border);
-            width: 260px;
-            position: absolute;
-            right: 0;
-            top: 0;
-            height: fit-content;
-            transform: translateX(40px);
-        }
-        @media (max-width: 1200px) {
-            .services-wrap {
-                grid-template-columns: repeat(3, 1fr);
-            }
-            .mining-activity-card {
-                position: static;
-                width: auto;
-                grid-column: 1 / -1;
-            }
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 22px;
+            margin-bottom: 44px;
         }
 
         .game-card {
@@ -418,6 +393,10 @@
             font-size: 0.85rem; color: var(--mid); line-height: 1.5; margin: 0;
         }
 
+        /* Network monitor */
+        .dashboard-bottom-grid { display: grid; grid-template-columns: 1fr; gap: 22px; margin-top: 32px; }
+        @media (min-width: 769px) { .dashboard-bottom-grid { grid-template-columns: 2fr 1fr; } }
+        .mining-activity-card { background: var(--raised); border-radius: var(--radius-lg); padding: 24px 28px; border: 1px solid var(--border); }
         .mining-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
         .mining-stat { text-align: center; }
         .mining-stat-value { display: block; font-family: 'Space Mono', monospace; font-size: 1.4rem; font-weight: 700; color: var(--amber); }
@@ -606,7 +585,6 @@
 
         <h3 class="section-title">Available Services</h3>
 
-        <div class="services-wrap">
         <div class="game-grid">
             <!-- Snake Faucet -->
             <a href="snake.html" class="game-card">
@@ -649,6 +627,7 @@
             </a>
         </div>
 
+        <div class="dashboard-bottom-grid">
         <div class="mining-activity-card">
             <h3 class="section-title">⛏️ Mining Activity</h3>
             <div class="mining-stats-grid">
@@ -665,7 +644,6 @@
                     <span class="mining-stat-label">CC</span>
                 </div>
             </div>
-        </div>
         </div>
 
         <div class="network-monitor">
@@ -685,6 +663,7 @@
                 </div>
             </div>
         </div>
+    </div>
     </div>
 
     <!-- Toast container -->
