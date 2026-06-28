@@ -280,6 +280,15 @@
             overflow: hidden;
             margin: 0 auto;
         }
+        .boost-card { background: linear-gradient(135deg, rgba(255,200,50,0.06), rgba(255,100,0,0.04)); border: 1px solid rgba(255,180,50,0.25); border-radius: 28px; padding: 1.5rem; margin-bottom: 1.5rem; text-align: center; }
+        .boost-card.active { border-color: #FFB347; box-shadow: 0 0 20px rgba(255,180,50,0.15); }
+        .boost-title { font-size: 1rem; font-weight: 700; color: #FFB347; margin-bottom: 6px; }
+        .boost-sub { font-size: 0.75rem; color: #8B8296; margin-bottom: 14px; }
+        .boost-btn { background: linear-gradient(135deg, #FF8C00, #FFB347); color: #0D0B0A; border: none; padding: 14px 28px; border-radius: 40px; font-weight: 700; font-size: 0.9rem; cursor: pointer; transition: 0.2s; font-family: inherit; box-shadow: 0 4px 12px rgba(255,140,0,0.3); }
+        .boost-btn:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.05); }
+        .boost-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .boost-status { font-family: 'Space Mono', monospace; font-size: 0.75rem; color: #8B8296; margin-top: 10px; }
+        .boost-status.active { color: #7FE0A0; }
         @media (max-width: 768px) { .ad-sidebar { display: none; } }
         @media (max-width: 560px) {
             .stats-grid { gap: 8px; }
@@ -336,6 +345,14 @@
             <div class="stat-value" id="uptimeValue">0s</div>
             <div class="stat-label">Session Time</div>
         </div>
+    </div>
+
+    <!-- Mining Boost -->
+    <div class="boost-card" id="boostCard">
+        <div class="boost-title">⚡ Mining Boost 1.3×</div>
+        <div class="boost-sub">Watch the ad for 15s to activate a 1.3× reward multiplier</div>
+        <button class="boost-btn" id="boostBtn" disabled>▶ Watch Ad</button>
+        <div class="boost-status" id="boostStatus">⏳ Watch the ad sidebar for 15s to unlock</div>
     </div>
 
     <!-- Current job -->
@@ -662,10 +679,88 @@
             log('Miner stopped completely.', 'warn');
         }
 
+        // ---------- Mining Boost (ad-view) ----------
+        const boostBtn = document.getElementById('boostBtn');
+        const boostStatus = document.getElementById('boostStatus');
+
+        let boostActive = false;
+        let adVisibleDuration = 0;
+        let adObserver = null;
+        let adWatchInterval = null;
+
+        function updateBoostUI() {
+            if (boostActive) {
+                boostBtn.disabled = true;
+                boostBtn.textContent = '✅ Boost Active';
+                boostStatus.textContent = '✅ 1.3× multiplier active until deactivated';
+                boostStatus.className = 'boost-status active';
+                document.getElementById('boostCard').classList.add('active');
+                return;
+            }
+            boostBtn.textContent = '▶ Watch Ad';
+            boostStatus.className = 'boost-status';
+            document.getElementById('boostCard').classList.remove('active');
+            const pct = Math.min(100, Math.round((adVisibleDuration / 15) * 100));
+            boostStatus.textContent = `⏳ Ad visible ${adVisibleDuration.toFixed(0)}s / 15s (${pct}%)`;
+            boostBtn.disabled = adVisibleDuration < 15;
+            if (adVisibleDuration >= 15) {
+                boostBtn.textContent = '⚡ Activate Boost';
+                boostStatus.textContent = '✅ Ad watched! Click "Activate Boost" to claim your 1.3× multiplier';
+            }
+        }
+
+        async function activateBoost() {
+            if (boostActive) return;
+            try {
+                const r1 = await fetch('/mining/boost/challenge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: workerName }) });
+                if (!r1.ok) { log('Boost: challenge failed', 'error'); return; }
+                const { challenge_id } = await r1.json();
+                boostBtn.disabled = true;
+                boostBtn.textContent = '⏳ Waiting 10s...';
+                boostStatus.textContent = '⏳ Server verifying wait time...';
+                await new Promise(r => setTimeout(r, 10000));
+                const r2 = await fetch('/mining/boost/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: workerName, challenge_id }) });
+                if (!r2.ok) { log('Boost: activation failed', 'error'); updateBoostUI(); return; }
+                const data = await r2.json();
+                if (data.success) {
+                    boostActive = true;
+                    log('Mining Boost 1.3× activated!', 'info');
+                    updateBoostUI();
+                }
+            } catch (e) {
+                log('Boost: ' + e.message, 'error');
+                updateBoostUI();
+            }
+        }
+
+        function setupAdObserver() {
+            adVisibleDuration = 0;
+            const adIframe = document.querySelector('.ad-iframe');
+            if (!adIframe) { log('Boost: ad iframe not found', 'warn'); return; }
+            adWatchInterval = setInterval(() => {
+                const rect = adIframe.getBoundingClientRect();
+                const vw = window.innerWidth;
+                const vh = window.innerHeight;
+                const visible = rect.left < vw && rect.right > 0 && rect.top < vh && rect.bottom > 0;
+                if (visible && rect.width > 0 && rect.height > 0) {
+                    const area = rect.width * rect.height;
+                    const winArea = vw * vh;
+                    if (area / winArea > 0.02) {
+                        adVisibleDuration = Math.min(15, adVisibleDuration + 1);
+                        updateBoostUI();
+                    }
+                }
+            }, 1000);
+        }
+
+        boostBtn.addEventListener('click', activateBoost);
+
         // ---------- Khởi tạo ----------
         function init() {
             startBtn.addEventListener('click', onStart);
             stopBtn.addEventListener('click', onStop);
+            setupAdObserver();
+            updateBoostUI();
             log(`Logged in as: ${workerName}`, 'info');
             // Tự động bắt đầu sau 1 giây
             setTimeout(() => {
