@@ -332,7 +332,6 @@
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
             gap: 22px;
-            margin-bottom: 44px;
         }
 
         .game-card {
@@ -394,8 +393,10 @@
         }
 
         /* Network monitor */
-        .mining-activity-card { background: var(--raised); border-radius: var(--radius-lg); padding: 24px 28px; border: 1px solid var(--border); margin-top: 32px; }
-        @media (min-width: 769px) { .mining-activity-card { width: 320px; margin-left: auto; } }
+        .mining-activity-card { background: var(--raised); border-radius: var(--radius-lg); padding: 24px 28px; border: 1px solid var(--border); }
+        .services-row { display: grid; gap: 22px; margin-top: 32px; }
+        @media (min-width: 769px) { .services-row { grid-template-columns: 1fr 300px; align-items: start; } }
+        @media (max-width: 768px) { .services-row { grid-template-columns: 1fr; } }
         .mining-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
         .mining-stat { text-align: center; }
         .mining-stat-value { display: block; font-family: 'Space Mono', monospace; font-size: 1.4rem; font-weight: 700; color: var(--amber); }
@@ -584,6 +585,7 @@
 
         <h3 class="section-title">Available Services</h3>
 
+        <div class="services-row">
         <div class="game-grid">
             <!-- Snake Faucet -->
             <a href="snake.html" class="game-card">
@@ -642,6 +644,7 @@
                     <span class="mining-stat-label">CC</span>
                 </div>
             </div>
+        </div>
         </div>
 
         <div class="network-monitor">
