@@ -393,10 +393,10 @@
         }
 
         /* Network monitor */
-        .mining-activity-card { background: var(--raised); border-radius: var(--radius-lg); padding: 24px 28px; border: 1px solid var(--border); margin-top: 32px; }
+        .mining-activity-card { background: var(--raised); border-radius: var(--radius-lg); padding: 24px 28px; border: 1px solid var(--border); }
         .services-wrap { display: flow-root; }
-        @media (min-width: 769px) { .mining-activity-card { float: right; width: 300px; margin-left: 22px; margin-top: 0; } }
-        @media (max-width: 768px) { .mining-activity-card { float: none; width: auto; margin-left: 0; } }
+        @media (min-width: 769px) { .mining-activity-card { float: right; width: 280px; margin-left: 22px; } }
+        @media (max-width: 768px) { .mining-activity-card { float: none; width: auto; margin-top: 32px; } }
         .mining-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
         .mining-stat { text-align: center; }
         .mining-stat-value { display: block; font-family: 'Space Mono', monospace; font-size: 1.4rem; font-weight: 700; color: var(--amber); }
@@ -586,6 +586,23 @@
         <h3 class="section-title">Available Services</h3>
 
         <div class="services-wrap">
+        <div class="mining-activity-card">
+            <h3 class="section-title">⛏️ Mining Activity</h3>
+            <div class="mining-stats-grid">
+                <div class="mining-stat">
+                    <span class="mining-stat-value" id="workers-count">0</span>
+                    <span class="mining-stat-label">Active Workers</span>
+                </div>
+                <div class="mining-stat">
+                    <span class="mining-stat-value" id="blocks-today">0</span>
+                    <span class="mining-stat-label">Blocks Today</span>
+                </div>
+                <div class="mining-stat">
+                    <span class="mining-stat-value" id="daily-profit">0.0000</span>
+                    <span class="mining-stat-label">CC</span>
+                </div>
+            </div>
+        </div>
         <div class="game-grid">
             <!-- Snake Faucet -->
             <a href="snake.html" class="game-card">
@@ -626,24 +643,6 @@
                 <span class="game-name">SWAP CENTER</span>
                 <p class="game-desc">Convert CC to DUCO or CC PoC at fixed rates. Fast & secure.</p>
             </a>
-        </div>
-
-        <div class="mining-activity-card">
-            <h3 class="section-title">⛏️ Mining Activity</h3>
-            <div class="mining-stats-grid">
-                <div class="mining-stat">
-                    <span class="mining-stat-value" id="workers-count">0</span>
-                    <span class="mining-stat-label">Active Workers</span>
-                </div>
-                <div class="mining-stat">
-                    <span class="mining-stat-value" id="blocks-today">0</span>
-                    <span class="mining-stat-label">Blocks Today</span>
-                </div>
-                <div class="mining-stat">
-                    <span class="mining-stat-value" id="daily-profit">0.0000</span>
-                    <span class="mining-stat-label">CC</span>
-                </div>
-            </div>
         </div>
         </div>
         <div style="clear: both;"></div>
