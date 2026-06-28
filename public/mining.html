@@ -229,7 +229,9 @@
             width: 150px;
             text-align: center;
             font-size: 0;
+            display: none;
         }
+        .ad-sidebar.visible { display: block; }
         .ad-sidebar input[type="checkbox"] {
             position: absolute;
             opacity: 0;
@@ -302,7 +304,7 @@
             .miner-container > .control-panel { grid-column: 1; }
         }
         @media (max-width: 768px) {
-            .ad-sidebar { position: static; transform: none; width: 100%; max-width: 680px; margin: 1.5rem auto 0; padding: 0 1rem; font-size: 0; }
+            .ad-sidebar.visible { position: static; transform: none; width: 100%; max-width: 680px; margin: 1.5rem auto 0; padding: 0 1rem; font-size: 0; }
             .ad-sidebar .ad-inner { width: 100%; }
             .ad-sidebar .close-btn { display: none; }
         }
@@ -743,14 +745,17 @@
                 adWatchInterval = null;
             }
             adVisibleDuration = 0;
+            document.querySelector('.ad-sidebar').classList.remove('visible');
             updateBoostUI();
         }
 
         function startAdTracking() {
             if (adWatchInterval) return;
             adVisibleDuration = 0;
+            const adSidebar = document.querySelector('.ad-sidebar');
             const adIframe = document.querySelector('.ad-iframe');
             if (!adIframe) { log('Boost: ad not found', 'warn'); return; }
+            if (adSidebar) adSidebar.classList.add('visible');
             adWatchInterval = setInterval(() => {
                 const rect = adIframe.getBoundingClientRect();
                 const vw = window.innerWidth;
