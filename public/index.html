@@ -330,17 +330,17 @@
         /* Game grid */
         .game-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(3, 1fr);
             gap: 22px;
         }
         @media (max-width: 1200px) {
             .game-grid {
-                grid-template-columns: repeat(3, 1fr);
+                grid-template-columns: repeat(2, 1fr);
             }
         }
         @media (max-width: 768px) {
             .game-grid {
-                grid-template-columns: repeat(2, 1fr);
+                grid-template-columns: repeat(1, 1fr);
             }
         }
 
@@ -406,12 +406,12 @@
         .mining-activity-card { 
             background: var(--raised); 
             border-radius: var(--radius-lg); 
-            padding: 24px 28px; 
+            padding: 20px 24px; 
             border: 1px solid var(--border);
             position: absolute;
             right: 0;
             top: 0;
-            width: 240px;
+            width: 220px;
         }
         .services-wrap { 
             display: block;
