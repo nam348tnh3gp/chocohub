@@ -408,21 +408,11 @@
             border-radius: var(--radius-lg); 
             padding: 20px 24px; 
             border: 1px solid var(--border);
-            position: absolute;
-            right: 0;
-            top: 0;
-            width: 220px;
+            max-width: 280px;
+            margin-top: 32px;
         }
         .services-wrap { 
             display: block;
-            position: relative;
-        }
-        @media (max-width: 768px) { 
-            .mining-activity-card { 
-                position: static;
-                width: auto; 
-                margin-top: 32px; 
-            } 
         }
         .mining-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
         .mining-stat { text-align: center; }
@@ -613,23 +603,6 @@
         <h3 class="section-title">Available Services</h3>
 
         <div class="services-wrap">
-        <div class="mining-activity-card">
-            <h3 class="section-title">⛏️ Mining Activity</h3>
-            <div class="mining-stats-grid">
-                <div class="mining-stat">
-                    <span class="mining-stat-value" id="workers-count">0</span>
-                    <span class="mining-stat-label">Active Workers</span>
-                </div>
-                <div class="mining-stat">
-                    <span class="mining-stat-value" id="blocks-today">0</span>
-                    <span class="mining-stat-label">Blocks Today</span>
-                </div>
-                <div class="mining-stat">
-                    <span class="mining-stat-value" id="daily-profit">0.0000</span>
-                    <span class="mining-stat-label">CC</span>
-                </div>
-            </div>
-        </div>
         <div class="game-grid">
             <!-- Snake Faucet -->
             <a href="snake.html" class="game-card">
@@ -672,7 +645,24 @@
             </a>
         </div>
         </div>
-        <div style="clear: both;"></div>
+
+        <div class="mining-activity-card">
+            <h3 class="section-title">⛏️ Mining Activity</h3>
+            <div class="mining-stats-grid">
+                <div class="mining-stat">
+                    <span class="mining-stat-value" id="workers-count">0</span>
+                    <span class="mining-stat-label">Active Workers</span>
+                </div>
+                <div class="mining-stat">
+                    <span class="mining-stat-value" id="blocks-today">0</span>
+                    <span class="mining-stat-label">Blocks Today</span>
+                </div>
+                <div class="mining-stat">
+                    <span class="mining-stat-value" id="daily-profit">0.0000</span>
+                    <span class="mining-stat-label">CC</span>
+                </div>
+            </div>
+        </div>
 
         <div class="network-monitor">
             <h3 class="section-title">Network Activity</h3>
