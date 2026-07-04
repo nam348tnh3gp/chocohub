@@ -26,19 +26,62 @@
 
 | Feature | Description |
 |:---:|---|
-| ⛏️ **Webminer** <br> *(SHA256)* | A browser-based miner for PC and mobile. An alternative way to earn Duino-Coins without complex setups. 
-| 💰 **CC Staking** | Validators are randomly chosen every few seconds. The winner gets **0.1 CC**. Passive earnings with minimal effort. |
+| ⛏️ **Webminer** <br> *(SHA256)* | A browser-based miner for PC and mobile. 
+| 💰 **CC Staking** | Validators get a % based on every swap made, receiving on how much they have staked |
 | 🎮 **Faucet Games** | Play the **Snake Faucet** and other games to receive CC rewards directly while you play. |
-| 🔄 **Swap System** <br> *(Partially added)* | In some days: swap **DUCO**, **WEBCOIN**, and possibly **XNO** directly on the platform. |
+| 🔄 **Swap System** <br> | Swap to Duco or XNO directly on the platform. |
 
 ---
 
 ## 💎 What is CC & CCpol?
 
 **CC (Choco Coins)** is the **main** & **stable** coin on chocohub, you can use for activities and others.
-**ChocoCoinPolygon** is the non-stable coin on chocohub, powers AI, POC (Proof-of-Capacity), Poc Validators (Micro), Real mining (mine XMR, receive CCpol), its price varies based on **sell** and **buy** with matic **duco**, other pairs will come soon, use **UNISWAP** For swapping them.
-
+**ChocoCoinPoC** is the non-stable CC token, it can be mined with HDD, SSD, SD cards or anything with actual storage of 1gb (no actual minimum, but recommended)
 **ChocoCoinPolygon (CCpol) Contract: 0x748454b64c415A2cb2EFD0162319479c5958d2D1 add to your wallet now !**
+
+## CC PoC, what is and how it works? 
+
+**CCpoc** is a decentralized blockchain network implementing Proof-of-Capacity (PoC) consensus with fair reward distribution through tier-based difficulty adjustment. The protocol prioritizes accessibility for small miners while maintaining security and network integrity.
+
+## What are the actual blockchains issue and how CCpoc solves it?
+
+1. **Mining Centralization**: Large miners with petabyte-scale storage dominate rewards, causing small miners to dont have actual profit.
+2. **Hardware Limitation**: Miners forced to use specific hardware configurations, like 200-300gb.
+3. **Energy Consumption**: PoW-based systems consume excessive electricity, in many cases, doesnt even pays eletricity bills.
+
+## How we solve it?
+
+- Proof-of-Capacity: Storage-based instead of compute-based
+- Tier-Based Rewards: Diminishing returns for extremely large miners
+- Flexible Hardware: Any storage device (SDCard, USB, NVME, HDD)
+- Energy Efficient: Minimal CPU, low power consumption (only actual usage while plotting)
+
+#### Proof-of-Capacity (PoC)
+
+```
+Challenge:
+  ├─ block_height: Current chain height
+  ├─ challenge_seed: Random seed from previous block
+  └─ target_scoop_index: Calculation point
+
+Block Submission:
+  ├─ Miner scans plot file for scoops
+  ├─ Computes deadline = quality_hash / base_target
+  ├─ Submits proof with lowest deadline
+  └─ Network validates PoC
+
+Validation:
+  ├─ Verify plot commitment (merkle root)
+  ├─ Recompute quality hash
+  ├─ Confirm deadline < max_deadline
+  └─ Accept block if valid
+```
+
+**Advantages**:
+- Asynchronous: Miners can work on multiple challenges
+- Verifiable: Proofs are independently verifiable
+- Fair: Larger storage = more proof attempts, but difficulty adjusts
+- Efficient: Minimal CPU, mostly I/O bound
 
 | 🔁 Exchange Rate | 💡 Utility |
 |:---:|:---|
