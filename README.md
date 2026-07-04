@@ -87,6 +87,10 @@ Validation:
 
 People who dont have hardware for common pow mining, giving them the opportunity to mine with unused storage with PoC or PoW mining with microcontrollers.
 
+## What about the gas fees, is it expensive?
+
+No, it doesnt, we use a formula where more miners = lower fees, this means more users makes the network sending more cheaper.
+
 | 🔁 Exchange Rate | 💡 Utility |
 |:---:|:---|
 | **10 CC = 1 DUCO** | Rewards for games, staking, mining, and soon swaps into other major micro-currencies. |
