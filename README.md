@@ -83,6 +83,10 @@ Validation:
 - Fair: Larger storage = more proof attempts, but difficulty adjusts
 - Efficient: Minimal CPU, mostly I/O bound
 
+## What are our Target users?
+
+People who dont have hardware for common pow mining, giving them the opportunity to mine with unused storage with PoC or PoW mining with microcontrollers.
+
 | 🔁 Exchange Rate | 💡 Utility |
 |:---:|:---|
 | **10 CC = 1 DUCO** | Rewards for games, staking, mining, and soon swaps into other major micro-currencies. |
