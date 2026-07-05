@@ -37,7 +37,7 @@
 
 **CC (Choco Coins)** is the **main** & **stable** coin on chocohub, you can use for activities and others.
 **ChocoCoinPoC** is the non-stable CC token, it can be mined with HDD, SSD, SD cards or anything with actual storage of 1gb (no actual minimum, but recommended)
-**ChocoCoinPolygon (CCpol) Contract: 0x748454b64c415A2cb2EFD0162319479c5958d2D1 add to your wallet now !**
+**ChocoCoinPolygon (CCpol) is a non-stable coin too, used as option for external tradings to CCPoC Contract: 0x748454b64c415A2cb2EFD0162319479c5958d2D1 add to your wallet now !**
 
 ## CC PoC, what is and how it works? 
 
