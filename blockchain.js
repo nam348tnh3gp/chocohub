@@ -114,12 +114,16 @@ function getLastBlock() {
 }
 
 // ─── Lấy job cho worker (tạo mới nếu chưa có) ─
-function getJobForWorker(workerName) {
+function getJobForWorker(workerName, instanceId, deviceType) {
+  // Per-instance difficulty key so different instances of the same user
+  // get independent difficulty tracking.
+  const diffKey = instanceId ? workerName + ':' + instanceId : workerName;
+
   // Dọn dẹp job hết hạn
   db.cleanupExpiredJobs(JOB_EXPIRE_SECONDS);
 
   // Kiểm tra worker đã có job active chưa
-  let job = db.getJobForWorker(workerName);
+  let job = db.getJobForWorker(diffKey);
   if (job) {
     // Validate that the height this job targets hasn't already been mined.
     // This can happen when another worker wins the race and the loser's job
@@ -139,15 +143,20 @@ function getJobForWorker(workerName) {
   const height = lastBlock ? lastBlock.height + 1 : 0;
   const prevHash = lastBlock ? lastBlock.hash : '0'.repeat(64);
 
-  // 🆕 Lấy tier của worker (mặc định 'cpu' nếu chưa đăng ký)
+  // Lấy tier của user (chia sẻ giữa các instance của cùng một user)
   const tier = db.getWorkerTier(workerName);
   const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cpu;
 
-  // Lấy difficulty riêng của worker (nếu chưa có, tạo mới)
-  let diff = db.getWorkerDifficulty(workerName);
+  // Lấy difficulty riêng của instance này
+  let diff = db.getWorkerDifficulty(diffKey);
   if (diff === null) {
-    diff = INITIAL_DIFFICULTY;
-    db.setWorkerDifficulty(workerName, diff, Date.now());
+    // Use device_type as a starting difficulty hint
+    if (deviceType === 'mobile_web') {
+      diff = Math.max(MIN_DIFFICULTY, Math.floor(INITIAL_DIFFICULTY / 5));
+    } else {
+      diff = INITIAL_DIFFICULTY;
+    }
+    db.setWorkerDifficulty(diffKey, diff, Date.now());
   }
 
   // 🆕 Đảm bảo diff trong khoảng cho phép VÀ không vượt quá max của tier
@@ -165,7 +174,7 @@ function getJobForWorker(workerName) {
     difficulty: diff,
     target_hex: targetHex,
     reward: reward,
-    assigned_to: workerName,
+    assigned_to: diffKey,
     tier: tier,
     reward_multiplier: multiplier
   });
@@ -262,24 +271,26 @@ function getDeviceMultiplier(deviceType) {
 }
 
 // ─── Submit solution ────────────────────────────
-function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported) {
+function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, instanceId) {
+  const diffKey = instanceId ? workerName + ':' + instanceId : workerName;
+  const userName = diffKey.includes(':') ? diffKey.split(':')[0] : diffKey;
   const job = db.getActiveJob(jobId);
   if (!job) {
     throw new Error('Job not found or already solved');
   }
-  if (job.assigned_to && job.assigned_to !== workerName) {
+  if (job.assigned_to && job.assigned_to !== diffKey) {
     throw new Error('This job is assigned to another worker');
   }
 
-  // 🆕 Check if worker is suspended
-  const flags = db.getWorkerFlags(workerName);
+  // Suspension check uses the user account (shared across instances)
+  const flags = db.getWorkerFlags(userName);
   if (flags && flags.suspended) {
-    console.warn(`🚫 Suspended worker ${workerName} attempted to submit solution`);
+    console.warn(`🚫 Suspended user ${userName} attempted to submit solution`);
     throw new Error('Worker suspended for suspicious behavior. Contact admin to appeal.');
   }
 
-  // Kiểm tra nonce
-  const input = job.prev_hash + String(nonce).padStart(20, '0') + workerName;
+  // Kiểm tra nonce (hash uses diffKey to match client computation)
+  const input = job.prev_hash + String(nonce).padStart(20, '0') + diffKey;
   const hashHex = crypto.createHash('sha256').update(input).digest('hex');
 
   if (hashHex >= job.target_hex) {
@@ -305,13 +316,13 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported) 
     // If solved 20x faster than hashrate implies → suspicious
     if (ratio < 0.05 && actualSolveTime > 0.1) {
       const reason = `Solved in ${actualSolveTime.toFixed(1)}s but reported hashrate ${hashrateReported} H/s implies ${expectedSolveTime.toFixed(1)}s (ratio ${ratio.toFixed(3)})`;
-      db.addWorkerWarning(workerName, reason);
-      console.warn(`⚠️ Suspicious solve: ${workerName} - ${reason}`);
+      db.addWorkerWarning(userName, reason);
+      console.warn(`⚠️ Suspicious solve: ${diffKey} - ${reason}`);
 
       // Check if this warning caused suspension
-      const updatedFlags = db.getWorkerFlags(workerName);
+      const updatedFlags = db.getWorkerFlags(userName);
       if (updatedFlags.suspended) {
-        console.warn(`🚫 Worker ${workerName} auto-suspended after hashrate validation failure`);
+        console.warn(`🚫 User ${userName} auto-suspended after hashrate validation failure`);
         return {
           status: 'error',
           reason: 'Worker suspended due to suspicious behavior (3 warnings in 24h). Solution rejected.',
@@ -342,7 +353,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported) 
   const deviceReward = parseFloat((minerBase * deviceMultiplier).toFixed(8));
 
   // ─── Mining Boost: multiplicador 1.3x se ativo ──
-  const boostMultiplier = db.getMiningBoostMultiplier(workerName);
+  const boostMultiplier = db.getMiningBoostMultiplier(diffKey);
   const finalReward = parseFloat((deviceReward * boostMultiplier).toFixed(8));
   const bonusReward = parseFloat((finalReward - deviceReward).toFixed(8));
 
@@ -354,7 +365,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported) 
     height: job.height,
     hash: hashHex,
     prev_hash: job.prev_hash,
-    miner: workerName,
+    miner: diffKey,
     nonce: String(nonce),
     timestamp: timestamp,
     reward: finalReward,
@@ -369,11 +380,11 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported) 
   // Lưu block
   db.insertBlock(newBlock);
 
-  // Pay miner (95% × multiplier × boost)
-  db.updateBalance(workerName, finalReward);
+  // Pay miner (95% × multiplier × boost) — credit the user account
+  db.updateBalance(userName, finalReward);
 
   if (bonusReward > 0) {
-    console.log(`⚡ Mining boost active for ${workerName}: ${deviceReward} → ${finalReward} CC (${boostMultiplier}x)`);
+    console.log(`⚡ Mining boost active for ${diffKey}: ${deviceReward} → ${finalReward} CC (${boostMultiplier}x)`);
   }
 
   // ─── Xử lý mempool ──────────────────────────────
@@ -391,19 +402,19 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported) 
   // leaving them alive is what caused the UNIQUE constraint rejection loop).
   db.markJobSolved(jobId);
   db.deleteJobsAtHeight(job.height, jobId); // removes every other active job at this height
-  db.deleteJobsForWorker(workerName, jobId); // belt-and-suspenders: clean up winner's own leftovers
+  db.deleteJobsForWorker(diffKey, jobId); // belt-and-suspenders: clean up winner's own leftovers
 
-  // Điều chỉnh difficulty cho worker dựa trên thời gian giải
+  // Điều chỉnh difficulty cho instance dựa trên thời gian giải
   const solveTime = (timestamp - parseJobDate(job.created_at));
   if (solveTime > 0) {
-    adjustWorkerDifficulty(workerName, solveTime);
+    adjustWorkerDifficulty(diffKey, solveTime);
   }
 
   // Gửi thông báo (webhook)
-  sendMinerWebhook(workerName, newBlock.height, tier, finalReward);
+  sendMinerWebhook(diffKey, newBlock.height, tier, finalReward);
 
   const logParts = [
-    `⛏️ Block ${newBlock.height} solved by ${workerName}`,
+    `⛏️ Block ${newBlock.height} solved by ${diffKey}`,
     `tier: ${tier} (${tierMultiplier}x)`,
     `PoS: ${posContribution} CC · miner: ${finalReward} CC`
   ];

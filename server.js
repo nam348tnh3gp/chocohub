@@ -1778,11 +1778,11 @@ app.get('/block/:height', (req, res) => {
 // Lấy job cho miner
 app.post('/get_job', (req, res) => {
   try {
-    const { worker_name } = req.body;
+    const { worker_name, instance_id, device_type } = req.body;
     if (!worker_name) {
       return res.status(400).json({ status: 'error', message: 'Missing worker_name' });
     }
-    const job = blockchain.getJobForWorker(worker_name);
+    const job = blockchain.getJobForWorker(worker_name, instance_id, device_type);
     if (!job) {
       return res.status(404).json({ status: 'error', message: 'No job available' });
     }
@@ -1819,6 +1819,7 @@ app.post('/submit_solution', (req, res) => {
     const nonce = req.query.nonce || req.body.nonce;
     const device_type = req.query.device_type || req.body.device_type || 'web';
     const hashrate_reported = parseFloat(req.body.hashrate_reported) || 0;
+    const instance_id = req.body.instance_id; // per-instance difficulty tracking
 
     if (!bounty_id || !nonce) {
       return res.status(400).json({ status: 'error', message: 'Missing required parameters: bounty_id, nonce' });
@@ -1847,7 +1848,7 @@ app.post('/submit_solution', (req, res) => {
       }
     }
 
-    const result = blockchain.submitSolution(bounty_id, nonce, worker_name, device_type, hashrate_reported);
+    const result = blockchain.submitSolution(bounty_id, nonce, worker_name, device_type, hashrate_reported, instance_id);
     res.json(result);
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
