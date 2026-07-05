@@ -938,6 +938,12 @@
         let lastTimestamp = Date.now();
         let currentHashrate = 0;
         let worker = null;
+        // Per-instance identity for independent difficulty tracking
+        const instanceId = Math.random().toString(36).substring(2, 10);
+        const effectiveWorker = workerName + ':' + instanceId;
+        // Device type for starting difficulty hint
+        const deviceType = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+            || window.innerWidth < 768 ? 'mobile_web' : 'desktop_web';
 
         // ---------- UI helpers ----------
         function showToast(msg, isError = false) {
@@ -993,7 +999,7 @@
                 const res = await fetch('/get_job', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ worker_name: workerName })
+                    body: JSON.stringify({ worker_name: workerName, instance_id: instanceId, device_type: deviceType })
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const job = await res.json();
@@ -1030,8 +1036,8 @@
             worker.postMessage({
                 type: 'start',
                 ...job,
-                username: workerName,
-                worker_name: workerName
+                username: effectiveWorker,
+                worker_name: effectiveWorker
             });
 
             miningActive = true;
@@ -1090,7 +1096,7 @@
                     if (worker) worker.postMessage({ type: 'stop' });
                     const jobId = data.job_id || data.bounty_id;
                     if (jobId) {
-                        submitSolution(jobId, data.nonce, workerName);
+                        submitSolution(jobId, data.nonce, workerName, instanceId);
                     } else {
                         log('No job id in found message', 'err');
                     }
@@ -1103,7 +1109,7 @@
         }
 
         // ---------- Gửi solution ----------
-        async function submitSolution(jobId, nonce, wName) {
+        async function submitSolution(jobId, nonce, wName, instId) {
             log(`Submitting solution for #${jobId.substring(0,8)}...`, 'info');
             try {
                 const res = await fetch('/submit_solution', {
@@ -1113,7 +1119,8 @@
                         bounty_id: jobId,
                         nonce: nonce,
                         worker_name: wName,
-                        device_type: 'web_miner'
+                        instance_id: instId,
+                        device_type: deviceType
                     })
                 });
                 const result = await res.json();
