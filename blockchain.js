@@ -5,7 +5,7 @@ const db = require('./db');
 
 // ─── Cấu hình ────────────────────────────────────
 const REWARD_PER_BLOCK = 0.05;                  // 0.05 CC
-const INITIAL_DIFFICULTY = 10;                  // mặc định cho worker mới
+const INITIAL_DIFFICULTY = 1;                  // mặc định cho worker mới
 const JOB_EXPIRE_SECONDS = 60;                  // job hết hạn sau 60s
 const MIN_DIFFICULTY = 1;
 const MAX_DIFFICULTY = 1000000;
@@ -64,7 +64,7 @@ const DEVICE_REWARD_MULTIPLIERS = {
   'mobile': 2.0,
   'android': 2.0,
   'ios': 2.0,
-  'web_miner': 1.0,
+  'web_miner': 1.3,
   'cpu': 1.0,
   'cpu_miner': 1.0,
   'gpu': 1.0, // Changed from 0.5 to 1.0
@@ -472,7 +472,7 @@ function adjustWorkerDifficulty(workerName, solveTime) {
   let idealDiff = currentDiff * (targetTime / solveTime);
   let newDiff = currentDiff + (idealDiff - currentDiff) * DIFFICULTY_ADJUSTMENT_FACTOR;
   // Giới hạn thay đổi tối đa 25% để tránh biến động mạnh
-  const maxChange = currentDiff * 0.25;
+  const maxChange = currentDiff * 2;
   newDiff = Math.max(currentDiff - maxChange, Math.min(currentDiff + maxChange, newDiff));
   newDiff = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, newDiff));
   newDiff = Math.round(newDiff * 10) / 10;
