@@ -1,93 +1,439 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>ChocoHub · Web Miner</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,600;14..32,700;14..32,800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            background: #0D0B0A;
-            background-image: radial-gradient(circle at 20% 30%, rgba(245, 138, 0, 0.08) 0%, transparent 70%);
-            font-family: 'Inter', sans-serif;
-            color: #F5EDE0;
-            min-height: 100vh;
-            padding: 2rem 1rem;
+        :root {
+            --radius-xl: 30px;
+            --radius-lg: 24px;
+            --radius-md: 18px;
+            --radius-pill: 999px;
+
+            --accent-yellow: #FFD60A;
+            --accent-orange: #FF9F0A;
+            --accent-blue: #0A84FF;
+            --accent-pink: #FF375F;
+            --accent-green: #32D74B;
+            --accent-cyan: #64D2FF;
+
+            --ease-liquid: cubic-bezier(.22,1,.36,1);
         }
-        .miner-container { max-width: 680px; margin: 0 auto; }
-        .header {
+
+        html[data-theme="dark"] {
+            --bg-base: #07060A;
+            --bg-base-2: #0B0910;
+            --text-primary: #F3ECDF;
+            --text-secondary: #9A93A6;
+            --text-tertiary: #5F5A6D;
+
+            --glass-bg: rgba(255,255,255,0.055);
+            --glass-bg-strong: rgba(255,255,255,0.09);
+            --glass-border: rgba(255,255,255,0.14);
+            --glass-highlight: rgba(255,255,255,0.22);
+            --glass-shadow: rgba(0,0,0,0.55);
+
+            --terminal-bg: #050608;
+            --terminal-border: rgba(255,255,255,0.08);
+
+            --blob-opacity: 0.55;
+            --blob-blur: 70px;
+            --input-track: rgba(255,255,255,0.08);
+        }
+
+        html[data-theme="light"] {
+            --bg-base: #EFEFF6;
+            --bg-base-2: #F6F5FB;
+            --text-primary: #1B1A22;
+            --text-secondary: #5B5766;
+            --text-tertiary: #8B879A;
+
+            --glass-bg: rgba(255,255,255,0.5);
+            --glass-bg-strong: rgba(255,255,255,0.72);
+            --glass-border: rgba(255,255,255,0.9);
+            --glass-highlight: rgba(255,255,255,0.95);
+            --glass-shadow: rgba(31,32,71,0.14);
+
+            --terminal-bg: #14141C;
+            --terminal-border: rgba(255,255,255,0.08);
+
+            --blob-opacity: 0.5;
+            --blob-blur: 80px;
+            --input-track: rgba(0,0,0,0.08);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
+            height: 100%;
+        }
+
+        body {
+            background: var(--bg-base);
+            font-family: 'Inter', sans-serif;
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 1.5rem 1rem 3rem;
+            overflow-x: hidden;
+            transition: background-color .6s var(--ease-liquid), color .5s var(--ease-liquid);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ---------- Floating abstract background art ---------- */
+        .bg-blobs {
+            position: fixed;
+            inset: 0;
+            z-index: -2;
+            overflow: hidden;
+            filter: blur(var(--blob-blur)) saturate(160%);
+            opacity: var(--blob-opacity);
+            transition: opacity .6s var(--ease-liquid);
+            pointer-events: none;
+        }
+        .blob {
+            position: absolute;
+            border-radius: 50%;
+            will-change: transform;
+        }
+        .blob-yellow {
+            width: 48vw; height: 48vw;
+            top: -14%; left: -10%;
+            background: radial-gradient(circle at 40% 40%, var(--accent-yellow) 0%, transparent 72%);
+            animation: float1 24s var(--ease-liquid) infinite alternate;
+        }
+        .blob-blue {
+            width: 55vw; height: 55vw;
+            bottom: -22%; right: -14%;
+            background: radial-gradient(circle at 60% 60%, var(--accent-blue) 0%, transparent 72%);
+            animation: float2 30s var(--ease-liquid) infinite alternate;
+        }
+        .blob-pink {
+            width: 40vw; height: 40vw;
+            top: 18%; right: 8%;
+            background: radial-gradient(circle at 50% 50%, var(--accent-pink) 0%, transparent 72%);
+            animation: float3 20s var(--ease-liquid) infinite alternate;
+        }
+        .blob-orange {
+            width: 38vw; height: 38vw;
+            bottom: 2%; left: 22%;
+            background: radial-gradient(circle at 50% 50%, var(--accent-orange) 0%, transparent 72%);
+            animation: float4 26s var(--ease-liquid) infinite alternate;
+        }
+        @keyframes float1 {
+            0%   { transform: translate(0,0) scale(1) rotate(0deg); }
+            50%  { transform: translate(6vw,8vh) scale(1.12) rotate(20deg); }
+            100% { transform: translate(-4vw,4vh) scale(0.95) rotate(-15deg); }
+        }
+        @keyframes float2 {
+            0%   { transform: translate(0,0) scale(1); }
+            50%  { transform: translate(-7vw,-6vh) scale(1.1); }
+            100% { transform: translate(3vw,-9vh) scale(0.92); }
+        }
+        @keyframes float3 {
+            0%   { transform: translate(0,0) scale(1); }
+            50%  { transform: translate(-5vw,7vh) scale(0.9); }
+            100% { transform: translate(6vw,3vh) scale(1.15); }
+        }
+        @keyframes float4 {
+            0%   { transform: translate(0,0) scale(1); }
+            50%  { transform: translate(5vw,-5vh) scale(1.08); }
+            100% { transform: translate(-6vw,-2vh) scale(0.94); }
+        }
+        .grain {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            pointer-events: none;
+            opacity: 0.035;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+            mix-blend-mode: overlay;
+        }
+
+        /* ---------- Glass primitive ---------- */
+        .glass {
+            position: relative;
+            background: var(--glass-bg);
+            backdrop-filter: blur(26px) saturate(180%);
+            -webkit-backdrop-filter: blur(26px) saturate(180%);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 10px 34px var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+            transition: background-color .5s var(--ease-liquid), border-color .5s var(--ease-liquid), box-shadow .5s var(--ease-liquid), transform .25s var(--ease-liquid);
+            overflow: hidden;
+        }
+        .glass::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(130deg, rgba(255,255,255,0.22), transparent 45%);
+            pointer-events: none;
+            opacity: 0.7;
+        }
+        .glass-pill {
+            border-radius: var(--radius-pill) !important;
+        }
+
+        a { color: inherit; }
+
+        /* ---------- App shell ---------- */
+        .app-shell {
+            max-width: 1180px;
+            margin: 0 auto;
+            position: relative;
+            z-index: 1;
+        }
+
+        .topbar {
             display: flex;
             justify-content: space-between;
             align-items: center;
             flex-wrap: wrap;
-            gap: 12px;
-            margin-bottom: 2rem;
+            gap: 14px;
+            padding: 14px 22px;
+            margin-bottom: 1.6rem;
         }
-        .logo-area {
+        .brand {
             display: flex;
             align-items: center;
             gap: 10px;
         }
-        .logo-area h1 {
-            font-size: 1.8rem;
+        .brand-icon {
+            font-size: 26px;
+            filter: drop-shadow(0 2px 6px rgba(255,159,10,0.5));
+        }
+        .brand h1 {
+            font-size: 1.4rem;
             font-weight: 800;
-            background: linear-gradient(135deg, #F58A00, #FFB347);
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange) 45%, var(--accent-pink));
             -webkit-background-clip: text;
             background-clip: text;
             color: transparent;
         }
-        .back-link {
-            background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(245, 138, 0, 0.25);
-            padding: 8px 20px;
-            border-radius: 40px;
-            text-decoration: none;
-            color: #B0A89A;
-            font-weight: 500;
-            transition: 0.2s;
+        .brand-sub {
+            font-size: 0.68rem;
+            color: var(--text-tertiary);
+            font-family: 'Space Mono', monospace;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
         }
-        .back-link:hover { border-color: #F58A00; color: #F58A00; }
+
+        .topbar-widgets {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .clock-widget {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            padding: 6px 16px;
+            line-height: 1.15;
+        }
+        .clock-widget .time {
+            font-family: 'Space Mono', monospace;
+            font-weight: 700;
+            font-size: 0.95rem;
+            letter-spacing: 0.03em;
+        }
+        .clock-widget .date {
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+        }
+
+        /* Theme toggle switch */
+        .theme-toggle {
+            appearance: none;
+            border: none;
+            background: none;
+            cursor: pointer;
+            padding: 0;
+        }
+        .toggle-track {
+            width: 58px;
+            height: 32px;
+            border-radius: var(--radius-pill);
+            background: linear-gradient(135deg, #2b2540, #171425);
+            border: 1px solid var(--glass-border);
+            display: flex;
+            align-items: center;
+            padding: 3px;
+            transition: background .45s var(--ease-liquid);
+            position: relative;
+            box-shadow: inset 0 2px 6px rgba(0,0,0,0.4);
+        }
+        html[data-theme="light"] .toggle-track {
+            background: linear-gradient(135deg, #FFE28A, #FFB347);
+        }
+        .toggle-thumb {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: #fff;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transform: translateX(0);
+            transition: transform .45s var(--ease-liquid);
+        }
+        html[data-theme="light"] .toggle-thumb { transform: translateX(26px); }
+        .toggle-thumb svg { width: 15px; height: 15px; }
+
+        .back-link {
+            padding: 9px 20px;
+            text-decoration: none;
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-size: 0.82rem;
+            transition: color .2s, transform .2s;
+        }
+        .back-link:hover { color: var(--accent-orange); transform: translateY(-1px); }
+
+        /* ---------- Layout grid ---------- */
+        .layout-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.4rem;
+        }
+        .side-col {
+            display: flex;
+            flex-direction: column;
+            gap: 1.4rem;
+        }
+
+        @media (min-width: 900px) {
+            .layout-grid {
+                grid-template-columns: minmax(0, 1fr) 300px;
+                align-items: start;
+            }
+            .side-col { position: sticky; top: 1.5rem; }
+        }
+
+        /* ---------- Stats ---------- */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 16px;
-            margin-bottom: 28px;
+            gap: 14px;
+            margin-bottom: 1.4rem;
         }
         .stat-card {
-            background: rgba(18, 16, 15, 0.7);
-            backdrop-filter: blur(8px);
-            border: 1px solid rgba(245, 138, 0, 0.2);
-            border-radius: 24px;
-            padding: 1rem;
+            padding: 1.1rem 0.8rem;
             text-align: center;
-            transition: 0.2s;
         }
         .stat-value {
             font-family: 'Space Mono', monospace;
-            font-size: 1.5rem;
+            font-size: 1.4rem;
             font-weight: 700;
-            color: #F58A00;
+            background: linear-gradient(135deg, var(--accent-orange), var(--accent-pink));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
             margin-bottom: 6px;
         }
         .stat-label {
-            font-size: 0.7rem;
+            font-size: 0.65rem;
             text-transform: uppercase;
-            letter-spacing: 1px;
-            color: #8B8296;
+            letter-spacing: 0.09em;
+            color: var(--text-tertiary);
+            font-weight: 600;
         }
+
+        /* ---------- Boost card ---------- */
+        .boost-card {
+            padding: 1.4rem;
+            text-align: center;
+        }
+        .boost-card.active {
+            border-color: rgba(255,159,10,0.55);
+            box-shadow: 0 0 0 1px rgba(255,159,10,0.25), 0 12px 34px var(--glass-shadow);
+        }
+        .boost-title {
+            font-size: 0.95rem;
+            font-weight: 800;
+            margin-bottom: 6px;
+            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+        .boost-sub {
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            margin-bottom: 14px;
+            line-height: 1.4;
+        }
+        .boost-btn {
+            width: 100%;
+            border: none;
+            padding: 13px 18px;
+            border-radius: var(--radius-pill);
+            font-weight: 700;
+            font-size: 0.82rem;
+            cursor: pointer;
+            font-family: inherit;
+            color: #14110A;
+            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange));
+            box-shadow: 0 6px 18px rgba(255,159,10,0.35);
+            transition: transform .2s var(--ease-liquid), filter .2s, opacity .2s;
+        }
+        .boost-btn:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.06); }
+        .boost-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+        .boost-status {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.68rem;
+            color: var(--text-secondary);
+            margin-top: 12px;
+            line-height: 1.5;
+        }
+        .boost-status.active { color: var(--accent-green); }
+
+        /* ---------- Widget card (side) ---------- */
+        .widget-card {
+            padding: 1.2rem 1.3rem;
+        }
+        .widget-card .greeting {
+            font-size: 0.95rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        .widget-card .greeting-sub {
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            margin-bottom: 14px;
+        }
+        .mini-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            padding: 7px 0;
+            border-top: 1px solid var(--glass-border);
+        }
+        .mini-row:first-of-type { border-top: none; }
+        .mini-row .dot-status {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--accent-green);
+            box-shadow: 0 0 8px var(--accent-green);
+            display: inline-block;
+            margin-right: 6px;
+        }
+
+        /* ---------- Job card ---------- */
         .job-card {
-            background: rgba(18, 16, 15, 0.85);
-            backdrop-filter: blur(12px);
-            border-radius: 28px;
-            border: 1px solid rgba(245, 138, 0, 0.3);
             padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            transition: all 0.2s;
+            margin-bottom: 1.4rem;
+            transition: all .3s var(--ease-liquid);
         }
         .job-card.mining {
-            border-color: #F58A00;
-            box-shadow: 0 0 18px rgba(245,138,0,0.2);
+            border-color: rgba(255,159,10,0.5);
+            box-shadow: 0 0 0 1px rgba(255,159,10,0.2), 0 0 30px rgba(255,159,10,0.18), inset 0 1px 0 var(--glass-highlight);
         }
         .job-header {
             display: flex;
@@ -99,127 +445,163 @@
         }
         .job-id {
             font-family: 'Space Mono', monospace;
-            font-size: 0.8rem;
-            background: rgba(245,138,0,0.1);
-            padding: 4px 12px;
-            border-radius: 40px;
-            color: #F58A00;
+            font-size: 0.75rem;
+            background: var(--glass-bg-strong);
+            padding: 5px 14px;
+            border-radius: var(--radius-pill);
+            color: var(--accent-orange);
+            border: 1px solid var(--glass-border);
         }
         .reward-badge {
-            background: rgba(80,250,123,0.1);
-            color: #7FE0A0;
-            padding: 4px 12px;
-            border-radius: 40px;
-            font-size: 0.75rem;
-            font-weight: 600;
+            background: rgba(50,215,75,0.12);
+            color: var(--accent-green);
+            padding: 5px 14px;
+            border-radius: var(--radius-pill);
+            font-size: 0.72rem;
+            font-weight: 700;
+            border: 1px solid rgba(50,215,75,0.25);
         }
         .difficulty-row {
             display: flex;
             justify-content: space-between;
-            font-size: 0.8rem;
-            color: #B0A89A;
+            font-size: 0.78rem;
+            color: var(--text-secondary);
             margin-bottom: 1rem;
         }
         .progress-bar-bg {
-            height: 6px;
-            background: #2A2522;
-            border-radius: 10px;
+            height: 8px;
+            background: var(--input-track);
+            border-radius: var(--radius-pill);
             overflow: hidden;
-            margin: 1rem 0;
+            margin: 0.5rem 0;
         }
         .progress-fill {
             height: 100%;
-            background: linear-gradient(90deg, #F58A00, #FFB347);
+            background: linear-gradient(90deg, var(--accent-yellow), var(--accent-orange) 50%, var(--accent-pink));
             width: 0%;
-            transition: width 0.3s ease;
-            border-radius: 10px;
+            transition: width .3s ease;
+            border-radius: var(--radius-pill);
+            box-shadow: 0 0 12px rgba(255,159,10,0.55);
         }
+
+        /* ---------- Control panel & buttons ---------- */
         .control-panel {
-            background: rgba(18, 16, 15, 0.85);
-            backdrop-filter: blur(8px);
-            border-radius: 28px;
-            border: 1px solid rgba(245, 138, 0, 0.2);
             padding: 1.5rem;
-            margin-bottom: 1.5rem;
+            margin-bottom: 1.4rem;
         }
         .button-group {
             display: flex;
             gap: 12px;
-            margin-bottom: 1rem;
+            margin-bottom: 1.1rem;
         }
         .btn {
             flex: 1;
             padding: 14px;
-            border-radius: 40px;
+            border-radius: var(--radius-pill);
             font-weight: 700;
-            font-size: 0.9rem;
+            font-size: 0.88rem;
             cursor: pointer;
-            transition: 0.2s;
+            transition: transform .2s var(--ease-liquid), filter .2s, opacity .2s;
             border: none;
             font-family: inherit;
         }
         .btn-primary {
-            background: linear-gradient(135deg, #F58A00, #FFB347);
-            color: #0D0B0A;
-            box-shadow: 0 4px 12px rgba(245,138,0,0.3);
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-pink));
+            color: #fff;
+            box-shadow: 0 8px 20px rgba(10,132,255,0.35);
         }
         .btn-primary:hover:not(:disabled) {
             transform: translateY(-2px);
-            filter: brightness(1.05);
+            filter: brightness(1.07);
         }
         .btn-secondary {
-            background: rgba(255,85,85,0.1);
-            border: 1px solid #FF5555;
-            color: #FF8888;
+            background: rgba(255,55,95,0.1);
+            border: 1px solid rgba(255,55,95,0.45);
+            color: var(--accent-pink);
         }
         .btn-secondary:hover:not(:disabled) {
-            background: rgba(255,85,85,0.2);
+            background: rgba(255,55,95,0.2);
         }
         .btn:disabled {
-            opacity: 0.5;
+            opacity: 0.45;
             cursor: not-allowed;
             transform: none;
         }
+
+        /* ---------- Terminal console ---------- */
+        .terminal-window {
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            border: 1px solid var(--terminal-border);
+            background: var(--terminal-bg);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+        }
+        .terminal-titlebar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01));
+            border-bottom: 1px solid var(--terminal-border);
+        }
+        .term-dot { width: 11px; height: 11px; border-radius: 50%; }
+        .term-dot.red { background: #FF5F57; }
+        .term-dot.yellow { background: #FEBC2E; }
+        .term-dot.green { background: #28C840; }
+        .terminal-title {
+            margin-left: 8px;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.68rem;
+            color: var(--text-tertiary);
+            letter-spacing: 0.03em;
+        }
         .console {
-            background: #0A0A0A;
-            border-radius: 20px;
-            padding: 1rem;
-            height: 160px;
+            background: transparent;
+            padding: 12px 14px;
+            height: 190px;
             overflow-y: auto;
             font-family: 'Space Mono', monospace;
-            font-size: 0.7rem;
-            border: 1px solid rgba(245,138,0,0.15);
+            font-size: 0.72rem;
+            line-height: 1.6;
         }
+        .console::-webkit-scrollbar { width: 6px; }
+        .console::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 10px; }
         .log-line {
-            padding: 4px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.02);
-            color: #7FE0A0;
+            padding: 2px 0;
+            color: var(--accent-green);
+            white-space: pre-wrap;
+            word-break: break-word;
         }
-        .log-info { color: #6BE5FF; }
-        .log-warn { color: #F5A623; }
-        .log-err  { color: #FF8888; }
-        .log-win  { color: #7FE0A0; font-weight: 600; }
+        .log-info { color: var(--accent-cyan); }
+        .log-warn { color: var(--accent-yellow); }
+        .log-err  { color: var(--accent-pink); }
+        .log-win  { color: var(--accent-green); font-weight: 700; }
+
+        /* ---------- Toast ---------- */
         .toast {
             position: fixed;
-            bottom: 20px;
+            bottom: 24px;
             left: 50%;
-            transform: translateX(-50%);
-            background: #1E1B1A;
-            border: 1px solid #F58A00;
-            padding: 12px 24px;
-            border-radius: 40px;
-            font-weight: 600;
+            transform: translateX(-50%) translateY(10px);
+            background: var(--glass-bg-strong);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid var(--glass-border);
+            padding: 13px 26px;
+            border-radius: var(--radius-pill);
+            font-weight: 700;
             font-size: 0.85rem;
-            backdrop-filter: blur(12px);
             z-index: 1000;
             opacity: 0;
-            transition: opacity 0.2s;
+            transition: opacity .3s var(--ease-liquid), transform .3s var(--ease-liquid);
             pointer-events: none;
+            box-shadow: 0 10px 30px var(--glass-shadow);
         }
-        .toast.show { opacity: 1; }
-        .toast.success { border-color: #40C057; color: #40C057; }
-        .toast.error { border-color: #FA5252; color: #FA5252; }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .toast.success { border-color: var(--accent-green); color: var(--accent-green); }
+        .toast.error { border-color: var(--accent-pink); color: var(--accent-pink); }
 
+        /* ---------- Ad sidebar (behavior classes kept, restyled) ---------- */
         .ad-sidebar {
             position: fixed;
             top: 50%;
@@ -242,14 +624,17 @@
             display: flex;
             flex-direction: column;
             align-items: center;
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            box-shadow: 0 10px 30px var(--glass-shadow);
         }
         .ad-sidebar .close-btn {
             position: absolute;
             bottom: -24px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(248, 248, 249, 0.7);
-            border-radius: 4px;
+            background: rgba(248, 248, 249, 0.85);
+            border-radius: 6px;
             padding: 4px;
             cursor: pointer;
             z-index: 99999;
@@ -272,7 +657,6 @@
             padding: 4px 10px;
             background: #F8F8F9;
             text-decoration: none;
-            border-radius: 4px 4px 0 0;
         }
         .ad-iframe {
             border: 0;
@@ -281,98 +665,143 @@
             height: 200px;
             overflow: hidden;
             margin: 0 auto;
+            display: block;
         }
-        .boost-card { background: linear-gradient(135deg, rgba(255,200,50,0.06), rgba(255,100,0,0.04)); border: 1px solid rgba(255,180,50,0.25); border-radius: 28px; padding: 1.5rem; margin-bottom: 1.5rem; text-align: center; }
-        .boost-card.active { border-color: #FFB347; box-shadow: 0 0 20px rgba(255,180,50,0.15); }
-        .boost-title { font-size: 1rem; font-weight: 700; color: #FFB347; margin-bottom: 6px; }
-        .boost-sub { font-size: 0.75rem; color: #8B8296; margin-bottom: 14px; }
-        .boost-btn { background: linear-gradient(135deg, #FF8C00, #FFB347); color: #0D0B0A; border: none; padding: 14px 28px; border-radius: 40px; font-weight: 700; font-size: 0.9rem; cursor: pointer; transition: 0.2s; font-family: inherit; box-shadow: 0 4px 12px rgba(255,140,0,0.3); }
-        .boost-btn:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.05); }
-        .boost-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .boost-status { font-family: 'Space Mono', monospace; font-size: 0.75rem; color: #8B8296; margin-top: 10px; }
-        .boost-status.active { color: #7FE0A0; }
-        @media (min-width: 769px) {
-            .miner-container { display: grid; grid-template-columns: 1fr auto; gap: 1.5rem; max-width: 960px; }
-            .miner-container > .header { grid-column: 1; }
-            .miner-container > .stats-grid { grid-column: 1; }
-            .miner-container > .boost-card { grid-column: 2; grid-row: 1 / 5; width: 200px; margin: 0; position: sticky; top: 2rem; align-self: start; padding: 1rem; }
-            .miner-container > .boost-card .boost-title { font-size: 0.85rem; }
-            .miner-container > .boost-card .boost-sub { font-size: 0.65rem; }
-            .miner-container > .boost-card .boost-btn { padding: 8px 16px; font-size: 0.75rem; }
-            .miner-container > .boost-card .boost-status { font-size: 0.65rem; }
-            .miner-container > .job-card { grid-column: 1; }
-            .miner-container > .control-panel { grid-column: 1; }
-        }
+
+        /* ---------- Responsive ---------- */
         @media (max-width: 768px) {
-            .ad-sidebar.visible { position: static; transform: none; width: 100%; max-width: 680px; margin: 1.5rem auto 0; padding: 0 1rem; font-size: 0; }
+            body { padding: 1rem 0.8rem 2.5rem; }
+            .topbar { padding: 12px 16px; }
+            .clock-widget { align-items: flex-start; }
+            .ad-sidebar.visible { position: static; transform: none; width: 100%; max-width: 680px; margin: 1.4rem auto 0; padding: 0; font-size: 0; }
             .ad-sidebar .ad-inner { width: 100%; }
             .ad-sidebar .close-btn { display: none; }
         }
         @media (max-width: 560px) {
             .stats-grid { gap: 8px; }
-            .stat-value { font-size: 1.2rem; }
+            .stat-value { font-size: 1.1rem; }
             .job-header { flex-direction: column; align-items: flex-start; }
+            .topbar-widgets { width: 100%; justify-content: space-between; }
+            .clock-widget { align-items: flex-start; padding: 6px 4px; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .blob { animation: none !important; }
+            * { transition-duration: 0.01ms !important; }
         }
     </style>
 </head>
 <body>
-<div class="miner-container">
-    <div class="header">
-        <div class="logo-area">
-            <span style="font-size: 28px;">⛏️</span>
-            <h1>Web Miner</h1>
-        </div>
-        <a href="/" class="back-link">← Dashboard</a>
-    </div>
 
-    <!-- Stats -->
-    <div class="stats-grid">
-        <div class="stat-card">
-            <div class="stat-value" id="hashrateValue">0 H/s</div>
-            <div class="stat-label">Hashrate</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-value" id="totalHashesValue">0</div>
-            <div class="stat-label">Total Hashes</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-value" id="uptimeValue">0s</div>
-            <div class="stat-label">Session Time</div>
-        </div>
-    </div>
+<div class="bg-blobs" aria-hidden="true">
+    <div class="blob blob-yellow"></div>
+    <div class="blob blob-blue"></div>
+    <div class="blob blob-pink"></div>
+    <div class="blob blob-orange"></div>
+</div>
+<div class="grain" aria-hidden="true"></div>
 
-    <!-- Mining Boost -->
-    <div class="boost-card" id="boostCard">
-        <div class="boost-title">⚡ Mining Boost 1.3×</div>
-        <div class="boost-sub">Watch the ad for 15s to activate a 1.3× reward multiplier</div>
-        <button class="boost-btn" id="boostBtn" disabled>▶ Watch Ad</button>
-        <div class="boost-status" id="boostStatus">⏳ Watch the ad sidebar for 15s to unlock</div>
-    </div>
+<div class="app-shell">
 
-    <!-- Current job -->
-    <div class="job-card" id="jobCard">
-        <div class="job-header">
-            <span class="job-id" id="jobId">No active job</span>
-            <span class="reward-badge" id="rewardBadge">— CC</span>
+    <header class="topbar glass">
+        <div class="brand">
+            <span class="brand-icon">⛏️</span>
+            <div>
+                <h1>Web Miner</h1>
+                <div class="brand-sub">ChocoHub</div>
+            </div>
         </div>
-        <div class="difficulty-row">
-            <span>Difficulty</span>
-            <span id="difficultyValue" style="color:#F58A00;">—</span>
+        <div class="topbar-widgets">
+            <div class="clock-widget">
+                <span class="time" id="liveClock">00:00:00</span>
+                <span class="date" id="liveDate">—</span>
+            </div>
+            <button class="theme-toggle" id="themeToggle" aria-label="Toggle day and night mode" title="Toggle theme">
+                <span class="toggle-track">
+                    <span class="toggle-thumb">
+                        <svg id="themeIcon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" stroke="#FF9F0A" stroke-width="2" stroke-linejoin="round"/>
+                        </svg>
+                    </span>
+                </span>
+            </button>
+            <a href="/" class="back-link glass glass-pill">← Dashboard</a>
         </div>
-        <div class="progress-bar-bg">
-            <div class="progress-fill" id="progressFill"></div>
-        </div>
-    </div>
+    </header>
 
-    <!-- Controls -->
-    <div class="control-panel">
-        <div class="button-group">
-            <button class="btn btn-primary" id="startBtn">▶ Start Mining</button>
-            <button class="btn btn-secondary" id="stopBtn" disabled>⏹ Stop</button>
+    <div class="layout-grid">
+        <div class="main-col">
+
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-card glass">
+                    <div class="stat-value" id="hashrateValue">0 H/s</div>
+                    <div class="stat-label">Hashrate</div>
+                </div>
+                <div class="stat-card glass">
+                    <div class="stat-value" id="totalHashesValue">0</div>
+                    <div class="stat-label">Total Hashes</div>
+                </div>
+                <div class="stat-card glass">
+                    <div class="stat-value" id="uptimeValue">0s</div>
+                    <div class="stat-label">Session Time</div>
+                </div>
+            </div>
+
+            <!-- Current job -->
+            <div class="job-card glass" id="jobCard">
+                <div class="job-header">
+                    <span class="job-id" id="jobId">No active job</span>
+                    <span class="reward-badge" id="rewardBadge">— CC</span>
+                </div>
+                <div class="difficulty-row">
+                    <span>Difficulty</span>
+                    <span id="difficultyValue" style="color: var(--accent-orange); font-family:'Space Mono',monospace;">—</span>
+                </div>
+                <div class="progress-bar-bg">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="control-panel glass">
+                <div class="button-group">
+                    <button class="btn btn-primary" id="startBtn">▶ Start Mining</button>
+                    <button class="btn btn-secondary" id="stopBtn" disabled>⏹ Stop</button>
+                </div>
+                <div class="terminal-window">
+                    <div class="terminal-titlebar">
+                        <span class="term-dot red"></span>
+                        <span class="term-dot yellow"></span>
+                        <span class="term-dot green"></span>
+                        <span class="terminal-title">chocohub@miner — zsh</span>
+                    </div>
+                    <div class="console" id="console">
+                        <div class="log-line log-info">&gt; Ready. Waiting for job...</div>
+                    </div>
+                </div>
+            </div>
+
         </div>
-        <div class="console" id="console">
-            <div class="log-line log-info">> Ready. Waiting for job...</div>
-        </div>
+
+        <aside class="side-col">
+            <!-- Mining Boost -->
+            <div class="boost-card glass" id="boostCard">
+                <div class="boost-title">⚡ Mining Boost 1.3×</div>
+                <div class="boost-sub">Watch the ad for 15s to activate a 1.3× reward multiplier</div>
+                <button class="boost-btn" id="boostBtn" disabled>▶ Watch Ad</button>
+                <div class="boost-status" id="boostStatus">⏳ Watch the ad sidebar for 15s to unlock</div>
+            </div>
+
+            <!-- Info widget -->
+            <div class="widget-card glass">
+                <div class="greeting" id="greetingText">Hello, miner 👋</div>
+                <div class="greeting-sub" id="greetingSub">Let's find some blocks today.</div>
+                <div class="mini-row"><span><span class="dot-status"></span>Network</span><span>Online</span></div>
+                <div class="mini-row"><span>Theme</span><span id="themeLabel">Night mode</span></div>
+                <div class="mini-row"><span>Local time</span><span id="miniTime">—</span></div>
+            </div>
+        </aside>
     </div>
 </div>
 
@@ -401,6 +830,67 @@
 <!-- END AADS AD UNIT 2444734 -->
 
 <div id="toast" class="toast"></div>
+
+<script>
+    // ---------- UI-only enhancements: clock, date, theme toggle ----------
+    // Isolated from the mining logic below; touches only cosmetic elements.
+    (function () {
+        const root = document.documentElement;
+        const themeToggle = document.getElementById('themeToggle');
+        const themeIcon = document.getElementById('themeIcon');
+        const themeLabel = document.getElementById('themeLabel');
+        const liveClock = document.getElementById('liveClock');
+        const liveDate = document.getElementById('liveDate');
+        const miniTime = document.getElementById('miniTime');
+        const greetingText = document.getElementById('greetingText');
+        const greetingSub = document.getElementById('greetingSub');
+
+        const SUN = '<path d="M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z" stroke="#FF9F0A" stroke-width="2"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" stroke="#FF9F0A" stroke-width="2" stroke-linecap="round"/>';
+        const MOON = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" stroke="#0A84FF" stroke-width="2" stroke-linejoin="round"/>';
+
+        function applyTheme(theme) {
+            root.setAttribute('data-theme', theme);
+            try { localStorage.setItem('choco_miner_theme', theme); } catch (e) {}
+            if (themeIcon) themeIcon.innerHTML = theme === 'dark' ? MOON : SUN;
+            if (themeLabel) themeLabel.textContent = theme === 'dark' ? 'Night mode' : 'Day mode';
+        }
+
+        let savedTheme = 'dark';
+        try { savedTheme = localStorage.getItem('choco_miner_theme') || 'dark'; } catch (e) {}
+        applyTheme(savedTheme);
+
+        if (themeToggle) {
+            themeToggle.addEventListener('click', () => {
+                const current = root.getAttribute('data-theme');
+                applyTheme(current === 'dark' ? 'light' : 'dark');
+            });
+        }
+
+        function pad(n) { return n.toString().padStart(2, '0'); }
+
+        function updateClock() {
+            const now = new Date();
+            const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+            const dateStr = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+            if (liveClock) liveClock.textContent = timeStr;
+            if (liveDate) liveDate.textContent = dateStr;
+            if (miniTime) miniTime.textContent = timeStr;
+
+            const hour = now.getHours();
+            let greeting = 'Good evening';
+            let sub = "Let's find some blocks tonight.";
+            if (hour < 5) { greeting = 'Still up?'; sub = 'The night shift earns CC too.'; }
+            else if (hour < 12) { greeting = 'Good morning'; sub = "Let's find some blocks today."; }
+            else if (hour < 17) { greeting = 'Good afternoon'; sub = 'Keep those hashes flowing.'; }
+            else if (hour < 21) { greeting = 'Good evening'; sub = 'Prime time for mining.'; }
+            if (greetingText) greetingText.textContent = `${greeting}, miner 👋`;
+            if (greetingSub) greetingSub.textContent = sub;
+        }
+
+        updateClock();
+        setInterval(updateClock, 1000);
+    })();
+</script>
 
 <script>
     (function() {
