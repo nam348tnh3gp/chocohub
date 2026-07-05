@@ -113,11 +113,42 @@ function getLastBlock() {
   return db.getLastBlock();
 }
 
+// ─── Helper: parse SQLite datetime('now') or ISO string ──
+function parseFlexibleDate(str) {
+  if (!str) return 0;
+  const iso = str.includes('T') ? str : str.replace(' ', 'T');
+  return new Date(iso.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(iso) ? iso : iso + 'Z').getTime() / 1000;
+}
+
+// ─── Decay difficulty when a job times out without a solve ──
+function decayWorkerDifficulty(workerName, missedSeconds) {
+  const currentDiff = db.getWorkerDifficulty(workerName) || INITIAL_DIFFICULTY;
+  const overrun = missedSeconds / TARGET_SOLVE_TIME;
+  let newDiff = currentDiff / Math.max(1.1, Math.min(overrun, 4));
+  const maxChange = currentDiff * 0.5;
+  newDiff = Math.max(currentDiff - maxChange, newDiff);
+  newDiff = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, newDiff));
+  newDiff = Math.round(newDiff * 10) / 10;
+  db.setWorkerDifficulty(workerName, newDiff, Date.now());
+  console.log(`⏱️ ${workerName} timed out (${missedSeconds.toFixed(1)}s, no solve): difficulty ${currentDiff.toFixed(1)} → ${newDiff.toFixed(1)}`);
+}
+
 // ─── Lấy job cho worker (tạo mới nếu chưa có) ─
 function getJobForWorker(workerName, instanceId, deviceType) {
   // Per-instance difficulty key so different instances of the same user
   // get independent difficulty tracking.
   const diffKey = instanceId ? workerName + ':' + instanceId : workerName;
+
+  // 🆕 Stale-job decay: if the current active job has expired without a solve,
+  // decay difficulty before cleaning up so the next job is easier.
+  const staleJob = db.getJobForWorker(diffKey);
+  if (staleJob) {
+    const createdTs = parseFlexibleDate(staleJob.created_at);
+    const ageSeconds = (Date.now() / 1000) - createdTs;
+    if (ageSeconds > JOB_EXPIRE_SECONDS) {
+      decayWorkerDifficulty(diffKey, ageSeconds);
+    }
+  }
 
   // Dọn dẹp job hết hạn
   db.cleanupExpiredJobs(JOB_EXPIRE_SECONDS);
@@ -299,16 +330,9 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
 
   const timestamp = Math.floor(Date.now() / 1000);
 
-  // Helper: parse SQLite datetime('now') or ISO string correctly
-  function parseJobDate(str) {
-    if (!str) return 0;
-    const iso = str.includes('T') ? str : str.replace(' ', 'T');
-    return new Date(iso.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(iso) ? iso : iso + 'Z').getTime() / 1000;
-  }
-
   // 🆕 Hashrate validation (cross-check reported hashrate vs actual solve time)
   if (hashrateReported && hashrateReported > 0) {
-    const jobCreatedTimestamp = parseJobDate(job.created_at);
+    const jobCreatedTimestamp = parseFlexibleDate(job.created_at);
     const actualSolveTime = timestamp - jobCreatedTimestamp;
     const expectedSolveTime = job.difficulty / hashrateReported;
     const ratio = actualSolveTime / expectedSolveTime;
@@ -405,7 +429,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   db.deleteJobsForWorker(diffKey, jobId); // belt-and-suspenders: clean up winner's own leftovers
 
   // Điều chỉnh difficulty cho instance dựa trên thời gian giải
-  const solveTime = (timestamp - parseJobDate(job.created_at));
+  const solveTime = (timestamp - parseFlexibleDate(job.created_at));
   if (solveTime > 0) {
     adjustWorkerDifficulty(diffKey, solveTime);
   }
