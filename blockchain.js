@@ -12,6 +12,68 @@ const MAX_DIFFICULTY = 1000000;
 const DIFFICULTY_ADJUSTMENT_FACTOR = 0.5;       // hệ số điều chỉnh (0.5 = trung bình)
 const TARGET_SOLVE_TIME = 10;                   // giây mong muốn (cho per‑worker điều chỉnh)
 
+// ─── 🆕 TIER CONFIGURATION (replaces DEVICE_REWARD_MULTIPLIERS) ──
+// Tier determines: reward multiplier + difficulty cap
+// Embedded devices get higher multipliers (fair reward for lower power)
+// GPU multiplier changed from 0.5x to 1.0x (difficulty adjustment already handles speed)
+const TIER_CONFIG = {
+  embedded_avr: {
+    multiplier: 3.5,
+    maxDifficulty: 5000,
+    description: 'Arduino, AVR microcontrollers (~400 H/s)'
+  },
+  embedded_arm: {
+    multiplier: 3.0,
+    maxDifficulty: 50000,
+    description: 'Raspberry Pi Pico, RP2040 (~5 kH/s)'
+  },
+  embedded_esp: {
+    multiplier: 2.5,
+    maxDifficulty: 100000,
+    description: 'ESP8266, NodeMCU (~66 kH/s)'
+  },
+  embedded_esp32: {
+    multiplier: 2.0,
+    maxDifficulty: 500000,
+    description: 'ESP32, ESP32-S2, ESP32-C3 (~170 kH/s)'
+  },
+  mobile: {
+    multiplier: 1.8,
+    maxDifficulty: 5000000,
+    description: 'Android, iOS (~500 kH/s)'
+  },
+  cpu: {
+    multiplier: 1.0,
+    maxDifficulty: 1000000000,
+    description: 'Desktop CPU, web miner (~1-10 MH/s)'
+  },
+  gpu: {
+    multiplier: 1.0,
+    maxDifficulty: 1000000000,
+    description: 'GPU mining (~10-500 MH/s)'
+  }
+};
+
+// ─── Old device multipliers (deprecated, kept for backward compatibility) ──
+const DEVICE_REWARD_MULTIPLIERS = {
+  'esp32': 3.0,
+  'esp8266': 3.0,
+  'arduino': 3.5,
+  'rp2040': 3.5,
+  'pico': 3.5,
+  'mobile': 2.0,
+  'android': 2.0,
+  'ios': 2.0,
+  'web_miner': 1.0,
+  'cpu': 1.0,
+  'cpu_miner': 1.0,
+  'gpu': 1.0, // Changed from 0.5 to 1.0
+  'gpu_miner': 1.0,
+  'nvidia': 1.0,
+  'amd': 1.0,
+  'default': 1.0
+};
+
 // ─── Cấu hình mempool ────────────────────────────
 const MAX_MEMPOOL_PER_BLOCK = 50;                // số giao dịch tối đa mỗi block
 const MEMPOOL_HOLDING_ACCOUNT = 'mempool_holding';
@@ -67,6 +129,10 @@ function getJobForWorker(workerName) {
   const height = lastBlock ? lastBlock.height + 1 : 0;
   const prevHash = lastBlock ? lastBlock.hash : '0'.repeat(64);
 
+  // 🆕 Lấy tier của worker (mặc định 'cpu' nếu chưa đăng ký)
+  const tier = db.getWorkerTier(workerName);
+  const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cpu;
+
   // Lấy difficulty riêng của worker (nếu chưa có, tạo mới)
   let diff = db.getWorkerDifficulty(workerName);
   if (diff === null) {
@@ -74,11 +140,12 @@ function getJobForWorker(workerName) {
     db.setWorkerDifficulty(workerName, diff, Date.now());
   }
 
-  // Đảm bảo diff trong khoảng cho phép
-  diff = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, diff));
+  // 🆕 Đảm bảo diff trong khoảng cho phép VÀ không vượt quá max của tier
+  diff = Math.max(MIN_DIFFICULTY, Math.min(tierConfig.maxDifficulty, diff));
 
   const targetHex = difficultyToTarget(diff);
   const reward = REWARD_PER_BLOCK;
+  const multiplier = tierConfig.multiplier;
 
   const jobId = 'job_' + crypto.randomBytes(6).toString('hex');
   db.createJob({
@@ -88,7 +155,9 @@ function getJobForWorker(workerName) {
     difficulty: diff,
     target_hex: targetHex,
     reward: reward,
-    assigned_to: workerName
+    assigned_to: workerName,
+    tier: tier,
+    reward_multiplier: multiplier
   });
 
   const newJob = db.getActiveJob(jobId);
@@ -105,7 +174,9 @@ function mapJob(job) {
     difficulty: job.difficulty,
     target_hex: job.target_hex,
     reward: job.reward,
-    assigned_to: job.assigned_to
+    assigned_to: job.assigned_to,
+    tier: job.tier || 'cpu',
+    reward_multiplier: job.reward_multiplier || 1.0
   };
 }
 
@@ -174,14 +245,27 @@ function processMempoolForBlock(blockHeight) {
   return { processed: processed, totalFees: totalFees };
 }
 
+// ─── Helper: multiplicador por tipo de dispositivo ─
+function getDeviceMultiplier(deviceType) {
+  const key = (deviceType || 'default').toLowerCase().trim();
+  return DEVICE_REWARD_MULTIPLIERS[key] || DEVICE_REWARD_MULTIPLIERS['default'];
+}
+
 // ─── Submit solution ────────────────────────────
-function submitSolution(jobId, nonce, workerName, deviceType) {
+function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported) {
   const job = db.getActiveJob(jobId);
   if (!job) {
     throw new Error('Job not found or already solved');
   }
   if (job.assigned_to && job.assigned_to !== workerName) {
     throw new Error('This job is assigned to another worker');
+  }
+
+  // 🆕 Check if worker is suspended
+  const flags = db.getWorkerFlags(workerName);
+  if (flags && flags.suspended) {
+    console.warn(`🚫 Suspended worker ${workerName} attempted to submit solution`);
+    throw new Error('Worker suspended for suspicious behavior. Contact admin to appeal.');
   }
 
   // Kiểm tra nonce
@@ -192,8 +276,70 @@ function submitSolution(jobId, nonce, workerName, deviceType) {
     return { status: 'error', reason: `Invalid nonce: hash ${hashHex.substring(0,12)}... >= target` };
   }
 
-  // Tạo block (chưa có tx_count và total_fees)
   const timestamp = Math.floor(Date.now() / 1000);
+
+  // Helper: parse SQLite datetime('now') or ISO string correctly
+  function parseJobDate(str) {
+    if (!str) return 0;
+    const iso = str.includes('T') ? str : str.replace(' ', 'T');
+    return new Date(iso.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(iso) ? iso : iso + 'Z').getTime() / 1000;
+  }
+
+  // 🆕 Hashrate validation (cross-check reported hashrate vs actual solve time)
+  if (hashrateReported && hashrateReported > 0) {
+    const jobCreatedTimestamp = parseJobDate(job.created_at);
+    const actualSolveTime = timestamp - jobCreatedTimestamp;
+    const expectedSolveTime = job.difficulty / hashrateReported;
+    const ratio = actualSolveTime / expectedSolveTime;
+
+    // If solved 20x faster than hashrate implies → suspicious
+    if (ratio < 0.05 && actualSolveTime > 0.1) {
+      const reason = `Solved in ${actualSolveTime.toFixed(1)}s but reported hashrate ${hashrateReported} H/s implies ${expectedSolveTime.toFixed(1)}s (ratio ${ratio.toFixed(3)})`;
+      db.addWorkerWarning(workerName, reason);
+      console.warn(`⚠️ Suspicious solve: ${workerName} - ${reason}`);
+
+      // Check if this warning caused suspension
+      const updatedFlags = db.getWorkerFlags(workerName);
+      if (updatedFlags.suspended) {
+        console.warn(`🚫 Worker ${workerName} auto-suspended after hashrate validation failure`);
+        return {
+          status: 'error',
+          reason: 'Worker suspended due to suspicious behavior (3 warnings in 24h). Solution rejected.',
+          warnings: updatedFlags.warning_count
+        };
+      }
+    }
+  }
+
+  // 🆕 Read tier and multiplier from job record (immutable, server-controlled)
+  const tier = job.tier || 'cpu';
+  const tierMultiplier = job.reward_multiplier || 1.0;
+
+  // ─── Device multiplier: use tier from job, legacy fallback for old jobs ──
+  let deviceMultiplier = tierMultiplier;
+  if (!job.tier) {
+    deviceMultiplier = getDeviceMultiplier(deviceType);
+    console.log(`⚠️ Legacy job ${jobId} using device_type multiplier: ${deviceMultiplier}x`);
+  }
+
+  // 🆕 Reward split: 5% to PoS pool (flat, always), 95% to miner (before boost)
+  const POS_REWARD_SHARE = 0.05;
+  const MINER_REWARD_SHARE = 0.95;
+  const posContribution = parseFloat((REWARD_PER_BLOCK * POS_REWARD_SHARE).toFixed(8)); // always 0.0025 CC
+  const minerBase = parseFloat((REWARD_PER_BLOCK * MINER_REWARD_SHARE).toFixed(8));     // always 0.0475 CC
+
+  // miner reward = 0.0475 × tier_multiplier
+  const deviceReward = parseFloat((minerBase * deviceMultiplier).toFixed(8));
+
+  // ─── Mining Boost: multiplicador 1.3x se ativo ──
+  const boostMultiplier = db.getMiningBoostMultiplier(workerName);
+  const finalReward = parseFloat((deviceReward * boostMultiplier).toFixed(8));
+  const bonusReward = parseFloat((finalReward - deviceReward).toFixed(8));
+
+  // 🆕 Credit PoS pool
+  db.addPosRewardPool(posContribution);
+
+  // Tạo block
   const newBlock = {
     height: job.height,
     hash: hashHex,
@@ -201,26 +347,23 @@ function submitSolution(jobId, nonce, workerName, deviceType) {
     miner: workerName,
     nonce: String(nonce),
     timestamp: timestamp,
-    reward: job.reward,
+    reward: finalReward,
     difficulty: job.difficulty,
     tx_count: 0,
-    total_fees: 0
+    total_fees: 0,
+    device_type: deviceType || 'unknown',
+    tier: tier,           // 🆕 server-controlled tier
+    pos_contribution: posContribution  // 🆕 flat PoS contribution
   };
 
   // Lưu block
   db.insertBlock(newBlock);
 
-  // ─── Mining Boost: multiplicador 1.3x se ativo ──
-  const boostMultiplier = db.getMiningBoostMultiplier(workerName);
-  const boostedReward = parseFloat((job.reward * boostMultiplier).toFixed(8));
-  const bonusReward = parseFloat((boostedReward - job.reward).toFixed(8));
+  // Pay miner (95% × multiplier × boost)
+  db.updateBalance(workerName, finalReward);
 
-  // Thưởng cho miner (com boost se ativo)
-  db.updateBalance(workerName, boostedReward);
-
-  // Se houve boost, registra no log e reabastece o pool
   if (bonusReward > 0) {
-    console.log(`⚡ Mining boost active for ${workerName}: ${job.reward} → ${boostedReward} CC (${boostMultiplier}x)`);
+    console.log(`⚡ Mining boost active for ${workerName}: ${deviceReward} → ${finalReward} CC (${boostMultiplier}x)`);
   }
 
   // ─── Xử lý mempool ──────────────────────────────
@@ -238,23 +381,33 @@ function submitSolution(jobId, nonce, workerName, deviceType) {
   db.deleteJobsForWorker(workerName, jobId);
 
   // Điều chỉnh difficulty cho worker dựa trên thời gian giải
-  const solveTime = (timestamp - new Date(job.created_at).getTime() / 1000);
+  const solveTime = (timestamp - parseJobDate(job.created_at));
   if (solveTime > 0) {
     adjustWorkerDifficulty(workerName, solveTime);
   }
 
   // Gửi thông báo (webhook)
-  sendMinerWebhook(workerName, newBlock.height, deviceType);
+  sendMinerWebhook(workerName, newBlock.height, tier, finalReward);
 
-  console.log(`⛏️ Block ${newBlock.height} solved by ${workerName} (${deviceType}) reward ${boostedReward} CC (boost: ${boostMultiplier}x), ${mempoolResult.processed} txs processed, fees ${mempoolResult.totalFees} CC`);
+  const logParts = [
+    `⛏️ Block ${newBlock.height} solved by ${workerName}`,
+    `tier: ${tier} (${tierMultiplier}x)`,
+    `PoS: ${posContribution} CC · miner: ${finalReward} CC`
+  ];
+  if (boostMultiplier > 1) logParts.push(`boost: ${boostMultiplier}x`);
+  logParts.push(`${mempoolResult.processed} txs, fees ${mempoolResult.totalFees} CC`);
+  console.log(logParts.join(' · '));
 
   return {
     status: 'success',
-    message: `Block ${newBlock.height} solved! Reward: ${boostedReward} CC${boostMultiplier > 1 ? ` (${boostMultiplier}x boost)` : ''}, ${mempoolResult.processed} transactions processed`,
-    reward: boostedReward,
+    message: `Block ${newBlock.height} solved! Miner reward: ${finalReward} CC (${tierMultiplier}x ${tier})${boostMultiplier > 1 ? ` (${boostMultiplier}x boost)` : ''}. PoS pool +${posContribution} CC. ${mempoolResult.processed} transactions processed`,
+    reward: finalReward,
+    pos_contribution: posContribution,
     block_hash: hashHex,
     tx_count: mempoolResult.processed,
     total_fees: mempoolResult.totalFees,
+    tier: tier,
+    tier_multiplier: tierMultiplier,
     boost_multiplier: boostMultiplier
   };
 }
@@ -278,7 +431,7 @@ function adjustWorkerDifficulty(workerName, solveTime) {
 }
 
 // ─── Webhook ─────────────────────────────────────
-async function sendMinerWebhook(worker, height, device) {
+async function sendMinerWebhook(worker, height, device, reward) {
   try {
     await fetch(process.env.DISCORD_WEBHOOK_URL, {
       method: 'POST',
@@ -286,7 +439,7 @@ async function sendMinerWebhook(worker, height, device) {
       body: JSON.stringify({
         embeds: [{
           title: "⛏️ New Block Mined!",
-          description: `Block **#${height}** was solved.\n\n**Worker:** \`${worker}\`\n**Device:** \`${device}\`\n**Reward:** 0.05 CC`,
+          description: `Block **#${height}** was solved.\n\n**Worker:** \`${worker}\`\n**Device:** \`${device}\`\n**Reward:** ${reward.toFixed(4)} CC`,
           color: 0xf1c40f,
           timestamp: new Date().toISOString(),
           footer: { text: "ChocoHub PoW" }
@@ -346,6 +499,8 @@ initBlockchain();
 
 // ─── Export các hàm ─────────────────────────────
 module.exports = {
+  // Config (for other modules to read)
+  TIER_CONFIG,
   // PoW mới
   getLastBlock: getLastBlock,
   getJobForWorker: getJobForWorker,

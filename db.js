@@ -104,7 +104,8 @@ db.exec(`
     reward REAL NOT NULL,
     difficulty REAL NOT NULL,
     tx_count INTEGER DEFAULT 0,
-    total_fees REAL DEFAULT 0
+    total_fees REAL DEFAULT 0,
+    device_type TEXT DEFAULT 'unknown'
   );
 
   CREATE TABLE IF NOT EXISTS mining_jobs (
@@ -517,11 +518,11 @@ function getBlockByHash(hash) {
 }
 
 function insertBlock(block) {
-  const { height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count, total_fees } = block;
+  const { height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count, total_fees, device_type, tier, pos_contribution } = block;
   db.prepare(`
-    INSERT INTO blocks (height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count, total_fees)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count || 0, total_fees || 0);
+    INSERT INTO blocks (height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count, total_fees, device_type, tier, pos_contribution)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count || 0, total_fees || 0, device_type || 'unknown', tier || 'unknown', pos_contribution || 0);
 }
 
 function updateBlockFees(height, totalFees) {
@@ -538,11 +539,11 @@ function getJobForWorker(workerName) {
 }
 
 function createJob(job) {
-  const { id, height, prev_hash, difficulty, target_hex, reward, assigned_to } = job;
+  const { id, height, prev_hash, difficulty, target_hex, reward, assigned_to, tier, reward_multiplier } = job;
   db.prepare(`
-    INSERT INTO mining_jobs (id, height, prev_hash, difficulty, target_hex, reward, assigned_to, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
-  `).run(id, height, prev_hash, difficulty, target_hex, reward, assigned_to);
+    INSERT INTO mining_jobs (id, height, prev_hash, difficulty, target_hex, reward, assigned_to, tier, reward_multiplier, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+  `).run(id, height, prev_hash, difficulty, target_hex, reward, assigned_to, tier || 'cpu', reward_multiplier || 1.0);
 }
 
 function markJobSolved(jobId) {
@@ -802,11 +803,211 @@ function setUserBanned(username, banned) {
   console.log(`🔒 User ${username} ${banned ? 'banned' : 'unbanned'}`);
 }
 
-// Gọi ensureBannedColumn khi module load
+// Garantir coluna device_type na tabela blocks (para DBs existentes)
+function ensureBlockDeviceTypeColumn() {
+  try {
+    db.prepare("ALTER TABLE blocks ADD COLUMN device_type TEXT DEFAULT 'unknown'").run();
+    console.log('✅ device_type column added to blocks table');
+  } catch (e) {
+    if (!e.message.includes('duplicate column name')) {
+      console.warn('Could not ensure device_type column:', e.message);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// 🆕 SAFE COLUMN ADDITION HELPER
+// ═══════════════════════════════════════════════════
+function ensureColumn(tableName, columnName, columnDef) {
+  try {
+    const check = db.prepare(`PRAGMA table_info(${tableName})`).all();
+    const exists = check.some(col => col.name === columnName);
+    if (!exists) {
+      db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDef}`);
+      console.log(`✅ Added column ${columnName} to ${tableName}`);
+    }
+  } catch (e) {
+    if (!e.message.includes('duplicate column')) {
+      console.warn(`⚠️ Could not add ${columnName} to ${tableName}:`, e.message);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// 🆕 TIER & FLAG MANAGEMENT FUNCTIONS
+// ═══════════════════════════════════════════════════
+
+function getWorkerTier(workerName) {
+  const row = db.prepare('SELECT tier FROM worker_difficulty WHERE worker_name = ?').get(workerName);
+  return row ? row.tier : 'cpu'; // default to cpu if not found
+}
+
+function setWorkerTier(workerName, tier) {
+  const validTiers = ['embedded_avr', 'embedded_arm', 'embedded_esp', 'embedded_esp32', 'mobile', 'cpu', 'gpu'];
+  if (!validTiers.includes(tier)) {
+    throw new Error(`Invalid tier: ${tier}`);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const existing = db.prepare('SELECT tier_registered_at FROM worker_difficulty WHERE worker_name = ?').get(workerName);
+  
+  if (existing && existing.tier_registered_at > 0) {
+    const elapsed = now - existing.tier_registered_at;
+    const COOLDOWN = 24 * 3600; // 24 hours
+    if (elapsed < COOLDOWN) {
+      const remaining = Math.ceil((COOLDOWN - elapsed) / 3600);
+      throw new Error(`Tier cooldown active. Wait ${remaining} hours before changing tier again.`);
+    }
+  }
+  
+  db.prepare(`
+    INSERT INTO worker_difficulty (worker_name, tier, tier_registered_at, tier_changes, difficulty, last_solve_time, updated_at)
+    VALUES (?, ?, ?, 1, 10, 0, datetime('now'))
+    ON CONFLICT(worker_name) DO UPDATE SET
+      tier = excluded.tier,
+      tier_registered_at = excluded.tier_registered_at,
+      tier_changes = tier_changes + 1,
+      updated_at = datetime('now')
+  `).run(workerName, tier, now);
+  
+  console.log(`📋 Worker ${workerName} tier set to ${tier}`);
+}
+
+function getWorkerFlags(workerName) {
+  const row = db.prepare('SELECT * FROM worker_flags WHERE worker_name = ?').get(workerName);
+  if (!row) return { warning_count: 0, suspended: false };
+  
+  // Parse warnings JSON
+  try {
+    row.warnings = JSON.parse(row.warnings_json || '[]');
+  } catch (e) {
+    row.warnings = [];
+  }
+  row.suspended = Boolean(row.suspended);
+  return row;
+}
+
+function addWorkerWarning(workerName, reason) {
+  const now = Math.floor(Date.now() / 1000);
+  const WINDOW = 24 * 3600; // 24 hours
+  const existing = getWorkerFlags(workerName);
+  let warnings = existing.warnings || [];
+  
+  // Remove warnings older than 24h
+  warnings = warnings.filter(w => (now - w.timestamp) < WINDOW);
+  
+  // Add new warning
+  warnings.push({ timestamp: now, reason });
+  const newCount = warnings.length;
+  const shouldSuspend = newCount >= 3;
+  
+  db.prepare(`
+    INSERT INTO worker_flags (worker_name, warning_count, last_warning_at, warnings_json, suspended, suspended_at, suspension_reason)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(worker_name) DO UPDATE SET
+      warning_count = excluded.warning_count,
+      last_warning_at = excluded.last_warning_at,
+      warnings_json = excluded.warnings_json,
+      suspended = excluded.suspended,
+      suspended_at = excluded.suspended_at,
+      suspension_reason = excluded.suspension_reason
+  `).run(
+    workerName,
+    newCount,
+    now,
+    JSON.stringify(warnings),
+    shouldSuspend ? 1 : 0,
+    shouldSuspend ? now : (existing.suspended_at || 0),
+    shouldSuspend ? `3 warnings in 24h` : (existing.suspension_reason || null)
+  );
+  
+  if (shouldSuspend && !existing.suspended) {
+    console.warn(`🚫 Worker ${workerName} suspended after 3 warnings`);
+  }
+  
+  return { warning_count: newCount, suspended: shouldSuspend };
+}
+
+function suspendWorker(workerName, reason) {
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(`
+    INSERT INTO worker_flags (worker_name, suspended, suspended_at, suspension_reason)
+    VALUES (?, 1, ?, ?)
+    ON CONFLICT(worker_name) DO UPDATE SET
+      suspended = 1,
+      suspended_at = excluded.suspended_at,
+      suspension_reason = excluded.suspension_reason
+  `).run(workerName, now, reason);
+  console.log(`🚫 Worker ${workerName} manually suspended: ${reason}`);
+}
+
+function clearWorkerSuspension(workerName, adminUsername) {
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(`
+    UPDATE worker_flags
+    SET suspended = 0,
+        warning_count = 0,
+        warnings_json = '[]',
+        cleared_by = ?,
+        cleared_at = ?
+    WHERE worker_name = ?
+  `).run(adminUsername, now, workerName);
+  console.log(`✅ Worker ${workerName} suspension cleared by ${adminUsername}`);
+}
+
+function getFlaggedWorkers() {
+  return db.prepare(`
+    SELECT worker_name, warning_count, suspended, suspended_at, suspension_reason, warnings_json
+    FROM worker_flags
+    WHERE warning_count > 0 OR suspended = 1
+    ORDER BY suspended DESC, warning_count DESC
+  `).all().map(row => {
+    try {
+      row.warnings = JSON.parse(row.warnings_json || '[]');
+    } catch (e) {
+      row.warnings = [];
+    }
+    row.suspended = Boolean(row.suspended);
+    delete row.warnings_json;
+    return row;
+  });
+}
+
+// Gọi ensureBannedColumn e ensureBlockDeviceTypeColumn quando module load
 ensureBannedColumn();
+ensureBlockDeviceTypeColumn();
+
+// ═══════════════════════════════════════════════════
+// 🆕 EXTEND EXISTING TABLES WITH NEW COLUMNS
+// ═══════════════════════════════════════════════════
+ensureColumn('worker_difficulty', 'tier', 'TEXT DEFAULT "cpu"');
+ensureColumn('worker_difficulty', 'tier_registered_at', 'INTEGER DEFAULT 0');
+ensureColumn('worker_difficulty', 'tier_changes', 'INTEGER DEFAULT 0');
+ensureColumn('mining_jobs', 'tier', 'TEXT DEFAULT "cpu"');
+ensureColumn('mining_jobs', 'reward_multiplier', 'REAL DEFAULT 1.0');
+ensureColumn('blocks', 'tier', 'TEXT DEFAULT "unknown"');
+ensureColumn('blocks', 'pos_contribution', 'REAL DEFAULT 0');
+
+// ═══════════════════════════════════════════════════
+// 🆕 CREATE WORKER_FLAGS TABLE
+// ═══════════════════════════════════════════════════
+db.exec(`
+  CREATE TABLE IF NOT EXISTS worker_flags (
+    worker_name TEXT PRIMARY KEY,
+    warning_count INTEGER DEFAULT 0,
+    last_warning_at INTEGER DEFAULT 0,
+    warnings_json TEXT DEFAULT '[]',
+    suspended INTEGER DEFAULT 0,
+    suspended_at INTEGER DEFAULT 0,
+    suspension_reason TEXT,
+    cleared_by TEXT,
+    cleared_at INTEGER DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_worker_flags_suspended ON worker_flags(suspended);
+`);
 
 // ─── Exports ─────────────────────────────────────
 module.exports = {
+  _db: db,
   authenticate,
   getUser,
   updateBalance,
@@ -877,5 +1078,14 @@ module.exports = {
   // Admin functions
   ensureBannedColumn,
   deleteUser,
-  setUserBanned
+  setUserBanned,
+  // 🆕 Tier management
+  getWorkerTier,
+  setWorkerTier,
+  // 🆕 Worker flags
+  getWorkerFlags,
+  addWorkerWarning,
+  suspendWorker,
+  clearWorkerSuspension,
+  getFlaggedWorkers
 };

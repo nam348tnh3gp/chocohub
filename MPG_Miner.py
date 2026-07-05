@@ -422,7 +422,8 @@ class ChocoMiner:
         self.session.headers.update({"User-Agent": "ChocoHub-Miner/v2-GPU"})
         self.found_event = threading.Event()
         self.solution = None
-        
+        self.token = None  # 🆕 JWT token
+
         self.gpu_miner = None
         if self.args.gpu and _gpu_available:
             self.gpu_miner = GPUMiner(cl)
@@ -617,11 +618,61 @@ class ChocoMiner:
             with self.stats_lock:
                 self.stats["hashes"] += int(hashrate * elapsed) if hashrate > 0 else 0
 
-    def submit(self, bid, nonce):
+    def authenticate(self):
+        """Authenticate with server and store JWT token."""
+        try:
+            resp = self.session.post(
+                f"{self.args.server}/auth",
+                json={"username": self.args.worker, "pin": self.args.pin},
+                timeout=10
+            )
+            data = resp.json()
+            if resp.status_code == 200 and data.get("status") == "success":
+                self.token = data.get("token")
+                self.session.headers.update({"Authorization": f"Bearer {self.token}"})
+                self.log("OK", f"Authenticated as {ANSI.CYN}{self.args.worker}{ANSI.RST}", direct=True)
+                return True
+            else:
+                self.log("ERR", f"Auth failed: {data.get('message', 'Unknown error')}", direct=True)
+                return False
+        except Exception as e:
+            self.log("ERR", f"Auth error: {e}", direct=True)
+            return False
+
+    def register_tier(self):
+        """Register the worker's device tier once (with 24h cooldown on server side)."""
+        if not self.token:
+            return
+        tier = getattr(self.args, "tier", None) or "gpu"
+        try:
+            resp = self.session.post(
+                f"{self.args.server}/mining/register-tier",
+                json={"tier": tier},
+                timeout=10
+            )
+            data = resp.json()
+            if resp.status_code == 200 and data.get("status") == "success":
+                self.log("OK", (
+                    f"Tier registered: {ANSI.YEL}{data.get('tier')}{ANSI.RST}  "
+                    f"multiplier={ANSI.GRN}{data.get('multiplier')}x{ANSI.RST}  "
+                    f"max_diff={data.get('max_difficulty')}"
+                ), direct=True)
+            else:
+                # Cooldown or same tier — not fatal
+                self.log("INFO", f"Tier: {data.get('message', tier)}", direct=True)
+        except Exception as e:
+            self.log("WARN", f"Tier registration skipped: {e}", direct=True)
+
+    def submit(self, bid, nonce, hashrate=0):
+        """Submit a solved nonce. Requires JWT (set in session headers)."""
         try:
             r = self.session.post(
                 f"{self.args.server}/submit_solution",
-                json={"bounty_id": bid, "nonce": nonce, "worker_name": self.args.worker, "device_type": "gpu_miner"},
+                json={
+                    "bounty_id": bid,
+                    "nonce": nonce,
+                    "hashrate_reported": int(hashrate)
+                },
                 timeout=10
             )
             return r.json()
@@ -637,6 +688,14 @@ class ChocoMiner:
         except:
             self.log("ERR", "Server unreachable", direct=True)
             return
+
+        # 🆕 Authenticate and get JWT
+        if not self.authenticate():
+            self.log("ERR", "Cannot mine without authentication. Check --pin.", direct=True)
+            return
+
+        # 🆕 Register tier (ignored if cooldown active — server handles it)
+        self.register_tier()
 
         threading.Thread(target=self.display_loop, daemon=True).start()
         threading.Thread(target=self.periodic_report, daemon=True).start()
@@ -666,14 +725,28 @@ class ChocoMiner:
                 bid, nonce, hx = self.solution
                 self.solution = None
                 self.found_event.clear()
-                self.log("WIN", f"Solution found! Nonce: {nonce}")
-                resp = self.submit(bid, nonce)
+
+                # 🆕 Calculate hashrate to report
+                elapsed = time.time() - self.stats["start_time"]
+                total_hashes = self.stats["hashes"]
+                current_hashrate = int(total_hashes / elapsed) if elapsed > 0 else 0
+
+                self.log("WIN", f"Solution found! Nonce: {nonce}  HR: {self.hr_str()}")
+                resp = self.submit(bid, nonce, hashrate=current_hashrate)
                 if resp.get("status") == "success":
                     with self.stats_lock:
                         self.stats["blocks_found"] += 1
-                    self.log("OK", f"Block accepted! +{resp.get('reward','?')} CC")
+                    reward = resp.get('reward', '?')
+                    tier = resp.get('tier', '')
+                    mult = resp.get('tier_multiplier', '')
+                    self.log("OK", f"Block accepted! +{reward} CC  [{tier} {mult}x]")
                 else:
-                    self.log("WARN", f"Rejected: {resp.get('reason', resp.get('message'))}")
+                    reason = resp.get('reason', resp.get('message', 'Unknown'))
+                    self.log("WARN", f"Rejected: {reason}")
+                    # 🆕 Re-authenticate if token expired
+                    if 'token' in str(reason).lower() or resp.get('message') == 'Missing or invalid token':
+                        self.log("INFO", "Token expired — re-authenticating...", direct=True)
+                        self.authenticate()
                 self.stats["current_job"] = None
 
     def stop(self):
@@ -700,10 +773,20 @@ def interactive_setup():
             break
         print(f"  {ANSI.RED}Please enter worker name!{ANSI.RST}")
 
-    print(f"\n  {ANSI.CYN}[?] Select device type:{ANSI.RST}")
-    print(f"     1) {ANSI.BLU}Mobile{ANSI.RST}")
-    print(f"     2) {ANSI.GRN}PC{ANSI.RST}")
-    dev_choice = input(f"  {ANSI.YEL}➤ Choice (1/2){ANSI.RST}: ").strip()
+    # 🆕 PIN for JWT auth
+    import getpass
+    pin_input = getpass.getpass(f"  {ANSI.YEL}➤ Account PIN{ANSI.RST}: ").strip()
+    if not pin_input:
+        print(f"  {ANSI.RED}PIN is required for authentication!{ANSI.RST}")
+        sys.exit(1)
+
+    print(f"\n  {ANSI.CYN}[?] Select device type (for tier registration):{ANSI.RST}")
+    print(f"     1) {ANSI.BLU}Mobile (Android/iOS){ANSI.RST}                  — 1.8x  multiplier")
+    print(f"     2) {ANSI.GRN}CPU (desktop/laptop){ANSI.RST}                  — 1.0x  multiplier")
+    print(f"     3) {ANSI.MAG}GPU (Nvidia/AMD){ANSI.RST}                      — 1.0x  multiplier")
+    dev_choice = input(f"  {ANSI.YEL}➤ Choice (1/2/3){ANSI.RST}: ").strip()
+    tier_map = {"1": "mobile", "2": "cpu", "3": "gpu"}
+    selected_tier = tier_map.get(dev_choice, "gpu")
     is_mobile = (dev_choice == "1")
 
     use_gpu = False
@@ -734,11 +817,14 @@ def interactive_setup():
 
     print(f"\n{ANSI.GRN}✓ Setup complete!{ANSI.RST}")
     time.sleep(1.5)
+    return pin_input, selected_tier
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="ChocoHub Python Miner with GPU support")
     parser.add_argument("--server", default=DEFAULT_SERVER, help=f"Server URL (default: {DEFAULT_SERVER})")
     parser.add_argument("--worker", default=DEFAULT_WORKER, help="Worker name (login username)")
+    parser.add_argument("--pin", default=None, help="Account PIN for JWT authentication (required)")
+    parser.add_argument("--tier", default="gpu", help="Device tier: embedded_avr, embedded_arm, embedded_esp, embedded_esp32, mobile, cpu, gpu (default: gpu)")
     parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="Number of CPU threads")
     parser.add_argument("--gpu", action="store_true", default=DEFAULT_GPU, help="Enable GPU mining (requires OpenCL)")
     parser.add_argument("--poll", type=int, default=DEFAULT_POLL, help="Job fetch interval in seconds")
@@ -758,10 +844,13 @@ def main():
     DEFAULT_POLL    = config.get("poll", DEFAULT_POLL)
 
     args_passed = sys.argv[1:]
-    has_essential = any(x in args_passed for x in ['--worker', '--threads', '--gpu', '--poll'])
+    has_essential = any(x in args_passed for x in ['--worker', '--threads', '--gpu', '--poll', '--pin'])
+
+    pin_from_setup = None
+    tier_from_setup = "gpu"
 
     if not has_essential and sys.stdin.isatty():
-        interactive_setup()
+        pin_from_setup, tier_from_setup = interactive_setup()
     else:
         if DEFAULT_WORKER is None:
             if sys.stdin.isatty():
@@ -776,6 +865,21 @@ def main():
         print(f"{ANSI.RED}Error: No worker name. Use --worker or run without parameters.{ANSI.RST}")
         sys.exit(1)
 
+    # 🆕 Resolve PIN: CLI > interactive > prompt
+    if args.pin is None:
+        if pin_from_setup:
+            args.pin = pin_from_setup
+        elif sys.stdin.isatty():
+            import getpass
+            args.pin = getpass.getpass(f"  {ANSI.YEL}➤ Account PIN: {ANSI.RST}").strip()
+        else:
+            print(f"{ANSI.RED}Error: --pin is required for authentication{ANSI.RST}")
+            sys.exit(1)
+
+    # 🆕 Resolve tier
+    if not hasattr(args, 'tier') or not args.tier:
+        args.tier = tier_from_setup
+
     if args.threads is None:
         args.threads = suggest_threads("pc" if not args.gpu else "pc", args.gpu)
 
@@ -786,7 +890,9 @@ def main():
         "worker": args.worker,
         "threads": args.threads,
         "gpu": args.gpu,
-        "poll": args.poll
+        "poll": args.poll,
+        "tier": args.tier
+        # Note: PIN is intentionally NOT saved to config for security
     })
 
     os.system("clear" if os.name != "nt" else "cls")

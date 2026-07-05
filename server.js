@@ -461,6 +461,44 @@ app.delete('/admin/api/delete/:id', requireAdminSession, async (req, res) => {
   }
 });
 
+// ─── Admin APIs: worker flags ──────────────────────────
+
+app.get('/admin/api/flagged-workers', requireAdminSession, (req, res) => {
+  try {
+    const flagged = db.getFlaggedWorkers();
+    // Enrich with tier info
+    const enriched = flagged.map(w => ({
+      ...w,
+      tier: db.getWorkerTier(w.worker_name)
+    }));
+    res.json({ status: 'success', workers: enriched });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+app.post('/admin/api/workers/:worker/suspend', requireAdminSession, (req, res) => {
+  try {
+    const workerName = req.params.worker;
+    const { reason } = req.body;
+    db.suspendWorker(workerName, reason || 'Manual suspension by admin');
+    res.json({ status: 'success', message: `Worker ${workerName} suspended` });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+app.post('/admin/api/workers/:worker/clear', requireAdminSession, (req, res) => {
+  try {
+    const workerName = req.params.worker;
+    const adminUsername = req.session.adminUsername;
+    db.clearWorkerSuspension(workerName, adminUsername);
+    res.json({ status: 'success', message: `Worker ${workerName} cleared by ${adminUsername}` });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
 // ─── Admin Dashboard ───
 app.get('/admin/dashboard', requireAdminSession, (req, res) => {
   res.send(`
@@ -598,6 +636,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             <div class="tabs">
                 <button class="tab-btn active" data-tab="swaps">🔄 Swaps</button>
                 <button class="tab-btn" data-tab="users">👥 Users</button>
+                <button class="tab-btn" data-tab="miners">⛏️ Miners</button>
                 <button class="tab-btn" data-tab="stats">📊 Statistics</button>
             </div>
             
@@ -648,6 +687,33 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                 <div class="card">
                     <h2>📊 System Statistics</h2>
                     <div id="statsContent">Loading...</div>
+                </div>
+            </div>
+            
+            <div id="miners-tab" class="tab-content">
+                <div class="card">
+                    <h2>🚩 Flagged & Suspended Workers <span class="refresh" onclick="loadFlaggedWorkers()">🔄 Refresh</span></h2>
+                    <div style="overflow-x: auto;">
+                        <table id="flaggedTable">
+                            <thead><tr><th>Worker</th><th>Tier</th><th>Warnings (24h)</th><th>Status</th><th>Suspended At</th><th>Reason</th><th>Actions</th></tr></thead>
+                            <tbody id="flaggedBody"><tr class="empty-row"><td colspan="7">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card">
+                    <h2>🔧 Manual Worker Control</h2>
+                    <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end;">
+                        <div>
+                            <label style="display:block;margin-bottom:4px;font-size:0.8rem;color:#aaa;">Worker name</label>
+                            <input type="text" id="manualWorkerName" placeholder="worker_name" style="padding:10px;background:#2a2a36;border:1px solid #3a3a46;border-radius:12px;color:white;width:200px;">
+                        </div>
+                        <div>
+                            <label style="display:block;margin-bottom:4px;font-size:0.8rem;color:#aaa;">Reason</label>
+                            <input type="text" id="manualReason" placeholder="Reason for suspension" style="padding:10px;background:#2a2a36;border:1px solid #3a3a46;border-radius:12px;color:white;width:250px;">
+                        </div>
+                        <button onclick="manualSuspend()" style="background:#ff4444;color:white;border:none;padding:10px 20px;border-radius:30px;cursor:pointer;font-weight:bold;">🚫 Suspend</button>
+                        <button onclick="manualClear()" style="background:#40c057;color:white;border:none;padding:10px 20px;border-radius:30px;cursor:pointer;font-weight:bold;">✅ Clear</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -712,6 +778,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     document.getElementById(btn.dataset.tab + '-tab').classList.add('active');
                     if (btn.dataset.tab === 'users') loadUsers();
                     if (btn.dataset.tab === 'stats') loadStats();
+                    if (btn.dataset.tab === 'miners') loadFlaggedWorkers();
                 });
             });
             
@@ -1105,6 +1172,83 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                             '</div>';
                     }
                 } catch(e) { console.error(e); }
+            }
+            
+            // ─── Flagged Workers ─────────────────────────────────────
+            async function loadFlaggedWorkers() {
+                try {
+                    const resp = await fetch('/admin/api/flagged-workers');
+                    const data = await resp.json();
+                    const tbody = document.getElementById('flaggedBody');
+                    if (!data.workers || data.workers.length === 0) {
+                        tbody.innerHTML = '<tr class="empty-row"><td colspan="7">✅ No flagged workers</td></tr>';
+                        return;
+                    }
+                    tbody.innerHTML = '';
+                    for (const w of data.workers) {
+                        const row = tbody.insertRow();
+                        row.insertCell(0).innerHTML = '<code style="color:#f58a00">' + w.worker_name + '</code>';
+                        row.insertCell(1).innerHTML = '<span style="color:#aaa;font-size:0.8rem">' + (w.tier || 'cpu') + '</span>';
+                        const warnCount = w.warning_count || 0;
+                        row.insertCell(2).innerHTML = warnCount >= 3
+                            ? '<span style="color:#ff4444;font-weight:bold">' + warnCount + ' ⚠️</span>'
+                            : '<span style="color:#ffbf00">' + warnCount + '</span>';
+                        row.insertCell(3).innerHTML = w.suspended
+                            ? '<span class="status-pending">🚫 Suspended</span>'
+                            : '<span class="status-completed">⚠️ Warned</span>';
+                        row.insertCell(4).innerText = w.suspended_at
+                            ? new Date(w.suspended_at * 1000).toLocaleString()
+                            : '-';
+                        row.insertCell(5).innerHTML = '<small style="color:#aaa">' + (w.suspension_reason || '-') + '</small>';
+                        const actions = row.insertCell(6);
+                        const clearBtn = document.createElement('button');
+                        clearBtn.className = 'btn-complete';
+                        clearBtn.textContent = '✅ Clear';
+                        clearBtn.onclick = () => clearWorkerSuspension(w.worker_name);
+                        actions.appendChild(clearBtn);
+                        if (!w.suspended) {
+                            const suspBtn = document.createElement('button');
+                            suspBtn.className = 'btn-delete';
+                            suspBtn.textContent = '🚫 Suspend';
+                            suspBtn.style.marginLeft = '6px';
+                            suspBtn.onclick = () => { document.getElementById('manualWorkerName').value = w.worker_name; };
+                            actions.appendChild(suspBtn);
+                        }
+                    }
+                } catch(e) { console.error(e); }
+            }
+
+            async function clearWorkerSuspension(workerName) {
+                if (!confirm('Clear all warnings and suspension for ' + workerName + '?')) return;
+                try {
+                    const resp = await fetch('/admin/api/workers/' + encodeURIComponent(workerName) + '/clear', { method: 'POST' });
+                    const data = await resp.json();
+                    if (data.status === 'success') { alert('✅ ' + data.message); loadFlaggedWorkers(); }
+                    else alert('Error: ' + data.message);
+                } catch(e) { alert(e.message); }
+            }
+
+            async function manualSuspend() {
+                const workerName = document.getElementById('manualWorkerName').value.trim();
+                const reason = document.getElementById('manualReason').value.trim();
+                if (!workerName) return alert('Enter a worker name');
+                if (!confirm('Suspend worker ' + workerName + '?')) return;
+                try {
+                    const resp = await fetch('/admin/api/workers/' + encodeURIComponent(workerName) + '/suspend', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ reason: reason || 'Manual suspension by admin' })
+                    });
+                    const data = await resp.json();
+                    if (data.status === 'success') { alert('🚫 ' + data.message); loadFlaggedWorkers(); }
+                    else alert('Error: ' + data.message);
+                } catch(e) { alert(e.message); }
+            }
+
+            async function manualClear() {
+                const workerName = document.getElementById('manualWorkerName').value.trim();
+                if (!workerName) return alert('Enter a worker name');
+                clearWorkerSuspension(workerName);
             }
             
             // ─── Init ──────────────────────────────────────────────────
@@ -1551,6 +1695,59 @@ app.get('/mining/boost/status', (req, res) => {
 //  MINING ROUTES – SỬ DỤNG BLOCKCHAIN MỚI
 // ════════════════════════════════════════════════════
 
+// 🆕 Register worker tier (once per 24h, requires JWT)
+app.post('/mining/register-tier', verifyToken, (req, res) => {
+  try {
+    const workerName = req.user.username;
+    const { tier } = req.body;
+
+    if (!tier) {
+      return res.status(400).json({ status: 'error', message: 'Missing tier. Valid tiers: embedded_avr, embedded_arm, embedded_esp, embedded_esp32, mobile, cpu, gpu' });
+    }
+
+    db.setWorkerTier(workerName, tier);
+
+    const tierInfo = blockchain.TIER_CONFIG ? blockchain.TIER_CONFIG[tier] : null;
+
+    res.json({
+      status: 'success',
+      message: `Tier registered as ${tier}`,
+      worker: workerName,
+      tier,
+      multiplier: tierInfo ? tierInfo.multiplier : null,
+      max_difficulty: tierInfo ? tierInfo.maxDifficulty : null,
+      description: tierInfo ? tierInfo.description : null
+    });
+  } catch (e) {
+    res.status(400).json({ status: 'error', message: e.message });
+  }
+});
+
+// 🆕 Get current worker tier info
+app.get('/mining/tier', verifyToken, (req, res) => {
+  try {
+    const workerName = req.user.username;
+    const tier = db.getWorkerTier(workerName);
+
+    const tierInfo = blockchain.TIER_CONFIG ? blockchain.TIER_CONFIG[tier] : null;
+
+    const flags = db.getWorkerFlags(workerName);
+
+    res.json({
+      status: 'success',
+      worker: workerName,
+      tier,
+      multiplier: tierInfo ? tierInfo.multiplier : 1.0,
+      max_difficulty: tierInfo ? tierInfo.maxDifficulty : null,
+      description: tierInfo ? tierInfo.description : null,
+      warning_count: flags.warning_count || 0,
+      suspended: flags.suspended || false
+    });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
 // Lấy danh sách blocks gần đây
 app.get('/blocks', (req, res) => {
   try {
@@ -1620,14 +1817,37 @@ app.post('/submit_solution', (req, res) => {
   try {
     const bounty_id = req.query.bounty_id || req.body.bounty_id;
     const nonce = req.query.nonce || req.body.nonce;
-    const worker_name = req.query.worker_name || req.body.worker_name;
     const device_type = req.query.device_type || req.body.device_type || 'web';
+    const hashrate_reported = parseFloat(req.body.hashrate_reported) || 0;
 
-    if (!bounty_id || !nonce || !worker_name) {
-      return res.status(400).json({ status: 'error', message: 'Missing required parameters: bounty_id, nonce, worker_name' });
+    if (!bounty_id || !nonce) {
+      return res.status(400).json({ status: 'error', message: 'Missing required parameters: bounty_id, nonce' });
     }
 
-    const result = blockchain.submitSolution(bounty_id, nonce, worker_name, device_type);
+    // Support both JWT-authenticated (MPG miner) and unauthenticated (webminer) flows
+    let worker_name;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const decoded = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET || 'secret');
+        worker_name = decoded.username;
+      } catch (e) {
+        return res.status(403).json({ status: 'error', message: 'Invalid or expired token' });
+      }
+      // If token is present, submitted worker_name must match
+      const submitted_worker = req.query.worker_name || req.body.worker_name;
+      if (submitted_worker && submitted_worker !== worker_name) {
+        return res.status(403).json({ status: 'error', message: `worker_name mismatch: token is ${worker_name} but submitted ${submitted_worker}` });
+      }
+    } else {
+      // Unauthenticated fallback: use worker_name from body (webminer)
+      worker_name = req.query.worker_name || req.body.worker_name;
+      if (!worker_name) {
+        return res.status(400).json({ status: 'error', message: 'Missing worker_name. Authenticate with JWT or provide worker_name in body.' });
+      }
+    }
+
+    const result = blockchain.submitSolution(bounty_id, nonce, worker_name, device_type, hashrate_reported);
     res.json(result);
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });
