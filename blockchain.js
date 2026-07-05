@@ -121,7 +121,17 @@ function getJobForWorker(workerName) {
   // Kiểm tra worker đã có job active chưa
   let job = db.getJobForWorker(workerName);
   if (job) {
-    return mapJob(job);
+    // Validate that the height this job targets hasn't already been mined.
+    // This can happen when another worker wins the race and the loser's job
+    // is still marked 'active' (not yet expired).
+    const blockAtHeight = db.getBlockByHeight(job.height);
+    if (blockAtHeight) {
+      // Height already taken — discard this stale job so a fresh one is created below
+      db.deleteJobsAtHeight(job.height);
+      job = null;
+    } else {
+      return mapJob(job);
+    }
   }
 
   // Lấy block cuối
@@ -376,9 +386,12 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported) 
     newBlock.total_fees = mempoolResult.totalFees;
   }
 
-  // Đánh dấu job solved và xóa job cũ của worker
+  // Mark the winning job solved, then wipe ALL active jobs at this height
+  // (other workers may still have active jobs targeting the same height —
+  // leaving them alive is what caused the UNIQUE constraint rejection loop).
   db.markJobSolved(jobId);
-  db.deleteJobsForWorker(workerName, jobId);
+  db.deleteJobsAtHeight(job.height, jobId); // removes every other active job at this height
+  db.deleteJobsForWorker(workerName, jobId); // belt-and-suspenders: clean up winner's own leftovers
 
   // Điều chỉnh difficulty cho worker dựa trên thời gian giải
   const solveTime = (timestamp - parseJobDate(job.created_at));

@@ -557,6 +557,21 @@ function deleteJobsForWorker(workerName, exceptJobId) {
   `).run(workerName, exceptJobId);
 }
 
+// Invalidate all active jobs at a given block height (called after a block is accepted)
+function deleteJobsAtHeight(height, exceptJobId) {
+  if (exceptJobId) {
+    db.prepare(`
+      DELETE FROM mining_jobs
+      WHERE height = ? AND status = 'active' AND id != ?
+    `).run(height, exceptJobId);
+  } else {
+    db.prepare(`
+      DELETE FROM mining_jobs
+      WHERE height = ? AND status = 'active'
+    `).run(height);
+  }
+}
+
 function cleanupExpiredJobs(expireSeconds) {
   db.prepare(`
     DELETE FROM mining_jobs
@@ -572,6 +587,13 @@ function getBlockCount() {
 
 function getBlocks(limit = 10, offset = 0) {
   return db.prepare('SELECT * FROM blocks ORDER BY height DESC LIMIT ? OFFSET ?').all(limit, offset);
+}
+
+function getBlocksByMiner(minerName, sinceTimestamp) {
+  if (sinceTimestamp != null) {
+    return db.prepare('SELECT * FROM blocks WHERE miner = ? AND timestamp >= ? ORDER BY height DESC').all(minerName, sinceTimestamp);
+  }
+  return db.prepare('SELECT * FROM blocks WHERE miner = ? ORDER BY height DESC').all(minerName);
 }
 
 // ═══════════════════════════════════════════════════
@@ -1048,9 +1070,11 @@ module.exports = {
   createJob,
   markJobSolved,
   deleteJobsForWorker,
+  deleteJobsAtHeight,
   cleanupExpiredJobs,
   getBlockCount,
   getBlocks,
+  getBlocksByMiner,
   // Mempool
   addToMempool,
   getPendingMempool,
