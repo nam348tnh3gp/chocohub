@@ -5,7 +5,7 @@ const db = require('./db');
 
 // ─── Cấu hình ────────────────────────────────────
 const REWARD_PER_BLOCK = 0.05;                  // 0.05 CC
-const INITIAL_DIFFICULTY = 10;                  // mặc định cho worker mới
+const INITIAL_DIFFICULTY = 1;                  // mặc định cho worker mới
 const JOB_EXPIRE_SECONDS = 60;                  // job hết hạn sau 60s
 const MIN_DIFFICULTY = 1;
 const MAX_DIFFICULTY = 1000000;
