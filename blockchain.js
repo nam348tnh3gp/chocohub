@@ -5,7 +5,7 @@ const db = require('./db');
 
 // ─── Cấu hình ────────────────────────────────────
 const REWARD_PER_BLOCK = 0.05;                  // 0.05 CC
-const INITIAL_DIFFICULTY = 1;                  // mặc định cho worker mới
+const INITIAL_DIFFICULTY = 10;                  // mặc định cho worker mới
 const JOB_EXPIRE_SECONDS = 60;                  // job hết hạn sau 60s
 const MIN_DIFFICULTY = 1;
 const MAX_DIFFICULTY = 1000000;
@@ -174,8 +174,11 @@ function getJobForWorker(workerName, instanceId, deviceType) {
   const height = lastBlock ? lastBlock.height + 1 : 0;
   const prevHash = lastBlock ? lastBlock.hash : '0'.repeat(64);
 
-  // Lấy tier của user (chia sẻ giữa các instance của cùng một user)
-  const tier = db.getWorkerTier(workerName);
+  // 🆕 Tier per-instance: try diffKey first, fall back to user-level
+  let tier = db.getWorkerTier(diffKey);
+  if (!tier || tier === 'cpu') {
+    tier = db.getWorkerTier(workerName);
+  }
   const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cpu;
 
   // Lấy difficulty riêng của instance này

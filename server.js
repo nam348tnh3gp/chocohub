@@ -1699,20 +1699,21 @@ app.get('/mining/boost/status', (req, res) => {
 app.post('/mining/register-tier', verifyToken, (req, res) => {
   try {
     const workerName = req.user.username;
-    const { tier } = req.body;
+    const { tier, instance_id } = req.body;
+    const tierKey = instance_id ? `${workerName}:${instance_id}` : workerName;
 
     if (!tier) {
       return res.status(400).json({ status: 'error', message: 'Missing tier. Valid tiers: embedded_avr, embedded_arm, embedded_esp, embedded_esp32, mobile, cpu, gpu' });
     }
 
-    db.setWorkerTier(workerName, tier);
+    db.setWorkerTier(tierKey, tier);
 
     const tierInfo = blockchain.TIER_CONFIG ? blockchain.TIER_CONFIG[tier] : null;
 
     res.json({
       status: 'success',
       message: `Tier registered as ${tier}`,
-      worker: workerName,
+      worker: tierKey,
       tier,
       multiplier: tierInfo ? tierInfo.multiplier : null,
       max_difficulty: tierInfo ? tierInfo.maxDifficulty : null,
@@ -1727,7 +1728,12 @@ app.post('/mining/register-tier', verifyToken, (req, res) => {
 app.get('/mining/tier', verifyToken, (req, res) => {
   try {
     const workerName = req.user.username;
-    const tier = db.getWorkerTier(workerName);
+    const instanceId = req.query.instance_id;
+    const tierKey = instanceId ? `${workerName}:${instanceId}` : workerName;
+    let tier = db.getWorkerTier(tierKey);
+    if (!tier || tier === 'cpu') {
+      tier = db.getWorkerTier(workerName);
+    }
 
     const tierInfo = blockchain.TIER_CONFIG ? blockchain.TIER_CONFIG[tier] : null;
 
