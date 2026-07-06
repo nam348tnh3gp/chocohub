@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
@@ -13,70 +13,108 @@
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 
     <style>
-        /* ═══════════════════════════════════════════
-           CHOCO HUB · GLOBAL DESIGN SYSTEM (merged style.css)
-           ═══════════════════════════════════════════ */
         :root {
-            --void:        #0a0a12;
-            --deep:        #0d0b0a;
-            --surface:     rgba(20, 20, 35, 0.7);
-            --raised:      #1d1d2e;
-            --overlay:     rgba(8, 8, 16, 0.94);
-            --border:      rgba(255, 149, 0, 0.08);
-            --border-mid:  rgba(255, 149, 0, 0.18);
-            --border-hi:   rgba(255, 149, 0, 0.35);
-            --text:        #eee4d8;
-            --mid:         #8b8296;
-            --dim:         #4a4458;
-            --amber:       #f58a00;
-            --amber-soft:  #ffb347;
-            --amber-glow:  rgba(245, 138, 0, 0.25);
-            --amber-faint: rgba(245, 138, 0, 0.04);
-            --gold:        #f2c94c;
-            --green:       #40c057;
-            --red:         #fa5252;
-            --pink:        #f06292;
-
-            --bg: var(--void);
+            --radius-xl: 30px;
+            --radius-lg: 26px;
+            --radius-md: 18px;
             --radius-sm: 12px;
-            --radius-md: 20px;
-            --radius-lg: 28px;
-            --radius-full: 99px;
-            --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.4);
-            --shadow-card-hover: 0 20px 48px rgba(0, 0, 0, 0.55);
-            --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
-            --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
-            --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+            --radius-pill: 999px;
+
+            --accent-yellow: #FFD60A;
+            --accent-orange: #FF9F0A;
+            --accent-blue: #0A84FF;
+            --accent-pink: #FF375F;
+            --accent-green: #32D74B;
+            --accent-red: #FA5252;
+
+            --ease-liquid: cubic-bezier(.22,1,.36,1);
+            --ease-back: cubic-bezier(.34,1.56,.64,1);
+        }
+
+        html[data-theme="dark"] {
+            --bg-base: #07060A;
+            --text-primary: #F1EAE0;
+            --text-secondary: #9A93A6;
+            --text-tertiary: #5F5A6D;
+
+            --glass-bg: rgba(255,255,255,0.055);
+            --glass-bg-strong: rgba(255,255,255,0.09);
+            --glass-border: rgba(255,255,255,0.14);
+            --glass-highlight: rgba(255,255,255,0.22);
+            --glass-shadow: rgba(0,0,0,0.55);
+
+            --field-bg: rgba(0,0,0,0.35);
+            --field-border: rgba(255,255,255,0.12);
+
+            --blob-opacity: 0.55;
+            --blob-blur: 74px;
+        }
+
+        html[data-theme="light"] {
+            --bg-base: #EFEFF6;
+            --text-primary: #1B1A22;
+            --text-secondary: #5B5766;
+            --text-tertiary: #8B879A;
+
+            --glass-bg: rgba(255,255,255,0.5);
+            --glass-bg-strong: rgba(255,255,255,0.75);
+            --glass-border: rgba(255,255,255,0.9);
+            --glass-highlight: rgba(255,255,255,0.95);
+            --glass-shadow: rgba(31,32,71,0.14);
+
+            --field-bg: rgba(255,255,255,0.6);
+            --field-border: rgba(0,0,0,0.1);
+
+            --blob-opacity: 0.5;
+            --blob-blur: 84px;
         }
 
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         html { font-size: 14px; }
 
         body {
-            margin: 0; padding: 0; background-color: #0a0807;
-            background-image:
-                radial-gradient(circle at 50% 40%, rgba(255, 120, 0, 0.08) 0%, transparent 70%),
-                radial-gradient(circle at 50% 50%, #140d0a 0%, #0a0807 100%);
-            background-attachment: fixed; color: var(--text); font-family: 'Outfit', sans-serif;
-            overflow-x: hidden; min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+            background: var(--bg-base);
+            color: var(--text-primary);
+            font-family: 'Outfit', sans-serif;
+            overflow-x: hidden;
+            min-height: 100vh;
+            display: flex; flex-direction: column; align-items: center;
+            -webkit-font-smoothing: antialiased;
+            transition: background-color .6s var(--ease-liquid), color .5s var(--ease-liquid);
         }
 
         button { font-family: inherit; cursor: pointer; border: none; outline: none; }
-        a { color: var(--amber); text-decoration: none; }
+        a { color: inherit; text-decoration: none; }
 
-        /* Animations */
-        @keyframes pulseGlow {
-            0% { box-shadow: 0 0 5px rgba(255, 149, 0, 0.05); }
-            50% { box-shadow: 0 0 15px rgba(255, 149, 0, 0.2); }
-            100% { box-shadow: 0 0 5px rgba(255, 149, 0, 0.05); }
+        /* ---------- Floating abstract background art ---------- */
+        .bg-blobs {
+            position: fixed; inset: 0; z-index: -2; overflow: hidden;
+            filter: blur(var(--blob-blur)) saturate(160%);
+            opacity: var(--blob-opacity);
+            transition: opacity .6s var(--ease-liquid);
+            pointer-events: none;
         }
-        @keyframes liquidMove {
-            0% { transform: translate(0, 0) scale(1) rotate(30deg); }
-            50% { transform: translate(-5%, 5%) scale(1.3) rotate(100deg); }
-            100% { transform: translate(5%, -5%) scale(1) rotate(-2deg); }
+        .blob { position: absolute; border-radius: 50%; will-change: transform; }
+        .blob-yellow { width: 46vw; height: 46vw; top: -12%; left: -8%; background: radial-gradient(circle at 40% 40%, var(--accent-yellow) 0%, transparent 72%); animation: float1 24s var(--ease-liquid) infinite alternate; }
+        .blob-blue { width: 52vw; height: 52vw; bottom: -20%; right: -12%; background: radial-gradient(circle at 60% 60%, var(--accent-blue) 0%, transparent 72%); animation: float2 30s var(--ease-liquid) infinite alternate; }
+        .blob-pink { width: 38vw; height: 38vw; top: 22%; right: 10%; background: radial-gradient(circle at 50% 50%, var(--accent-pink) 0%, transparent 72%); animation: float3 20s var(--ease-liquid) infinite alternate; }
+        .blob-orange { width: 36vw; height: 36vw; bottom: 4%; left: 18%; background: radial-gradient(circle at 50% 50%, var(--accent-orange) 0%, transparent 72%); animation: float4 26s var(--ease-liquid) infinite alternate; }
+        @keyframes float1 { 0%{transform:translate(0,0) scale(1) rotate(0deg);} 50%{transform:translate(6vw,8vh) scale(1.12) rotate(20deg);} 100%{transform:translate(-4vw,4vh) scale(0.95) rotate(-15deg);} }
+        @keyframes float2 { 0%{transform:translate(0,0) scale(1);} 50%{transform:translate(-7vw,-6vh) scale(1.1);} 100%{transform:translate(3vw,-9vh) scale(0.92);} }
+        @keyframes float3 { 0%{transform:translate(0,0) scale(1);} 50%{transform:translate(-5vw,7vh) scale(0.9);} 100%{transform:translate(6vw,3vh) scale(1.15);} }
+        @keyframes float4 { 0%{transform:translate(0,0) scale(1);} 50%{transform:translate(5vw,-5vh) scale(1.08);} 100%{transform:translate(-6vw,-2vh) scale(0.94);} }
+        .grain {
+            position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: 0.035;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+            mix-blend-mode: overlay;
+        }
+
+        @keyframes pulseDot {
+            0%, 100% { box-shadow: 0 0 4px rgba(50,215,75,0.4); }
+            50% { box-shadow: 0 0 16px rgba(50,215,75,0.5), 0 0 24px rgba(50,215,75,0.3); }
         }
         @keyframes logoBounce {
             0%, 100% { transform: translateY(0); }
@@ -84,560 +122,568 @@
             50% { transform: translateY(0); }
             70% { transform: translateY(-3px); }
         }
-        @keyframes shimmer {
-            0% { transform: translateX(-100%); }
-            100% { transform: translateX(100%); }
-        }
 
-        .liquid-bg {
-            position: fixed; top: -25%; left: -25%; width: 150%; height: 150%;
-            background: radial-gradient(circle at center, rgba(255, 149, 0, 0.04) 0%, rgba(30, 20, 10, 0.2) 30%, transparent 60%);
-            z-index: -1; pointer-events: none; filter: blur(60px);
-            animation: liquidMove 20s ease-in-out infinite alternate;
+        /* ---------- Glass primitive ---------- */
+        .glass {
+            position: relative;
+            background: var(--glass-bg);
+            backdrop-filter: blur(26px) saturate(180%);
+            -webkit-backdrop-filter: blur(26px) saturate(180%);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 10px 34px var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+            transition: background-color .5s var(--ease-liquid), border-color .5s var(--ease-liquid), box-shadow .5s var(--ease-liquid), transform .25s var(--ease-liquid);
+            overflow: hidden;
         }
-
-        /* Panel (shared) */
-        .panel {
-            position: relative; z-index: 1; width: 100%; max-width: 680px;
-            background: var(--surface); backdrop-filter: blur(14px) saturate(160%);
-            -webkit-backdrop-filter: blur(14px) saturate(160%);
-            border: 1px solid var(--border); border-radius: 18px; padding: 35px;
-            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+        .glass::before {
+            content: ""; position: absolute; inset: 0;
+            background: linear-gradient(130deg, rgba(255,255,255,0.22), transparent 45%);
+            pointer-events: none; opacity: 0.7;
         }
+        .glass-pill { border-radius: var(--radius-pill) !important; }
 
-        .c-tr, .c-bl {
-            content: ''; position: absolute; width: 18px; height: 18px;
-            border-color: var(--amber); border-style: solid; opacity: .45;
-        }
-        .c-tr { top: -1px; right: -1px; border-width: 2px 2px 0 0; border-radius: 0 18px 0 0; }
-        .c-bl { bottom: -1px; left: -1px; border-width: 0 0 2px 2px; border-radius: 0 0 0 18px; }
-
-        /* Field & Button */
+        /* ---------- Field & Button (login) ---------- */
         .field-lbl {
-            font-family: 'Space Mono', monospace; font-size: .65rem; color: var(--dim);
-            letter-spacing: 1px; text-transform: uppercase; margin-bottom: 7px; text-align: left;
+            font-family: 'Space Mono', monospace; font-size: .68rem; color: var(--text-tertiary);
+            letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; text-align: left;
         }
         .field-inp {
-            width: 100%; padding: 16px 20px; background: rgba(10, 10, 20, 0.6);
-            border: 1px solid var(--border-mid); border-radius: 10px; color: var(--amber);
-            font-family: 'Space Mono'; font-size: 1.05rem;
-            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
-            outline: none; transition: 0.2s; animation: pulseGlow 3s infinite ease-in-out;
+            width: 100%; padding: 15px 18px;
+            background: var(--field-bg); border: 1px solid var(--field-border);
+            border-radius: var(--radius-md); color: var(--accent-orange);
+            font-family: 'Space Mono', monospace; font-size: 1rem;
+            outline: none; transition: border-color .2s, box-shadow .2s;
         }
-        .field-inp:focus { border-color: var(--border-hi); }
+        .field-inp:focus { border-color: var(--accent-orange); box-shadow: 0 0 0 3px rgba(255,159,10,0.15); }
 
         .btn-start {
-            width: 100%; background: var(--amber); color: #000; border-radius: 12px;
-            padding: 18px; font-weight: 800; font-size: 1rem; letter-spacing: 1px;
-            box-shadow: 0 4px 22px rgba(255,149,0,.3); transition: 0.2s; margin-top: 15px;
+            width: 100%; border-radius: var(--radius-pill);
+            padding: 16px; font-weight: 800; font-size: 0.95rem; letter-spacing: 0.4px;
+            color: #fff; margin-top: 16px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-pink));
+            box-shadow: 0 8px 22px rgba(10,132,255,0.35);
+            transition: transform .2s var(--ease-liquid), filter .2s, opacity .2s;
         }
-        .btn-start:hover { background: var(--amber-soft); transform: translateY(-2px); }
-        .btn-start:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-start:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.07); }
+        .btn-start:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
-        /* Toast */
+        /* ---------- Toast ---------- */
         #toast {
             position: fixed; bottom: 30px; left: 50%;
-            transform: translateX(-50%) translateY(20px);
-            background: #111; padding: 14px 28px; border-radius: 50px;
-            border: 1px solid var(--amber); color: #fff; font-weight: 600;
-            font-size: 0.9rem; opacity: 0; transition: 0.3s; z-index: 10005;
-            pointer-events: none;
+            transform: translateX(-50%) translateY(15px);
+            background: var(--glass-bg-strong);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid var(--glass-border);
+            padding: 13px 26px; border-radius: var(--radius-pill);
+            color: var(--text-primary); font-weight: 700; font-size: 0.88rem;
+            opacity: 0; transition: opacity .3s var(--ease-liquid), transform .3s var(--ease-liquid);
+            z-index: 10005; pointer-events: none;
+            box-shadow: 0 10px 30px var(--glass-shadow);
         }
         #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-        #toast.success { border-color: var(--green); color: var(--green); }
-        #toast.error { border-color: var(--red); color: var(--red); }
+        #toast.success { border-color: var(--accent-green); color: var(--accent-green); }
+        #toast.error { border-color: var(--accent-red); color: var(--accent-red); }
 
-        /* ═══════════════════════════════════════════
-           DASHBOARD SPECIFIC STYLES
-           ═══════════════════════════════════════════ */
+        /* ---------- App shell ---------- */
         .dashboard-container {
-            width: min(920px, 94vw);
-            margin: 40px auto 60px;
+            width: min(1080px, 94vw);
+            margin: 0 auto 60px;
             padding: 0 16px;
-            position: relative;
-            z-index: 1;
-            opacity: 0;
-            transform: translateY(28px);
-            transition: opacity 0.6s var(--ease-out-expo), transform 0.6s var(--ease-out-expo);
+            position: relative; z-index: 1;
+            opacity: 0; transform: translateY(28px);
+            transition: opacity 0.6s var(--ease-liquid), transform 0.6s var(--ease-liquid);
         }
+        .dashboard-container.loaded { opacity: 1; transform: translateY(0); }
 
-        .dashboard-container.loaded {
-            opacity: 1;
-            transform: translateY(0);
-        }
-
-        /* Header */
+        /* Topbar */
         .dashboard-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 36px;
-            flex-wrap: wrap;
-            gap: 16px;
+            display: flex; align-items: center; justify-content: space-between;
+            flex-wrap: wrap; gap: 14px; padding: 14px 22px; margin: 20px 0 1.6rem;
         }
+        .logo { display: flex; align-items: center; gap: 10px; }
+        .logo .logo-icon { font-size: 24px; animation: logoBounce 3s ease-in-out infinite; filter: drop-shadow(0 2px 6px rgba(255,159,10,0.5)); }
+        .logo-text h1 {
+            font-size: 1.2rem; font-weight: 800; letter-spacing: -0.02em;
+            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange) 45%, var(--accent-pink));
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+        }
+        .logo-text .brand-sub { font-size: 0.62rem; color: var(--text-tertiary); font-family: 'Space Mono', monospace; letter-spacing: 0.08em; text-transform: uppercase; }
 
-        .logo {
-            font-size: 1.6rem;
-            font-weight: 800;
-            letter-spacing: -0.02em;
-            color: var(--amber);
-            text-shadow: 0 0 16px var(--amber-glow), 0 0 45px rgba(255,149,0,.18);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            user-select: none;
-        }
-        .logo .logo-icon {
-            display: inline-block;
-            font-size: 1.8rem;
-            animation: logoBounce 3s ease-in-out infinite;
-        }
+        .topbar-widgets { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
         .status-pill {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-full);
-            padding: 8px 18px;
-            font-size: 0.78rem;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-            color: var(--green);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
+            padding: 9px 18px; font-size: 0.74rem; font-weight: 700; letter-spacing: 0.04em;
+            color: var(--accent-green); display: flex; align-items: center; gap: 8px;
         }
-        .status-pill .pulse-dot {
-            width: 8px; height: 8px; border-radius: 50%;
-            background: var(--green);
-            box-shadow: 0 0 8px rgba(64,192,87,0.25);
-            animation: pulseDot 2s ease-in-out infinite;
+        .status-pill .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-green); animation: pulseDot 2s ease-in-out infinite; }
+
+        .clock-widget { display: flex; flex-direction: column; align-items: flex-end; padding: 6px 4px; line-height: 1.15; }
+        .clock-widget .time { font-family: 'Space Mono', monospace; font-weight: 700; font-size: 0.88rem; letter-spacing: 0.03em; }
+        .clock-widget .date { font-size: 0.6rem; color: var(--text-secondary); }
+
+        .theme-toggle { appearance: none; background: none; padding: 0; }
+        .toggle-track {
+            width: 54px; height: 30px; border-radius: var(--radius-pill);
+            background: linear-gradient(135deg, #2b2540, #171425);
+            border: 1px solid var(--glass-border);
+            display: flex; align-items: center; padding: 3px; position: relative;
+            transition: background .45s var(--ease-liquid);
+            box-shadow: inset 0 2px 6px rgba(0,0,0,0.4);
         }
-        @keyframes pulseDot {
-            0%, 100% { box-shadow: 0 0 4px rgba(64,192,87,0.25); }
-            50% { box-shadow: 0 0 16px rgba(64,192,87,0.25), 0 0 24px rgba(64,192,87,0.2); }
+        html[data-theme="light"] .toggle-track { background: linear-gradient(135deg, #FFE28A, #FFB347); }
+        .toggle-thumb {
+            width: 24px; height: 24px; border-radius: 50%; background: #fff;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+            display: flex; align-items: center; justify-content: center;
+            transform: translateX(0); transition: transform .45s var(--ease-liquid);
         }
+        html[data-theme="light"] .toggle-thumb { transform: translateX(24px); }
+        .toggle-thumb svg { width: 14px; height: 14px; }
 
         /* Greeting */
-        .greeting { margin-bottom: 32px; }
-        .greeting h1 {
-            font-size: clamp(1.8rem, 4vw, 2.4rem);
-            font-weight: 800; color: var(--text);
-            margin: 0 0 4px; letter-spacing: -0.02em; line-height: 1.2;
-        }
-        .greeting .subtitle {
-            color: var(--mid); font-size: 0.95rem; font-weight: 400; letter-spacing: 0.01em;
-        }
+        .greeting { margin-bottom: 28px; padding: 0 6px; }
+        .greeting h1 { font-size: clamp(1.6rem, 4vw, 2.2rem); font-weight: 800; margin-bottom: 4px; letter-spacing: -0.02em; line-height: 1.2; }
+        .greeting .subtitle { color: var(--text-secondary); font-size: 0.9rem; }
 
-        /* Main balance card */
+        /* ---------- Main balance card ---------- */
         .main-card {
-            background: linear-gradient(145deg, rgba(245, 138, 0, 0.55) 0%, rgba(255, 45, 120, 0.18) 55%, rgba(90, 40, 120, 0.08) 100%);
-            backdrop-filter: blur(24px);
-            -webkit-backdrop-filter: blur(24px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: var(--radius-lg);
-            padding: 36px 40px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 24px;
-            margin-bottom: 44px;
-            position: relative;
-            overflow: hidden;
-            box-shadow: var(--shadow-card), 0 0 30px rgba(245,166,35,0.15);
-            transition: box-shadow 0.6s var(--ease-smooth), border-color 0.6s var(--ease-smooth);
-        }
-        .main-card:hover {
-            box-shadow: var(--shadow-card-hover), 0 0 50px rgba(245,166,35,0.2);
-            border-color: rgba(255,255,255,0.18);
+            padding: 34px 38px;
+            display: flex; justify-content: space-between; align-items: center;
+            gap: 24px; margin-bottom: 40px; flex-wrap: wrap;
         }
         .main-card::after {
-            content: ''; position: absolute; top: -50%; left: -50%;
-            width: 200%; height: 200%;
-            background: radial-gradient(circle at 30% 40%, rgba(255,255,255,0.04) 0%, transparent 50%);
-            pointer-events: none;
-            animation: shimmerRotate 15s linear infinite;
+            content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
+            background: radial-gradient(circle at 30% 40%, rgba(255,255,255,0.05) 0%, transparent 50%);
+            pointer-events: none; animation: shimmerRotate 15s linear infinite;
         }
-        @keyframes shimmerRotate {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
+        @keyframes shimmerRotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
         .balance-info { position: relative; z-index: 1; }
         .balance-info .label {
-            font-size: 0.72rem; color: var(--amber);
-            text-transform: uppercase; letter-spacing: 3px;
-            margin-bottom: 10px; font-weight: 700; opacity: 0.9;
+            font-size: 0.7rem; color: var(--accent-orange); text-transform: uppercase;
+            letter-spacing: 3px; margin-bottom: 10px; font-weight: 700;
         }
         .balance-info .amount {
-            font-family: 'Space Mono', 'Courier New', monospace;
-            font-size: clamp(2.5rem, 6vw, 4.2rem);
-            font-weight: 700; line-height: 1;
-            display: flex; align-items: baseline; gap: 8px;
-            letter-spacing: -0.03em;
+            font-family: 'Space Mono', monospace;
+            font-size: clamp(2.4rem, 6vw, 3.8rem); font-weight: 700; line-height: 1;
+            display: flex; align-items: baseline; gap: 8px; letter-spacing: -0.02em;
+            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange) 60%, var(--accent-pink));
+            -webkit-background-clip: text; background-clip: text; color: transparent;
         }
-        .balance-info .amount .currency {
-            font-size: 1.1rem; color: var(--mid); font-weight: 400; letter-spacing: 0.05em;
+        .balance-info .amount .currency { font-size: 1rem; color: var(--text-secondary); font-weight: 400; -webkit-text-fill-color: var(--text-secondary); }
+        .balance-info .rate-hint {
+            margin-top: 12px; font-size: 0.72rem; color: var(--text-tertiary);
+            font-family: 'Space Mono', monospace;
         }
 
         .account-meta {
-            position: relative; z-index: 1; text-align: right;
-            display: flex; flex-direction: column; align-items: flex-end; gap: 14px;
+            position: relative; z-index: 1;
+            display: flex; align-items: center; gap: 14px;
         }
-        .account-meta .meta-label {
-            color: var(--mid); font-size: 0.7rem; letter-spacing: 2px;
-            text-transform: uppercase; font-weight: 600;
+        .session-chip {
+            display: flex; align-items: center; gap: 7px;
+            padding: 9px 16px; border-radius: var(--radius-pill);
+            background: rgba(50,215,75,0.1); border: 1px solid rgba(50,215,75,0.25);
+            color: var(--accent-green); font-size: 0.74rem; font-weight: 700;
         }
-        .account-meta .secure-badge {
-            color: var(--green); font-weight: 800; letter-spacing: 0.5px;
-            font-size: 0.82rem; display: flex; align-items: center; gap: 6px;
-        }
+        .session-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-green); animation: pulseDot 2s ease-in-out infinite; }
 
         .btn-logout {
-            background: rgba(255, 45, 120, 0.08);
-            color: var(--pink);
-            border: 1px solid rgba(255, 45, 120, 0.2);
-            padding: 10px 22px;
-            border-radius: var(--radius-full);
-            font-size: 0.78rem; font-weight: 700; letter-spacing: 0.05em;
-            cursor: pointer;
-            transition: all 0.15s var(--ease-smooth);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
+            background: rgba(255,55,95,0.1); color: var(--accent-pink);
+            border: 1px solid rgba(255,55,95,0.3);
+            padding: 10px 20px; border-radius: var(--radius-pill);
+            font-size: 0.76rem; font-weight: 700; letter-spacing: 0.04em;
+            transition: all 0.2s var(--ease-liquid);
         }
-        .btn-logout:hover {
-            background: var(--pink); color: #fff;
-            border-color: var(--pink);
-            box-shadow: 0 0 24px rgba(255,45,120,0.25);
-            transform: translateY(-1px);
-        }
+        .btn-logout:hover { background: var(--accent-pink); color: #fff; transform: translateY(-1px); }
         .btn-logout:active { transform: scale(0.96); }
 
-        /* Section titles */
+        /* ---------- Section titles ---------- */
         .section-title {
-            font-weight: 800; letter-spacing: 0.03em; margin-bottom: 22px;
-            font-size: 1.05rem; text-transform: uppercase; color: var(--text);
-            display: flex; align-items: center; gap: 10px;
+            font-weight: 800; letter-spacing: 0.03em; margin-bottom: 18px;
+            font-size: 0.95rem; text-transform: uppercase;
+            display: flex; align-items: center; gap: 10px; padding: 0 6px;
         }
-        .section-title::after {
-            content: ''; flex: 1; height: 1px; background: var(--border); min-width: 30px;
-        }
+        .section-title::after { content: ''; flex: 1; height: 1px; background: var(--glass-border); min-width: 30px; }
+        .section-title .ttl-icon { width: 18px; height: 18px; flex-shrink: 0; }
 
-        /* Game grid */
-        .game-grid {
+        /* ---------- Service groups (scalable, side-by-side, room to grow) ---------- */
+        .service-groups {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            grid-template-columns: 1fr;
             gap: 22px;
-            margin-bottom: 44px;
+            margin-bottom: 40px;
+        }
+        @media (min-width: 860px) {
+            .service-groups { grid-template-columns: 1fr 1fr; align-items: start; }
+        }
+        .service-group { display: flex; flex-direction: column; gap: 12px; }
+        .group-label {
+            font-size: 0.68rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+            color: var(--text-tertiary); padding: 0 4px 2px;
         }
 
-        .game-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-md);
-            padding: 28px 26px;
-            text-decoration: none;
-            color: var(--text);
-            transition: all 0.3s var(--ease-out-expo);
+        .service-row {
+            display: flex; align-items: center; gap: 16px;
+            padding: 16px 18px;
+            transition: transform 0.25s var(--ease-liquid), border-color 0.25s var(--ease-liquid);
             position: relative;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            cursor: pointer;
-            overflow: hidden;
-            box-shadow: var(--shadow-card);
         }
-        .game-card:hover {
-            border-color: var(--amber);
-            transform: translateY(-6px);
-            background: rgba(28, 28, 45, 0.85);
-            box-shadow: var(--shadow-card-hover), 0 0 30px rgba(245,166,35,0.1);
-        }
-        .game-card:active { transform: scale(0.97); transition: transform 0.1s ease; }
+        .service-row:hover { transform: translateY(-3px); border-color: rgba(255,159,10,0.4); }
+        .service-row:active { transform: scale(0.98); }
 
-        .game-badge {
-            position: absolute; top: 18px; right: 18px;
-            background: rgba(245, 138, 0, 0.12);
-            color: var(--amber);
-            padding: 5px 14px;
-            border-radius: var(--radius-full);
-            font-size: 0.68rem; font-weight: 800; letter-spacing: 0.06em;
-            z-index: 2;
-            backdrop-filter: blur(4px);
-            -webkit-backdrop-filter: blur(4px);
-            border: 1px solid rgba(245, 166, 35, 0.2);
+        .service-icon {
+            width: 46px; height: 46px; flex-shrink: 0;
+            border-radius: 14px;
+            display: flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, rgba(255,159,10,0.18), rgba(255,55,95,0.1));
+            border: 1px solid rgba(255,159,10,0.2);
         }
-        .game-badge.soon {
-            background: rgba(255,255,255,0.04); color: var(--dim);
-            border-color: rgba(255,255,255,0.08);
-        }
-        .game-badge.beta {
-            background: rgba(0, 230, 118, 0.1); color: var(--green);
-            border-color: rgba(0, 230, 118, 0.2);
-        }
+        .service-icon svg { width: 24px; height: 24px; }
 
-        .game-icon {
-            font-size: 3.2rem; display: block; line-height: 1;
-            transition: transform 0.3s var(--ease-out-back);
-        }
-        .game-card:hover .game-icon { transform: scale(1.12) rotate(-3deg); }
+        .service-body { flex: 1; min-width: 0; }
+        .service-name-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 3px; }
+        .service-name { font-size: 1rem; font-weight: 700; letter-spacing: -0.01em; }
+        .service-desc { font-size: 0.78rem; color: var(--text-secondary); line-height: 1.4; }
 
-        .game-name { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.01em; margin: 0; }
-        .game-desc {
-            font-size: 0.85rem; color: var(--mid); line-height: 1.5; margin: 0;
+        .service-badge {
+            padding: 3px 11px; border-radius: var(--radius-pill);
+            font-size: 0.6rem; font-weight: 800; letter-spacing: 0.05em;
+            background: rgba(255,159,10,0.14); color: var(--accent-orange);
+            border: 1px solid rgba(255,159,10,0.25);
         }
+        .service-badge.beta { background: rgba(50,215,75,0.12); color: var(--accent-green); border-color: rgba(50,215,75,0.25); }
+        .service-badge.swap { background: rgba(10,132,255,0.14); color: var(--accent-blue); border-color: rgba(10,132,255,0.28); }
 
-        /* Network monitor */
+        .service-arrow { color: var(--text-tertiary); font-size: 1.1rem; flex-shrink: 0; transition: transform 0.2s var(--ease-liquid); }
+        .service-row:hover .service-arrow { transform: translateX(3px); color: var(--accent-orange); }
+
+        /* ---------- Network monitor ---------- */
         .network-monitor { margin-top: 10px; }
-        .monitor-grid {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 20px;
-            width: 100%;
-        }
-        @media (max-width: 600px) {
-            .monitor-grid { grid-template-columns: 1fr; }
-        }
+        .monitor-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; width: 100%; }
+        @media (max-width: 700px) { .monitor-grid { grid-template-columns: 1fr; } }
 
-        .panel-dark {
-            background: var(--surface); border: 1px solid var(--border);
-            border-radius: var(--radius-md); padding: 22px 24px;
-            backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-            transition: border-color 0.3s var(--ease-smooth);
-        }
-        .panel-dark:hover { border-color: var(--border-hi); }
+        .panel-dark { padding: 22px 24px; }
         .panel-dark h4 {
-            color: var(--mid); font-size: 0.7rem; letter-spacing: 2px;
+            display: flex; align-items: center; gap: 8px;
+            color: var(--text-secondary); font-size: 0.72rem; letter-spacing: 1.5px;
             margin-bottom: 16px; text-transform: uppercase; font-weight: 700;
         }
+        .panel-dark h4 svg { width: 15px; height: 15px; flex-shrink: 0; }
 
-        .log-list {
-            list-style: none; padding: 0;
-            font-family: 'Space Mono', 'Courier New', monospace;
-            font-size: 0.8rem; max-height: 220px; overflow-y: auto;
-        }
+        .log-list { list-style: none; font-family: 'Space Mono', monospace; font-size: 0.8rem; max-height: 240px; overflow-y: auto; }
         .log-list li {
-            padding: 8px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-            color: var(--mid); transition: color 0.15s;
-            display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+            padding: 10px 12px; margin-bottom: 4px; border-radius: var(--radius-sm);
+            background: var(--glass-bg-strong);
+            color: var(--text-secondary); transition: background 0.15s;
+            display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
         }
-        .log-list li:last-child { border-bottom: none; }
-        .log-list .block-id { color: var(--amber); font-weight: 700; }
-        .log-list .reward { color: var(--green); font-weight: 700; }
+        .log-list li:hover { background: rgba(255,159,10,0.08); }
+        .log-list .block-id { color: var(--accent-orange); font-weight: 700; }
+        .log-list .reward { color: var(--accent-green); font-weight: 700; margin-left: auto; }
 
         .miner-entry {
             display: flex; align-items: center; gap: 10px;
-            padding: 8px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-            font-family: 'Space Mono', 'Courier New', monospace; font-size: 0.8rem;
+            padding: 10px 12px; margin-bottom: 4px; border-radius: var(--radius-sm);
+            background: var(--glass-bg-strong);
+            font-family: 'Space Mono', monospace; font-size: 0.8rem;
         }
-        .miner-entry:last-child { border-bottom: none; }
-        .miner-dot {
-            width: 7px; height: 7px; border-radius: 50%;
-            background: var(--green); box-shadow: 0 0 8px rgba(64,192,87,0.25);
-            flex-shrink: 0; animation: pulseDot 2s ease-in-out infinite;
-        }
-        .miner-name { color: var(--amber); font-weight: 700; }
-        .miner-device { color: var(--dim); font-size: 0.7rem; margin-left: auto; }
+        .miner-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-green); box-shadow: 0 0 8px rgba(50,215,75,0.4); flex-shrink: 0; animation: pulseDot 2s ease-in-out infinite; }
+        .miner-name { color: var(--accent-orange); font-weight: 700; }
+        .miner-device { color: var(--text-tertiary); font-size: 0.7rem; margin-left: auto; }
 
-        .empty-state {
-            color: var(--dim); text-align: center; padding: 24px 0;
-            font-style: italic; font-size: 0.82rem;
-        }
+        .empty-state { color: var(--text-tertiary); text-align: center; padding: 24px 0; font-style: italic; font-size: 0.82rem; }
 
-        /* Login overlay */
+        /* ---------- Login overlay ---------- */
         #login-overlay {
-            position: fixed; inset: 0;
-            background: var(--void);
-            z-index: 2000;
+            position: fixed; inset: 0; z-index: 2000;
             display: flex; align-items: center; justify-content: center;
             transition: opacity 0.5s ease;
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
+            background: var(--bg-base);
         }
-        #login-overlay.fading {
-            opacity: 0; pointer-events: none;
-        }
+        #login-overlay.fading { opacity: 0; pointer-events: none; }
 
         .login-box {
             width: min(420px, 92vw); text-align: center;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            padding: 40px 32px;
-            box-shadow: var(--shadow-card-hover);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            animation: loginSlideUp 0.7s var(--ease-out-expo) both;
+            padding: 42px 34px;
+            animation: loginSlideUp 0.7s var(--ease-liquid) both;
         }
-        @keyframes loginSlideUp {
-            from { opacity: 0; transform: translateY(40px) scale(0.96); }
-            to { opacity: 1; transform: translateY(0) scale(1); }
-        }
+        @keyframes loginSlideUp { from { opacity: 0; transform: translateY(40px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
-        .login-icon {
-            font-size: 4.5rem; margin-bottom: 8px;
-            animation: logoBounce 3s ease-in-out infinite;
-            display: inline-block;
-        }
+        .login-icon { font-size: 4rem; margin-bottom: 8px; display: inline-block; animation: logoBounce 3s ease-in-out infinite; }
         .login-box h2 {
-            font-weight: 800; margin-bottom: 4px;
-            letter-spacing: -0.02em; font-size: 1.5rem; color: var(--text);
+            font-weight: 800; margin-bottom: 4px; letter-spacing: -0.02em; font-size: 1.4rem;
+            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange) 45%, var(--accent-pink));
+            -webkit-background-clip: text; background-clip: text; color: transparent;
         }
-        .login-box .login-sub {
-            color: var(--mid); margin-bottom: 28px; font-size: 0.88rem;
-        }
+        .login-box .login-sub { color: var(--text-secondary); margin-bottom: 26px; font-size: 0.86rem; }
+        .login-hint { font-size: 0.72rem; color: var(--text-tertiary); margin-top: 18px; line-height: 1.5; }
 
-        .login-hint {
-            font-size: 0.72rem; color: var(--dim); margin-top: 18px; line-height: 1.5;
-        }
-
-        /* Responsive */
+        /* ---------- Responsive ---------- */
         @media (max-width: 768px) {
-            .main-card {
-                flex-direction: column; text-align: center;
-                padding: 28px 24px; gap: 20px;
-            }
-            .balance-info .amount {
-                justify-content: center; font-size: 2.8rem;
-            }
-            .account-meta { align-items: center; text-align: center; }
-            .game-grid { grid-template-columns: 1fr; }
+            .main-card { flex-direction: column; text-align: center; padding: 28px 24px; gap: 20px; }
+            .balance-info .amount { justify-content: center; }
+            .account-meta { justify-content: center; }
             .dashboard-header { flex-direction: column; align-items: flex-start; }
-            .greeting h1 { font-size: 1.5rem; }
+            .topbar-widgets { width: 100%; justify-content: space-between; }
         }
-        @media (max-width: 400px) {
-            .main-card { padding: 20px 16px; border-radius: var(--radius-md); }
-            .balance-info .amount { font-size: 2.2rem; }
-            .game-card { padding: 20px 16px; }
-            .login-box { padding: 28px 18px; }
+        @media (max-width: 420px) {
+            .main-card { padding: 22px 18px; }
+            .login-box { padding: 30px 20px; }
+            .service-row { padding: 14px; gap: 12px; }
+            .service-icon { width: 40px; height: 40px; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .blob { animation: none !important; }
+            * { transition-duration: 0.01ms !important; }
         }
     </style>
 </head>
 <body>
 
-    <!-- Animated liquid background -->
-    <div class="liquid-bg" aria-hidden="true"></div>
+<div class="bg-blobs" aria-hidden="true">
+    <div class="blob blob-yellow"></div>
+    <div class="blob blob-blue"></div>
+    <div class="blob blob-pink"></div>
+    <div class="blob blob-orange"></div>
+</div>
+<div class="grain" aria-hidden="true"></div>
 
-    <!-- LOGIN OVERLAY (only shown if not authenticated) -->
-    <div id="login-overlay">
-        <div class="login-box">
-            <span class="login-icon" aria-hidden="true">🍫</span>
-            <h2>CHOCO HUB</h2>
-            <p class="login-sub">Enter your credentials to access the vault.</p>
+<!-- LOGIN OVERLAY (only shown if not authenticated) -->
+<div id="login-overlay">
+    <div class="login-box glass">
+        <span class="login-icon" aria-hidden="true">🍫</span>
+        <h2>CHOCO HUB</h2>
+        <p class="login-sub">Enter your credentials to access the vault.</p>
 
-            <div style="text-align: left; margin-bottom: 18px;">
-                <label class="field-lbl">Username</label>
-                <input type="text" id="user-name" class="field-inp" placeholder="e.g. ChocoKing" autocomplete="username" spellcheck="false">
-            </div>
-
-            <div style="text-align: left; margin-bottom: 28px;">
-                <label class="field-lbl">Security PIN</label>
-                <input type="password" id="user-pin" class="field-inp" placeholder="4 to 8 digits" maxlength="8" autocomplete="current-password">
-            </div>
-
-            <button class="btn-start" id="auth-btn">ENTER HUB</button>
-            <p class="login-hint">If the username doesn't exist, we'll create one for you.</p>
+        <div style="text-align: left; margin-bottom: 18px;">
+            <label class="field-lbl">Username</label>
+            <input type="text" id="user-name" class="field-inp" placeholder="e.g. ChocoKing" autocomplete="username" spellcheck="false">
         </div>
+
+        <div style="text-align: left; margin-bottom: 10px;">
+            <label class="field-lbl">Security PIN</label>
+            <input type="password" id="user-pin" class="field-inp" placeholder="4 to 8 digits" maxlength="8" autocomplete="current-password">
+        </div>
+
+        <button class="btn-start" id="auth-btn">ENTER HUB</button>
+        <p class="login-hint">If the username doesn't exist, we'll create one for you.</p>
+    </div>
+</div>
+
+<!-- DASHBOARD (hidden until login) -->
+<div class="dashboard-container" id="dash-ui">
+    <header class="dashboard-header glass">
+        <div class="logo">
+            <span class="logo-icon" aria-hidden="true">🍫</span>
+            <div class="logo-text">
+                <h1>CHOCO HUB</h1>
+                <div class="brand-sub">Hybrid PoW + PoS</div>
+            </div>
+        </div>
+        <div class="topbar-widgets">
+            <div class="status-pill glass glass-pill" aria-live="polite">
+                <span class="pulse-dot" aria-hidden="true"></span> ONLINE
+            </div>
+            <div class="clock-widget">
+                <span class="time" id="liveClock">00:00:00</span>
+                <span class="date" id="liveDate">—</span>
+            </div>
+            <button class="theme-toggle" id="themeToggle" aria-label="Toggle day and night mode" title="Toggle theme">
+                <span class="toggle-track">
+                    <span class="toggle-thumb">
+                        <svg id="themeIcon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" stroke="#0A84FF" stroke-width="2" stroke-linejoin="round"/>
+                        </svg>
+                    </span>
+                </span>
+            </button>
+        </div>
+    </header>
+
+    <div class="greeting">
+        <h1 id="welcome-msg">Good morning, Guest</h1>
+        <p class="subtitle">Ready to earn CC with mining & staking?</p>
     </div>
 
-    <!-- DASHBOARD (hidden until login) -->
-    <div class="dashboard-container" id="dash-ui">
-        <header class="dashboard-header">
-            <div class="logo">
-                <span class="logo-icon" aria-hidden="true">🍫</span> CHOCO HUB
-            </div>
-            <div class="status-pill" aria-live="polite">
-                <span class="pulse-dot" aria-hidden="true"></span> HYBRID PoW+PoS
-            </div>
-        </header>
-
-        <div class="greeting">
-            <h1 id="welcome-msg">Good morning, Guest</h1>
-            <p class="subtitle">Ready to earn CC with mining & staking?</p>
+    <section class="main-card glass">
+        <div class="balance-info">
+            <div class="label">Total Vault Balance</div>
+            <div class="amount" id="balance-val">0000 <span class="currency">CC</span></div>
+            <div class="rate-hint">Reference rate · 10 CC ≈ 1 DUCO</div>
         </div>
-
-        <section class="main-card">
-            <div class="balance-info">
-                <div class="label">Total Vault Balance</div>
-                <div class="amount" id="balance-val">0000 <span class="currency">CC</span></div>
-            </div>
-            <div class="account-meta">
-                <span class="meta-label">Account Status</span>
-                <span class="secure-badge">● SECURE / ENCRYPTED</span>
-                <button class="btn-logout" id="logout-btn">LOGOUT</button>
-            </div>
-        </section>
-
-        <h3 class="section-title">Available Services</h3>
-
-        <div class="game-grid">
-            <!-- Snake Faucet -->
-            <a href="snake.html" class="game-card">
-                <span class="game-badge">HOT ⚡</span>
-                <span class="game-icon" aria-hidden="true">🐍</span>
-                <span class="game-name">SNAKE FAUCET</span>
-                <p class="game-desc">Classic Snake with different modes. Earn up to 50 CC per claim in Hardcore Mode.</p>
-            </a>
-
-            <!-- Web Miner (PoW) -->
-            <a href="mining.html" class="game-card">
-                <span class="game-badge">PoW</span>
-                <span class="game-icon" aria-hidden="true">⛏️</span>
-                <span class="game-name">WEB MINER</span>
-                <p class="game-desc">Mine CC using your browser's CPU. Solve Proof-of-Work blocks and earn rewards.</p>
-            </a>
-
-            <!-- Staking Vault (PoS) -->
-            <a href="staking.html" class="game-card">
-                <span class="game-badge">PoS</span>
-                <span class="game-icon" aria-hidden="true">🏦</span>
-                <span class="game-name">STAKING VAULT</span>
-                <p class="game-desc">Stake your CC to become a validator. Earn block rewards via Proof-of-Stake consensus.</p>
-            </a>
-
-            <!-- Send CC -->
-            <a href="send.html" class="game-card">
-                <span class="game-badge beta">NEW</span>
-                <span class="game-icon" aria-hidden="true">💸</span>
-                <span class="game-name">SEND CC</span>
-                <p class="game-desc">Transfer your Choco Coins to any user instantly. Fast, secure, and simple.</p>
-            </a>
-
-            <!-- SWAP CC to DUCO / CC PoC (NEW CARD) -->
-            <a href="swap.html" class="game-card">
-                <span class="game-badge">SWAP 🔄</span>
-                <span class="game-icon" aria-hidden="true">💱</span>
-                <span class="game-name">SWAP CENTER</span>
-                <p class="game-desc">Convert CC to DUCO or CC PoC at fixed rates. Fast & secure.</p>
-            </a>
+        <div class="account-meta">
+            <div class="session-chip"><span class="dot"></span> Session Active</div>
+            <button class="btn-logout" id="logout-btn">LOGOUT</button>
         </div>
+    </section>
 
-        <div class="network-monitor">
-            <h3 class="section-title">Network Activity</h3>
-            <div class="monitor-grid">
-                <div class="panel-dark">
-                    <h4>Recently Mined / Forged</h4>
-                    <ul id="mined-blocks-log" class="log-list">
-                        <li class="empty-state">Awaiting activity...</li>
-                    </ul>
-                </div>
-                <div class="panel-dark">
-                    <h4>Active Validators</h4>
-                    <div id="active-miners-list">
-                        <div class="empty-state">No active validators</div>
+    <h3 class="section-title">
+        <svg class="ttl-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 12h16M4 6h16M4 18h10" stroke="#FF9F0A" stroke-width="2" stroke-linecap="round"/></svg>
+        Available Services
+    </h3>
+
+    <div class="service-groups">
+        <div class="service-group">
+            <div class="group-label">Earn</div>
+
+            <a href="snake.html" class="service-row glass">
+                <span class="service-icon">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 14c0-2 1.5-3 3-3s3 1 3 3-1.5 3-3 3M4 14v-4c0-3 2-5 5-5s5 2 5 5v4c0 3 2 5 5 5s5-2 5-5-1.5-3-3-3" stroke="#FFD60A" stroke-width="2" stroke-linecap="round"/><circle cx="18" cy="7" r="1.2" fill="#FFD60A"/></svg>
+                </span>
+                <div class="service-body">
+                    <div class="service-name-row">
+                        <span class="service-name">Snake Faucet</span>
+                        <span class="service-badge">HOT</span>
                     </div>
+                    <p class="service-desc">Classic Snake, up to 50 CC per claim in Hardcore Mode.</p>
+                </div>
+                <span class="service-arrow">→</span>
+            </a>
+
+            <a href="mining.html" class="service-row glass">
+                <span class="service-icon">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 3.5 20.5 9.5M6 13 3 21l8-3 8.5-8.5a3 3 0 0 0-4.24-4.24L6 13Z" stroke="#FF9F0A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                <div class="service-body">
+                    <div class="service-name-row">
+                        <span class="service-name">Web Miner</span>
+                        <span class="service-badge">PoW</span>
+                    </div>
+                    <p class="service-desc">Mine CC with your browser's CPU via Proof-of-Work.</p>
+                </div>
+                <span class="service-arrow">→</span>
+            </a>
+
+            <a href="staking.html" class="service-row glass">
+                <span class="service-icon">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 21h18M4 21V10l8-6 8 6v11M9 21v-6h6v6" stroke="#FF375F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                <div class="service-body">
+                    <div class="service-name-row">
+                        <span class="service-name">Staking Vault</span>
+                        <span class="service-badge">PoS</span>
+                    </div>
+                    <p class="service-desc">Stake CC to validate blocks and earn steady rewards.</p>
+                </div>
+                <span class="service-arrow">→</span>
+            </a>
+        </div>
+
+        <div class="service-group">
+            <div class="group-label">Transfer</div>
+
+            <a href="send.html" class="service-row glass">
+                <span class="service-icon">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 12h14M13 6l7 6-7 6" stroke="#32D74B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                <div class="service-body">
+                    <div class="service-name-row">
+                        <span class="service-name">Send CC</span>
+                        <span class="service-badge beta">NEW</span>
+                    </div>
+                    <p class="service-desc">Transfer Choco Coins to any user instantly.</p>
+                </div>
+                <span class="service-arrow">→</span>
+            </a>
+
+            <a href="swap.html" class="service-row glass">
+                <span class="service-icon">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 7h11l-3-3M17 17H6l3 3" stroke="#0A84FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                <div class="service-body">
+                    <div class="service-name-row">
+                        <span class="service-name">Swap Center</span>
+                        <span class="service-badge swap">SWAP</span>
+                    </div>
+                    <p class="service-desc">Convert CC to DUCO or XNO at fixed rates.</p>
+                </div>
+                <span class="service-arrow">→</span>
+            </a>
+
+            <div class="group-label" style="margin-top: 8px; opacity: 0.5;">More coming soon</div>
+        </div>
+    </div>
+
+    <div class="network-monitor">
+        <h3 class="section-title">
+            <svg class="ttl-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 12h4l2-8 4 16 2-8h6" stroke="#FF9F0A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Network Activity
+        </h3>
+        <div class="monitor-grid">
+            <div class="panel-dark glass">
+                <h4>
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 3.5 20.5 9.5M6 13 3 21l8-3 8.5-8.5a3 3 0 0 0-4.24-4.24L6 13Z" stroke="#FF9F0A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Recently Mined / Forged
+                </h4>
+                <ul id="mined-blocks-log" class="log-list">
+                    <li class="empty-state">Awaiting activity...</li>
+                </ul>
+            </div>
+            <div class="panel-dark glass">
+                <h4>
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4Z" stroke="#32D74B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Active Validators
+                </h4>
+                <div id="active-miners-list">
+                    <div class="empty-state">No active validators</div>
                 </div>
             </div>
         </div>
     </div>
+</div>
 
-    <!-- Toast container -->
-    <div id="toast" role="status" aria-live="polite"></div>
+<!-- Toast container -->
+<div id="toast" role="status" aria-live="polite"></div>
 
-    <script>
+<script>
+    // ---------- UI-only enhancements: clock, date, theme toggle ----------
+    // Isolated in its own IIFE; does not touch or rely on the dashboard script below.
+    (function () {
+        const root = document.documentElement;
+        const themeToggle = document.getElementById('themeToggle');
+        const themeIcon = document.getElementById('themeIcon');
+        const liveClock = document.getElementById('liveClock');
+        const liveDate = document.getElementById('liveDate');
+
+        const SUN = '<path d="M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z" stroke="#FF9F0A" stroke-width="2"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" stroke="#FF9F0A" stroke-width="2" stroke-linecap="round"/>';
+        const MOON = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" stroke="#0A84FF" stroke-width="2" stroke-linejoin="round"/>';
+
+        function applyTheme(theme) {
+            root.setAttribute('data-theme', theme);
+            try { localStorage.setItem('choco_dash_theme', theme); } catch (e) {}
+            if (themeIcon) themeIcon.innerHTML = theme === 'dark' ? MOON : SUN;
+        }
+
+        let savedTheme = 'dark';
+        try { savedTheme = localStorage.getItem('choco_dash_theme') || 'dark'; } catch (e) {}
+        applyTheme(savedTheme);
+
+        if (themeToggle) {
+            themeToggle.addEventListener('click', () => {
+                const current = root.getAttribute('data-theme');
+                applyTheme(current === 'dark' ? 'light' : 'dark');
+            });
+        }
+
+        function pad(n) { return n.toString().padStart(2, '0'); }
+
+        function updateClock() {
+            const now = new Date();
+            const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+            const dateStr = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+            if (liveClock) liveClock.textContent = timeStr;
+            if (liveDate) liveDate.textContent = dateStr;
+        }
+
+        updateClock();
+        setInterval(updateClock, 1000);
+    })();
+</script>
+
+<script>
         // ══════════════════════════════════════════════════════
         // SECURITY-FIXED DASHBOARD SCRIPT (Case-Sensitive Username)
         // ══════════════════════════════════════════════════════
