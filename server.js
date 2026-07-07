@@ -27,9 +27,9 @@ const NodeFeesRouter = require('./routes/node_fees');
 
 // admin users
 const ADMIN_USERS = ['chocoetom', 'Nam2010'];
-const NODE_MASTER_TOKEN = process.env.NODE_MASTER_TOKEN;
-if (!NODE_MASTER_TOKEN || NODE_MASTER_TOKEN === 'chocohub-node-master') {
-  console.warn('⚠️ WARNING: NODE_MASTER_TOKEN is default/weak. Set a real token in .env!');
+const NODE_MASTER_TOKEN = process.env.NODE_MASTER_TOKEN || 'chocohub-node-master';
+if (!process.env.NODE_MASTER_TOKEN || NODE_MASTER_TOKEN === 'chocohub-node-master') {
+  console.warn('⚠️ WARNING: NODE_MASTER_TOKEN is default/weak. Set a real token in Render dashboard!');
 }
 
 // ─── Rate limiters for node endpoints ──────────
