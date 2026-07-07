@@ -8,7 +8,7 @@ const REWARD_PER_BLOCK = 0.05;                  // 0.05 CC
 const INITIAL_DIFFICULTY = 10;                  // mặc định cho worker mới
 const JOB_EXPIRE_SECONDS = 60;                  // job hết hạn sau 60s
 const MIN_DIFFICULTY = 1;
-const MAX_DIFFICULTY = 1000000;
+const MAX_DIFFICULTY = 1000000000;
 const DIFFICULTY_ADJUSTMENT_FACTOR = 0.5;       // hệ số điều chỉnh (0.5 = trung bình)
 const TARGET_SOLVE_TIME = 10;                   // giây mong muốn (cho per‑worker điều chỉnh)
 
@@ -39,7 +39,7 @@ const TIER_CONFIG = {
   },
   mobile: {
     multiplier: 1.8,
-    maxDifficulty: 5000000,
+    maxDifficulty: 10000,
     description: 'Android, iOS (~500 kH/s)'
   },
   cpu: {
@@ -130,8 +130,8 @@ function parseFlexibleDate(str) {
 function decayWorkerDifficulty(workerName, missedSeconds) {
   const currentDiff = db.getWorkerDifficulty(workerName) || INITIAL_DIFFICULTY;
   const overrun = missedSeconds / TARGET_SOLVE_TIME;
-  let newDiff = currentDiff / Math.max(1.1, Math.min(overrun, 4));
-  const maxChange = currentDiff * 0.5;
+  let newDiff = currentDiff / Math.max(1.1, Math.min(overrun, 20));
+  const maxChange = currentDiff * 0.9;
   newDiff = Math.max(currentDiff - maxChange, newDiff);
   newDiff = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, newDiff));
   newDiff = Math.round(newDiff * 10) / 10;
@@ -181,26 +181,22 @@ function getJobForWorker(workerName, instanceId, deviceType) {
   const height = lastBlock ? lastBlock.height + 1 : 0;
   const prevHash = lastBlock ? lastBlock.hash : '0'.repeat(64);
 
-  // Try to grab a pool job at the next height
-  const poolJob = db.prepare(
-    'SELECT * FROM mining_jobs WHERE height = ? AND status = ? AND assigned_to = ? ORDER BY created_at ASC LIMIT 1'
-  ).get(height, 'active', '_pool');
-
-  if (poolJob) {
-    db.prepare('UPDATE mining_jobs SET assigned_to = ? WHERE id = ?').run(diffKey, poolJob.id);
-    return mapJob(poolJob);
-  }
-
   let tier = db.getWorkerTier(diffKey);
   if (!tier || tier === 'cpu') {
     tier = db.getWorkerTier(workerName);
+  }
+  if (!tier || tier === 'cpu') {
+    if (deviceType === 'mobile_web') {
+      tier = 'mobile';
+      try { db.setWorkerTier(diffKey, 'mobile'); } catch (e) { }
+    }
   }
   const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cpu;
 
   let diff = db.getWorkerDifficulty(diffKey);
   if (diff === null) {
     if (deviceType === 'mobile_web') {
-      diff = Math.max(MIN_DIFFICULTY, Math.floor(INITIAL_DIFFICULTY / 5));
+      diff = 100;
     } else {
       diff = INITIAL_DIFFICULTY;
     }
@@ -208,6 +204,22 @@ function getJobForWorker(workerName, instanceId, deviceType) {
   }
 
   diff = Math.max(MIN_DIFFICULTY, Math.min(tierConfig.maxDifficulty, diff));
+
+  // Persist the capped difficulty so stored value stays within tier limits
+  db.setWorkerDifficulty(diffKey, diff, Date.now());
+
+  // Try to grab a pool job at the next height
+  const poolJob = db.prepare(
+    'SELECT * FROM mining_jobs WHERE height = ? AND status = ? AND assigned_to = ? ORDER BY created_at ASC LIMIT 1'
+  ).get(height, 'active', '_pool');
+
+  if (poolJob) {
+    const poolTargetHex = difficultyToTarget(diff);
+    db.prepare(
+      'UPDATE mining_jobs SET assigned_to = ?, difficulty = ?, target_hex = ? WHERE id = ?'
+    ).run(diffKey, diff, poolTargetHex, poolJob.id);
+    return mapJob(Object.assign({}, poolJob, { difficulty: diff, target_hex: poolTargetHex }));
+  }
 
   const targetHex = difficultyToTarget(diff);
   const reward = REWARD_PER_BLOCK;
@@ -530,14 +542,26 @@ function adjustWorkerDifficulty(workerName, solveTime) {
   // Tính toán difficulty mới
   let idealDiff = currentDiff * (targetTime / solveTime);
   let newDiff = currentDiff + (idealDiff - currentDiff) * 0.75;
-  // Giới hạn thay đổi tối đa 200% để ramp nhanh hơn
-  const maxChange = currentDiff * 2.0;
+  // Giới hạn thay đổi tối đa 100% để tránh ramp quá nhanh
+  const maxChange = currentDiff * 1.0;
   newDiff = Math.max(currentDiff - maxChange, Math.min(currentDiff + maxChange, newDiff));
   newDiff = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, newDiff));
   newDiff = Math.round(newDiff * 10) / 10;
 
   db.setWorkerDifficulty(workerName, newDiff, Date.now());
   console.log(`👷 Worker ${workerName}: difficulty ${currentDiff.toFixed(1)} → ${newDiff.toFixed(1)} (solve time ${solveTime.toFixed(1)}s)`);
+}
+
+// ─── Đặt lại difficulty về mức an toàn cho tier ──
+function capWorkerDifficulty(workerName, tier) {
+  const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cpu;
+  const currentDiff = db.getWorkerDifficulty(workerName);
+  if (currentDiff === null) return;
+  const capped = Math.min(currentDiff, tierConfig.maxDifficulty);
+  if (capped < currentDiff) {
+    db.setWorkerDifficulty(workerName, capped, Date.now());
+    console.log(`📉 Worker ${workerName}: difficulty capped from ${currentDiff.toFixed(1)} → ${capped.toFixed(1)} (tier: ${tier})`);
+  }
 }
 
 // ─── Webhook ─────────────────────────────────────
