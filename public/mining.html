@@ -945,7 +945,7 @@
         const deviceType = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
             || window.innerWidth < 768 ? 'mobile_web' : 'desktop_web';
         // Node auto-discovery
-        let currentServer = '';  // '' = direct, or 'http://node:port'
+        let currentServer = '';  // '' = direct, or '/api/proxy'
         let selectedNode = null;
         let heartbeatInterval = null;
 
@@ -1008,10 +1008,10 @@
             heartbeatInterval = setInterval(async () => {
                 if (!selectedNode) return;
                 try {
-                    await fetch(`${selectedNode.url}/miner_heartbeat`, {
+                    await fetch('/api/proxy/heartbeat', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ miners: 1 })
+                        body: JSON.stringify({ node_id: selectedNode.id, miners: 1 })
                     });
                 } catch (e) { /* silent */ }
             }, 15000);
