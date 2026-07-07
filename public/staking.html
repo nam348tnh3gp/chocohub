@@ -1,220 +1,329 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>CHOCO HUB · Staking Vault (PoS)</title>
+    <title>CHOCO HUB · Staking Vault</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --void: #0a0a12;
-            --surface: rgba(20, 20, 35, 0.7);
-            --border: rgba(255, 149, 0, 0.08);
-            --border-mid: rgba(255, 149, 0, 0.18);
-            --border-hi: rgba(255, 149, 0, 0.35);
-            --text: #eee4d8;
-            --mid: #8b8296;
-            --dim: #4a4458;
-            --amber: #f58a00;
-            --amber-soft: #ffb347;
-            --amber-glow: rgba(245, 138, 0, 0.25);
-            --green: #40c057;
-            --red: #fa5252;
-            --pink: #f06292;
+            --radius-xl: 30px;
+            --radius-lg: 26px;
+            --radius-md: 18px;
             --radius-sm: 12px;
-            --radius-md: 20px;
-            --radius-lg: 28px;
-            --radius-full: 99px;
-            --shadow-card: 0 8px 32px rgba(0,0,0,0.4);
-            --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+            --radius-pill: 999px;
+            --accent-yellow: #FFD60A;
+            --accent-orange: #FF9F0A;
+            --accent-blue: #0A84FF;
+            --accent-pink: #FF375F;
+            --accent-green: #32D74B;
+            --accent-red: #FA5252;
+            --ease-liquid: cubic-bezier(.22,1,.36,1);
+        }
+        html[data-theme="dark"] {
+            --bg-base: #07060A;
+            --text-primary: #F1EAE0;
+            --text-secondary: #9A93A6;
+            --text-tertiary: #5F5A6D;
+            --glass-bg: rgba(255,255,255,0.055);
+            --glass-bg-strong: rgba(255,255,255,0.09);
+            --glass-border: rgba(255,255,255,0.14);
+            --glass-highlight: rgba(255,255,255,0.22);
+            --glass-shadow: rgba(0,0,0,0.55);
+            --field-bg: rgba(0,0,0,0.35);
+            --field-border: rgba(255,255,255,0.12);
+            --blob-opacity: 0.25;
+            --blob-blur: 74px;
         }
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { font-size: 14px; }
         body {
-            background-color: #0a0807;
-            background-image: radial-gradient(circle at 50% 30%, rgba(255,120,0,0.1) 0%, transparent 65%),
-                              radial-gradient(circle at 50% 80%, #140d0a 0%, #0a0807 100%);
+            background: var(--bg-base);
+            color: var(--text-primary);
             font-family: 'Outfit', sans-serif;
-            color: var(--text);
+            overflow-x: hidden;
             min-height: 100vh;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
             padding: 20px;
+            -webkit-font-smoothing: antialiased;
+            transition: background-color .6s var(--ease-liquid), color .5s var(--ease-liquid);
         }
+        button { font-family: inherit; cursor: pointer; border: none; outline: none; }
+        a { color: inherit; text-decoration: none; }
+
+        .bg-blobs {
+            position: fixed; inset: 0; z-index: -2; overflow: hidden;
+            filter: blur(var(--blob-blur)) saturate(160%);
+            opacity: var(--blob-opacity);
+            pointer-events: none;
+        }
+        .blob { position: absolute; border-radius: 50%; }
+        .blob-yellow { width: 46vw; height: 46vw; top: -12%; left: -8%; background: radial-gradient(circle at 40% 40%, var(--accent-yellow) 0%, transparent 72%); animation: float1 24s var(--ease-liquid) infinite alternate; }
+        .blob-blue { width: 52vw; height: 52vw; bottom: -20%; right: -12%; background: radial-gradient(circle at 60% 60%, var(--accent-blue) 0%, transparent 72%); animation: float2 30s var(--ease-liquid) infinite alternate; }
+        .blob-pink { width: 38vw; height: 38vw; top: 22%; right: 10%; background: radial-gradient(circle at 50% 50%, var(--accent-pink) 0%, transparent 72%); animation: float3 20s var(--ease-liquid) infinite alternate; }
+        .blob-orange { width: 36vw; height: 36vw; bottom: 4%; left: 18%; background: radial-gradient(circle at 50% 50%, var(--accent-orange) 0%, transparent 72%); animation: float4 26s var(--ease-liquid) infinite alternate; }
+        @keyframes float1 { 0%{transform:translate(0,0) scale(1) rotate(0deg);} 50%{transform:translate(6vw,8vh) scale(1.12) rotate(20deg);} 100%{transform:translate(-4vw,4vh) scale(0.95) rotate(-15deg);} }
+        @keyframes float2 { 0%{transform:translate(0,0) scale(1);} 50%{transform:translate(-7vw,-6vh) scale(1.1);} 100%{transform:translate(3vw,-9vh) scale(0.92);} }
+        @keyframes float3 { 0%{transform:translate(0,0) scale(1);} 50%{transform:translate(-5vw,7vh) scale(0.9);} 100%{transform:translate(6vw,3vh) scale(1.15);} }
+        @keyframes float4 { 0%{transform:translate(0,0) scale(1);} 50%{transform:translate(5vw,-5vh) scale(1.08);} 100%{transform:translate(-6vw,-2vh) scale(0.94);} }
+        .grain {
+            position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: 0.035;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+            mix-blend-mode: overlay;
+        }
+        .glass {
+            position: relative;
+            background: var(--glass-bg);
+            backdrop-filter: blur(26px) saturate(180%);
+            -webkit-backdrop-filter: blur(26px) saturate(180%);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 10px 34px var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+            overflow: hidden;
+        }
+        .glass::before {
+            content: ""; position: absolute; inset: 0;
+            background: linear-gradient(130deg, rgba(255,255,255,0.22), transparent 45%);
+            pointer-events: none; opacity: 0.7;
+        }
+
         .container {
             width: 100%;
-            max-width: 580px;
-            background: var(--surface);
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            padding: 32px 28px;
-            box-shadow: var(--shadow-card);
+            max-width: 480px;
+            padding: 36px 32px;
         }
+        .container > * { position: relative; z-index: 1; }
+
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 20px;
+            color: var(--text-secondary);
+            font-size: 0.82rem;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+        .back-link:hover { color: var(--accent-yellow); }
+
         h1 {
-            font-size: 1.8rem;
+            font-size: 1.7rem;
             font-weight: 800;
             letter-spacing: -0.02em;
             display: flex;
             align-items: center;
-            gap: 8px;
-            color: var(--amber);
+            gap: 10px;
+            color: var(--accent-yellow);
+            margin-bottom: 28px;
+        }
+
+        .stat-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
             margin-bottom: 24px;
         }
-        .back-link {
-            display: inline-block;
-            margin-bottom: 20px;
-            color: var(--mid);
-            font-size: 0.8rem;
-            text-decoration: none;
-            font-weight: 600;
-            transition: color 0.2s;
+        .stat-card {
+            padding: 16px;
+            border-radius: var(--radius-md);
+            background: var(--glass-bg-strong);
+            border: 1px solid var(--glass-border);
         }
-        .back-link:hover { color: var(--amber); }
-        .info-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 0;
-            border-bottom: 1px solid var(--border);
-            font-size: 0.9rem;
-        }
-        .info-row .label { color: var(--mid); }
-        .info-row .value { font-weight: 700; font-family: 'Space Mono', monospace; }
-        .balance-row .value { color: var(--amber); }
-        .field-lbl {
+        .stat-card .label {
             font-family: 'Space Mono', monospace;
-            font-size: .65rem;
-            color: var(--dim);
+            font-size: 0.65rem;
+            color: var(--text-tertiary);
             letter-spacing: 1px;
             text-transform: uppercase;
             margin-bottom: 6px;
+        }
+        .stat-card .value {
+            font-weight: 700;
+            font-family: 'Space Mono', monospace;
+            font-size: 1.1rem;
+        }
+        .stat-card .value.amber { color: var(--accent-yellow); }
+        .stat-card .value.green { color: var(--accent-green); }
+        .stat-card .value.pink { color: var(--accent-pink); }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: var(--radius-pill);
+            font-family: 'Space Mono', monospace;
+        }
+        .status-badge.active {
+            background: rgba(50,215,75,0.12);
+            color: var(--accent-green);
+            border: 1px solid rgba(50,215,75,0.25);
+        }
+        .status-badge.inactive {
+            background: rgba(255,55,95,0.1);
+            color: var(--accent-pink);
+            border: 1px solid rgba(255,55,95,0.2);
+        }
+        .pulse-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: currentColor;
+            box-shadow: 0 0 8px currentColor;
+            animation: pulseDot 2s infinite;
+        }
+        @keyframes pulseDot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .field-lbl {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.65rem;
+            color: var(--text-tertiary);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
             display: block;
         }
         .field-inp {
             width: 100%;
             padding: 14px 18px;
-            background: rgba(10,10,20,0.6);
-            border: 1px solid var(--border-mid);
-            border-radius: 10px;
-            color: var(--amber);
-            font-family: 'Space Mono';
+            background: var(--field-bg);
+            border: 1px solid var(--field-border);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: 'Space Mono', monospace;
             font-size: 1rem;
             outline: none;
             transition: border-color 0.2s;
         }
-        .field-inp:focus { border-color: var(--border-hi); }
+        .field-inp:focus { border-color: var(--accent-yellow); }
+        .field-inp::placeholder { color: var(--text-tertiary); }
+
         .btn {
             width: 100%;
             padding: 14px;
-            border: none;
             border-radius: var(--radius-sm);
-            font-weight: 800;
-            font-size: 0.95rem;
+            font-weight: 700;
+            font-size: 0.9rem;
             letter-spacing: 0.5px;
             cursor: pointer;
-            transition: 0.2s;
-            margin-top: 16px;
+            transition: all 0.25s var(--ease-liquid);
+            margin-top: 12px;
         }
         .btn-stake {
-            background: var(--amber);
+            background: var(--accent-yellow);
             color: #000;
-            box-shadow: 0 4px 20px rgba(255,149,0,0.3);
+            box-shadow: 0 4px 20px rgba(255,214,10,0.25);
         }
-        .btn-stake:hover { background: var(--amber-soft); transform: translateY(-2px); }
+        .btn-stake:hover { background: #ffe44d; transform: translateY(-2px); box-shadow: 0 6px 28px rgba(255,214,10,0.35); }
         .btn-unstake {
             background: transparent;
-            color: var(--pink);
-            border: 1px solid rgba(255,45,120,0.4);
-            box-shadow: 0 2px 12px rgba(255,45,120,0.1);
+            color: var(--accent-pink);
+            border: 1px solid rgba(255,55,95,0.3);
         }
         .btn-unstake:hover {
-            background: rgba(255,45,120,0.15);
-            border-color: var(--pink);
+            background: rgba(255,55,95,0.1);
+            border-color: var(--accent-pink);
             transform: translateY(-2px);
         }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-        .status-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 0.75rem;
-            font-weight: 700;
-            padding: 4px 12px;
-            border-radius: var(--radius-full);
-            background: rgba(64,192,87,0.1);
-            color: var(--green);
-            border: 1px solid rgba(64,192,87,0.2);
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; }
+
+        .divider {
+            height: 1px;
+            background: var(--glass-border);
+            margin: 20px 0;
         }
-        .status-badge.inactive { background: rgba(255,45,120,0.1); color: var(--pink); border-color: rgba(255,45,120,0.2); }
-        .pulse-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--green);
-            box-shadow: 0 0 8px rgba(64,192,87,0.4);
-            animation: pulseDot 2s infinite;
+
+        .hint {
+            margin-top: 20px;
+            font-size: 0.72rem;
+            color: var(--text-tertiary);
+            text-align: center;
+            line-height: 1.5;
         }
-        .inactive .pulse-dot { background: var(--red); box-shadow: 0 0 8px rgba(250,82,82,0.4); }
-        @keyframes pulseDot {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
+
         #toast {
             position: fixed;
-            bottom: 20px;
+            bottom: 24px;
             left: 50%;
-            transform: translateX(-50%);
-            background: #111;
-            border: 1px solid var(--amber);
-            padding: 10px 20px;
-            border-radius: 50px;
+            transform: translateX(-50%) translateY(20px);
+            background: var(--glass-bg-strong);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            padding: 12px 24px;
+            border-radius: var(--radius-pill);
             font-weight: 600;
             font-size: 0.85rem;
             opacity: 0;
-            transition: opacity 0.3s;
+            transition: all 0.35s var(--ease-liquid);
             z-index: 999;
+            pointer-events: none;
         }
-        #toast.show { opacity: 1; }
-        #toast.error { border-color: var(--red); color: var(--red); }
+        #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        #toast.error { border-color: var(--accent-red); color: var(--accent-red); }
+        #toast.success { border-color: var(--accent-green); color: var(--accent-green); }
+
         @media (max-width: 480px) {
-            .container { padding: 20px 16px; }
+            .container { padding: 24px 18px; }
+            .stat-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="bg-blobs">
+        <div class="blob blob-yellow"></div>
+        <div class="blob blob-blue"></div>
+        <div class="blob blob-pink"></div>
+        <div class="blob blob-orange"></div>
+    </div>
+    <div class="grain"></div>
+
+    <div class="container glass">
         <a href="index.html" class="back-link">← Dashboard</a>
         <h1>🏦 STAKING VAULT</h1>
 
-        <div class="info-row balance-row">
-            <span class="label">Your balance</span>
-            <span class="value" id="user-balance">-- CC</span>
-        </div>
-        <div class="info-row">
-            <span class="label">Staked amount</span>
-            <span class="value" id="staked-amount">-- CC</span>
-        </div>
-        <div class="info-row">
-            <span class="label">Validator status</span>
-            <span id="validator-status" class="status-badge inactive"><span class="pulse-dot"></span> INACTIVE</span>
-        </div>
-        <div class="info-row">
-            <span class="label">Pending reward</span>
-            <span class="value" id="pending-reward">0.0 CC</span>
-        </div>
-
-        <div style="margin-top: 18px;">
-            <label class="field-lbl">Stake amount</label>
-            <input type="number" id="stake-input" class="field-inp" placeholder="Min 10 CC" min="10" step="1">
-            <button class="btn btn-stake" id="stake-btn">STAKE</button>
-            <button class="btn btn-unstake" id="unstake-btn">UNSTAKE ALL</button>
+        <div class="stat-grid">
+            <div class="stat-card">
+                <div class="label">Balance</div>
+                <div class="value amber" id="user-balance">-- CC</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Staked</div>
+                <div class="value green" id="staked-amount">-- CC</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Pending Reward</div>
+                <div class="value" id="pending-reward">0.0 CC</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Status</div>
+                <span id="validator-status" class="status-badge inactive"><span class="pulse-dot"></span> INACTIVE</span>
+            </div>
         </div>
 
-        <div style="margin-top: 20px; font-size: 0.7rem; color: var(--dim); text-align: center;">
+        <div class="divider"></div>
+
+        <label class="field-lbl">Stake amount (min 10 CC)</label>
+        <input type="number" id="stake-input" class="field-inp" placeholder="10 CC" min="10" step="1">
+        <button class="btn btn-stake" id="stake-btn">STAKE</button>
+        <button class="btn btn-unstake" id="unstake-btn">UNSTAKE ALL</button>
+
+        <div class="hint">
             Staking rewards are distributed when you are chosen as the block proposer (PoS).
         </div>
     </div>
@@ -222,13 +331,12 @@
     <div id="toast"></div>
 
     <script>
-        // Lấy thông tin từ localStorage
-        let username = localStorage.getItem('choco_user');
-        const token = localStorage.getItem('choco_token');
+        const isPreview = new URLSearchParams(window.location.search).has('preview');
+        let username = localStorage.getItem('choco_user') || (isPreview ? 'demo' : null);
+        const token = localStorage.getItem('choco_token') || (isPreview ? 'preview' : null);
 
-        if (!username || !token) {
-            // Chưa đăng nhập, chuyển về dashboard
-            alert('Vui lòng đăng nhập trước.');
+        if (!isPreview && (!username || !token)) {
+            alert('Please login first.');
             window.location.href = 'index.html';
         }
 
@@ -240,7 +348,6 @@
             t._timeout = setTimeout(() => t.className = '', 3000);
         }
 
-        // Hàm gọi API có token
         async function apiCall(method, path, body = null) {
             const options = {
                 method,
@@ -254,8 +361,16 @@
             return res.json();
         }
 
-        // Lấy thông tin staking (không cần token nhưng vẫn gửi để đồng bộ)
         async function refreshUI() {
+            if (isPreview) {
+                document.getElementById('user-balance').textContent = '42.0000 CC';
+                document.getElementById('staked-amount').textContent = '25.0000 CC';
+                document.getElementById('pending-reward').textContent = '0.1250 CC';
+                const badge = document.getElementById('validator-status');
+                badge.innerHTML = '<span class="pulse-dot"></span> VALIDATOR';
+                badge.className = 'status-badge active';
+                return;
+            }
             try {
                 const res = await fetch(`/pos/info?username=${encodeURIComponent(username)}`, {
                     headers: { 'Authorization': `Bearer ${token}` }
@@ -264,11 +379,10 @@
                 if (data.status === 'success') {
                     document.getElementById('user-balance').textContent = data.balance.toFixed(4) + ' CC';
                     document.getElementById('staked-amount').textContent = (data.staked || 0).toFixed(4) + ' CC';
-                    const isValidator = data.is_validator;
                     const badge = document.getElementById('validator-status');
-                    if (isValidator) {
+                    if (data.is_validator) {
                         badge.innerHTML = '<span class="pulse-dot"></span> VALIDATOR';
-                        badge.className = 'status-badge';
+                        badge.className = 'status-badge active';
                     } else {
                         badge.innerHTML = '<span class="pulse-dot"></span> INACTIVE';
                         badge.className = 'status-badge inactive';
@@ -276,7 +390,6 @@
                     document.getElementById('pending-reward').textContent = (data.pending_reward || 0).toFixed(4) + ' CC';
                 } else {
                     if (data.message === 'User not found') {
-                        // Có thể token hết hạn hoặc user không tồn tại
                         showToast('Session expired. Please login again.', 'error');
                         setTimeout(() => { window.location.href = 'index.html'; }, 1500);
                     } else {
@@ -288,7 +401,6 @@
             }
         }
 
-        // Stake: chỉ gửi amount (server lấy username từ token)
         document.getElementById('stake-btn').addEventListener('click', async () => {
             const amount = parseFloat(document.getElementById('stake-input').value);
             if (isNaN(amount) || amount < 10) {
@@ -315,7 +427,6 @@
             }
         });
 
-        // Unstake: không cần body
         document.getElementById('unstake-btn').addEventListener('click', async () => {
             const btn = document.getElementById('unstake-btn');
             btn.disabled = true;
