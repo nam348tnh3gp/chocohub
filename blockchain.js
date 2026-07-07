@@ -106,6 +106,12 @@ function initBlockchain() {
     db.insertBlock(genesis);
     console.log('🌱 Genesis block created');
   }
+
+  // Seed pool job at next height
+  const lastBlock = getLastBlock();
+  if (lastBlock) {
+    preCreateJobs(lastBlock.height + 1, JOB_POOL_SIZE, lastBlock.hash);
+  }
 }
 
 // ─── Lấy block cuối ────────────────────────────
@@ -135,51 +141,35 @@ function decayWorkerDifficulty(workerName, missedSeconds) {
 
 // ─── Lấy job cho worker (tạo mới nếu chưa có) ─
 function getJobForWorker(workerName, instanceId, deviceType) {
-  // Per-instance difficulty key so different instances of the same user
-  // get independent difficulty tracking.
   const diffKey = instanceId ? workerName + ':' + instanceId : workerName;
 
-  // 🆕 Stale-job decay: if the current active job has expired without a solve,
-  // decay difficulty before cleaning up so the next job is easier.
-  // Anti-exploit: penalize repeated timeouts with a minimum cooldown
   const staleJob = db.getJobForWorker(diffKey);
   if (staleJob) {
     const createdTs = parseFlexibleDate(staleJob.created_at);
     const ageSeconds = (Date.now() / 1000) - createdTs;
     if (ageSeconds > JOB_EXPIRE_SECONDS) {
       decayWorkerDifficulty(diffKey, ageSeconds);
-      // Anti-exploit: mark that this worker just timed out, enforce cooldown
       db.setWorkerDifficulty(diffKey + '_timeout', Date.now(), Date.now());
     }
   }
 
-  // Anti-exploit: enforce 10s cooldown after a timeout before giving a new job
   const lastTimeout = db.getWorkerDifficulty(diffKey + '_timeout');
   if (lastTimeout) {
     const cooldownElapsed = (Date.now() - lastTimeout) / 1000;
     if (cooldownElapsed < 10) {
-      // Still in cooldown — return the stale job if possible, else wait
       const existingJob = db.getJobForWorker(diffKey);
       if (existingJob) return mapJob(existingJob);
-      // Create a dummy response telling the miner to wait
       return { status: 'cooldown', message: 'Wait before requesting a new job', retry_after: Math.ceil(10 - cooldownElapsed) };
     }
-    // Cooldown passed — clear it
     db.setWorkerDifficulty(diffKey + '_timeout', 0, 0);
   }
 
-  // Dọn dẹp job hết hạn
   db.cleanupExpiredJobs(JOB_EXPIRE_SECONDS);
 
-  // Kiểm tra worker đã có job active chưa
   let job = db.getJobForWorker(diffKey);
   if (job) {
-    // Validate that the height this job targets hasn't already been mined.
-    // This can happen when another worker wins the race and the loser's job
-    // is still marked 'active' (not yet expired).
     const blockAtHeight = db.getBlockByHeight(job.height);
     if (blockAtHeight) {
-      // Height already taken — discard this stale job so a fresh one is created below
       db.deleteJobsAtHeight(job.height);
       job = null;
     } else {
@@ -187,22 +177,28 @@ function getJobForWorker(workerName, instanceId, deviceType) {
     }
   }
 
-  // Lấy block cuối
   const lastBlock = getLastBlock();
   const height = lastBlock ? lastBlock.height + 1 : 0;
   const prevHash = lastBlock ? lastBlock.hash : '0'.repeat(64);
 
-  // 🆕 Tier per-instance: try diffKey first, fall back to user-level
+  // Try to grab a pool job at the next height
+  const poolJob = db.prepare(
+    'SELECT * FROM mining_jobs WHERE height = ? AND status = ? AND assigned_to = ? ORDER BY created_at ASC LIMIT 1'
+  ).get(height, 'active', '_pool');
+
+  if (poolJob) {
+    db.prepare('UPDATE mining_jobs SET assigned_to = ? WHERE id = ?').run(diffKey, poolJob.id);
+    return mapJob(poolJob);
+  }
+
   let tier = db.getWorkerTier(diffKey);
   if (!tier || tier === 'cpu') {
     tier = db.getWorkerTier(workerName);
   }
   const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cpu;
 
-  // Lấy difficulty riêng của instance này
   let diff = db.getWorkerDifficulty(diffKey);
   if (diff === null) {
-    // Use device_type as a starting difficulty hint
     if (deviceType === 'mobile_web') {
       diff = Math.max(MIN_DIFFICULTY, Math.floor(INITIAL_DIFFICULTY / 5));
     } else {
@@ -211,7 +207,6 @@ function getJobForWorker(workerName, instanceId, deviceType) {
     db.setWorkerDifficulty(diffKey, diff, Date.now());
   }
 
-  // 🆕 Đảm bảo diff trong khoảng cho phép VÀ không vượt quá max của tier
   diff = Math.max(MIN_DIFFICULTY, Math.min(tierConfig.maxDifficulty, diff));
 
   const targetHex = difficultyToTarget(diff);
@@ -231,8 +226,38 @@ function getJobForWorker(workerName, instanceId, deviceType) {
     reward_multiplier: multiplier
   });
 
+  // Pre-create jobs at next heights so other miners have work too
+  preCreateJobs(height + 1, 3, prevHash);
+
   const newJob = db.getActiveJob(jobId);
   return mapJob(newJob);
+}
+
+const JOB_POOL_SIZE = 1;
+
+function preCreateJobs(fromHeight, count, lastPrevHash) {
+  const h = fromHeight;
+  const existing = db.prepare(
+    'SELECT id FROM mining_jobs WHERE height = ? AND status = ?'
+  ).get(h, 'active');
+  if (existing) return;
+
+  const blockAtHeight = db.getBlockByHeight(h);
+  if (blockAtHeight) return;
+
+  const targetHex = difficultyToTarget(INITIAL_DIFFICULTY);
+  const jobId = 'job_' + crypto.randomBytes(6).toString('hex');
+  db.createJob({
+    id: jobId,
+    height: h,
+    prev_hash: lastPrevHash,
+    difficulty: INITIAL_DIFFICULTY,
+    target_hex: targetHex,
+    reward: REWARD_PER_BLOCK,
+    assigned_to: '_pool',
+    tier: 'cpu',
+    reward_multiplier: 1.0
+  });
 }
 
 // ─── Chuyển đổi job object ─────────────────────
@@ -330,8 +355,13 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   if (!job) {
     throw new Error('Job not found or already solved');
   }
-  if (job.assigned_to && job.assigned_to !== diffKey) {
+  if (job.assigned_to && job.assigned_to !== diffKey && job.assigned_to !== '_pool') {
     throw new Error('This job is assigned to another worker');
+  }
+
+  // Claim pool job for this worker
+  if (job.assigned_to === '_pool') {
+    db.prepare('UPDATE mining_jobs SET assigned_to = ? WHERE id = ?').run(diffKey, jobId);
   }
 
   // Suspension check uses the user account (shared across instances)
@@ -454,8 +484,11 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   // (other workers may still have active jobs targeting the same height —
   // leaving them alive is what caused the UNIQUE constraint rejection loop).
   db.markJobSolved(jobId);
-  db.deleteJobsAtHeight(job.height, jobId); // removes every other active job at this height
-  db.deleteJobsForWorker(diffKey, jobId); // belt-and-suspenders: clean up winner's own leftovers
+  db.deleteJobsAtHeight(job.height, jobId);
+  db.deleteJobsForWorker(diffKey, jobId);
+
+  // Pre-create jobs at next heights for other miners
+  preCreateJobs(newBlock.height + 1, JOB_POOL_SIZE, hashHex);
 
   // Điều chỉnh difficulty cho instance dựa trên thời gian giải
   const solveTime = (timestamp - parseFlexibleDate(job.created_at));
