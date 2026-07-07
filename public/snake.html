@@ -387,6 +387,19 @@
             white-space: nowrap; z-index: 10005; box-shadow: 0 0 30px rgba(255,153,0,0.4);
         }
         
+        .touch-hint {
+            display: none;
+            text-align: center;
+            padding: 10px;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.65rem;
+            color: var(--dim);
+            letter-spacing: 1px;
+        }
+        .touch-active .dpad-desktop { display: none !important; }
+        .touch-active .touch-hint { display: block; }
+        .touch-active .cvs-wrap { border-color: var(--amber); cursor: grab; }
+
         @media (max-width: 600px) {
             .panel { padding: 20px; }
             .game-title { font-size: 1.6rem; }
@@ -576,7 +589,7 @@
                     <div class="spd-bar" id="spd-bar"></div>
                 </div>
 
-                <div class="dpad">
+                <div class="dpad dpad-desktop">
                     <div></div>
                     <button class="dpad-btn" onpointerdown="dpadHit('UP',event)">▲</button>
                     <div></div>
@@ -588,6 +601,10 @@
                     <div></div>
                     <button class="dpad-btn" onpointerdown="dpadHit('DOWN',event)">▼</button>
                     <div></div>
+                </div>
+
+                <div class="touch-hint" id="touch-hint">
+                    <span>👆 SWIPE ON THE GAME TO CONTROL</span>
                 </div>
 
                 <div class="gbtn-row">

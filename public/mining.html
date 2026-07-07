@@ -39,7 +39,7 @@
             --terminal-bg: #050608;
             --terminal-border: rgba(255,255,255,0.08);
 
-            --blob-opacity: 0.2;
+            --blob-opacity: 0.55;
             --blob-blur: 70px;
             --input-track: rgba(255,255,255,0.08);
         }
@@ -60,7 +60,7 @@
             --terminal-bg: #14141C;
             --terminal-border: rgba(255,255,255,0.08);
 
-            --blob-opacity: 0.7;
+            --blob-opacity: 0.5;
             --blob-blur: 80px;
             --input-track: rgba(0,0,0,0.08);
         }
@@ -944,6 +944,9 @@
         // Device type for starting difficulty hint
         const deviceType = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
             || window.innerWidth < 768 ? 'mobile_web' : 'desktop_web';
+        // Node auto-discovery
+        let currentServer = '';  // '' = direct, or 'http://node:port'
+        let selectedNode = null;
 
         // ---------- UI helpers ----------
         function showToast(msg, isError = false) {
@@ -964,6 +967,51 @@
             if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
             if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
             return n.toString();
+        }
+
+        // ---------- Node Auto-Discovery ----------
+        async function discoverBestNode() {
+            try {
+                const resp = await fetch('/api/nodes');
+                const data = await resp.json();
+                if (data.status !== 'success' || !data.nodes || data.nodes.length === 0) {
+                    log('No mining nodes found. Using direct connection.', 'info');
+                    currentServer = '';
+                    return;
+                }
+                log(`Found ${data.nodes.length} node(s). Testing latency...`, 'info');
+
+                const results = await Promise.all(data.nodes.map(async (node) => {
+                    try {
+                        const start = Date.now();
+                        const r = await fetch(`${node.url}/ping`, { signal: AbortSignal.timeout(5000) });
+                        await r.json();
+                        const latency = Date.now() - start;
+                        return { ...node, latency, load: node.cpu_load || 0 };
+                    } catch (e) {
+                        return { ...node, latency: Infinity, load: 100 };
+                    }
+                }));
+
+                // Sort: 70% latency weight, 30% load weight
+                results.sort((a, b) => {
+                    const scoreA = (a.latency * 0.7) + (a.load * 30);
+                    const scoreB = (b.latency * 0.7) + (b.load * 30);
+                    return scoreA - scoreB;
+                });
+
+                selectedNode = results[0];
+                if (selectedNode.latency === Infinity) {
+                    log('All nodes unreachable. Using direct connection.', 'warn');
+                    currentServer = '';
+                } else {
+                    currentServer = selectedNode.url;
+                    log(`Connected to: ${selectedNode.name} (${selectedNode.location}) — ${selectedNode.latency}ms`, 'info');
+                }
+            } catch (e) {
+                log(`Node discovery failed: ${e.message}. Using direct connection.`, 'warn');
+                currentServer = '';
+            }
         }
 
         function updateUI() {
@@ -996,7 +1044,7 @@
         // ---------- Job handling (hỗ trợ cả server cũ và mới) ----------
         async function fetchNewJob() {
             try {
-                const res = await fetch('/get_job', {
+                const res = await fetch(`${currentServer}/get_job`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ worker_name: workerName, instance_id: instanceId, device_type: deviceType })
@@ -1112,7 +1160,7 @@
         async function submitSolution(jobId, nonce, wName, instId) {
             log(`Submitting solution for #${jobId.substring(0,8)}...`, 'info');
             try {
-                const res = await fetch('/submit_solution', {
+                const res = await fetch(`${currentServer}/submit_solution`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1338,11 +1386,13 @@
             startBoostPolling();
             updateBoostUI();
             log(`Logged in as: ${workerName}`, 'info');
-            // Tự động bắt đầu sau 1 giây
-            setTimeout(() => {
-                autoMineEnabled = true;
-                startMiningLoop();
-            }, 1000);
+            // Discover best node, then auto-mine
+            discoverBestNode().then(() => {
+                setTimeout(() => {
+                    autoMineEnabled = true;
+                    startMiningLoop();
+                }, 1000);
+            });
         }
 
         init();
