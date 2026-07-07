@@ -974,10 +974,10 @@
             return n.toString();
         }
 
-        // ---------- Node Auto-Discovery (browser-side ping) ----------
+        // ---------- Node Auto-Discovery (server-side ping) ----------
         async function discoverBestNode() {
             try {
-                const resp = await fetch('/api/nodes');
+                const resp = await fetch('/api/nodes/discover');
                 const data = await resp.json();
                 if (data.status !== 'success' || !data.nodes || data.nodes.length === 0) {
                     log('No mining nodes found. Using direct connection.', 'info');
@@ -985,44 +985,20 @@
                     selectedNode = null;
                     return;
                 }
+                log(`Found ${data.nodes.length} node(s). Testing latency...`, 'info');
 
-                const publicNodes = data.nodes.filter(n => !n.url.includes('localhost'));
-                if (publicNodes.length === 0) {
-                    log('No public nodes found. Using direct connection.', 'warn');
-                    currentServer = '';
-                    selectedNode = null;
-                    return;
-                }
-
-                log(`Found ${publicNodes.length} node(s). Pinging from your location...`, 'info');
-
-                const results = await Promise.all(publicNodes.map(async (node) => {
-                    try {
-                        const start = performance.now();
-                        const ctrl = new AbortController();
-                        const t = setTimeout(() => ctrl.abort(), 8000);
-                        const r = await fetch(node.url + '/ping', { signal: ctrl.signal });
-                        clearTimeout(t);
-                        if (!r.ok) throw new Error('nok');
-                        await r.json();
-                        return { ...node, latency: performance.now() - start, reachable: true };
-                    } catch {
-                        return { ...node, latency: Infinity, reachable: false };
-                    }
-                }));
-
-                const reachable = results.filter(n => n.reachable);
+                // Filter reachable nodes
+                const reachable = data.nodes.filter(n => n.reachable && n.latency !== Infinity);
                 if (reachable.length === 0) {
-                    log('All nodes unreachable from your location. Using direct connection.', 'warn');
+                    log('All nodes unreachable. Using direct connection.', 'warn');
                     currentServer = '';
                     selectedNode = null;
                     return;
                 }
 
-                reachable.sort((a, b) => a.latency - b.latency);
-                selectedNode = reachable[0];
-                currentServer = '/api/proxy';
-                log(`Connected to: ${selectedNode.name} (${selectedNode.location}) — ${selectedNode.latency.toFixed(0)}ms from you`, 'info');
+                selectedNode = reachable[0]; // Already sorted by latency
+                currentServer = '/api/proxy'; // Route through main server
+                log(`Connected to: ${selectedNode.name} (${selectedNode.location}) — ${selectedNode.latency}ms`, 'info');
             } catch (e) {
                 log(`Node discovery failed: ${e.message}. Using direct connection.`, 'warn');
                 currentServer = '';
