@@ -2449,16 +2449,17 @@ app.listen(PORT, () => {
         if (nodes.length > 0) {
           for (const node of nodes) {
             try {
-              const resp = await fetch(`${node.url}/api/nodes/sync-blocks?since=0`, {
-                headers: { 'Authorization': `Bearer ${node.auth_token}` }
+              const resp = await fetch(`${node.url}/full-chain`, {
+                headers: { 'Authorization': `Bearer ${NODE_MASTER_TOKEN}` }
               });
               if (resp.ok) {
                 const data = await resp.json();
-                if (data.blocks && data.blocks.length > 0) {
+                if (data.status === 'success' && data.blocks && data.blocks.length > 0) {
+                  let imported = 0;
                   for (const block of data.blocks) {
-                    try { db.insertBlock(block); } catch (e) { /* skip */ }
+                    try { db.insertBlock(block); imported++; } catch (e) { /* skip */ }
                   }
-                  console.log(`📥 Restored ${data.blocks.length} blocks from node: ${node.name}`);
+                  console.log(`📥 Restored ${imported} blocks from node: ${node.name} (height: ${data.last_height})`);
                   break;
                 }
               }
