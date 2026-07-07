@@ -1015,7 +1015,6 @@ ensureColumn('mining_jobs', 'tier', 'TEXT DEFAULT "cpu"');
 ensureColumn('mining_jobs', 'reward_multiplier', 'REAL DEFAULT 1.0');
 ensureColumn('blocks', 'tier', 'TEXT DEFAULT "unknown"');
 ensureColumn('blocks', 'pos_contribution', 'REAL DEFAULT 0');
-ensureColumn('mining_nodes', 'last_block_height', 'INTEGER DEFAULT 0');
 
 // ═══════════════════════════════════════════════════
 // 🆕 CREATE WORKER_FLAGS TABLE
@@ -1054,6 +1053,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_mining_nodes_status ON mining_nodes(status);
   CREATE INDEX IF NOT EXISTS idx_mining_nodes_heartbeat ON mining_nodes(last_heartbeat);
 `);
+
+ensureColumn('mining_nodes', 'last_block_height', 'INTEGER DEFAULT 0');
 
 // ═══════════════════════════════════════════════════
 // 🆕 MINING NODE FUNCTIONS
