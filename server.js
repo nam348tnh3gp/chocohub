@@ -2114,6 +2114,55 @@ app.get('/api/nodes/discover', async (req, res) => {
   }
 });
 
+// Public proxy: miner sends job request here, server forwards to node
+// (bypasses localtunnel interstitial that blocks browser requests)
+app.post('/api/proxy/get_job', nodeRateLimit, async (req, res) => {
+  try {
+    const { node_id, worker_name, instance_id, device_type } = req.body;
+    if (!node_id || !worker_name) {
+      return res.status(400).json({ status: 'error', message: 'Missing node_id or worker_name' });
+    }
+    const node = db.getMiningNodeById(parseInt(node_id));
+    if (!node) {
+      return res.status(404).json({ status: 'error', message: 'Node not found' });
+    }
+    const resp = await fetch(`${node.url}/get_job`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ worker_name, instance_id, device_type })
+    });
+    const data = await resp.json();
+    res.json(data);
+  } catch (e) {
+    console.error('Proxy get_job error:', e.message);
+    res.status(502).json({ status: 'error', message: 'Node unreachable' });
+  }
+});
+
+// Public proxy: miner sends solution here, server forwards to node
+app.post('/api/proxy/submit_solution', nodeRateLimit, async (req, res) => {
+  try {
+    const { node_id, bounty_id, nonce, worker_name, instance_id, device_type } = req.body;
+    if (!node_id || !bounty_id || nonce === undefined || !worker_name) {
+      return res.status(400).json({ status: 'error', message: 'Missing required fields' });
+    }
+    const node = db.getMiningNodeById(parseInt(node_id));
+    if (!node) {
+      return res.status(404).json({ status: 'error', message: 'Node not found' });
+    }
+    const resp = await fetch(`${node.url}/submit_solution`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bounty_id, nonce, worker_name, instance_id, device_type })
+    });
+    const data = await resp.json();
+    res.json(data);
+  } catch (e) {
+    console.error('Proxy submit_solution error:', e.message);
+    res.status(502).json({ status: 'error', message: 'Node unreachable' });
+  }
+});
+
 // Internal: Node gets job (proxied from main server)
 app.post('/api/nodes/get_job', nodeRateLimit, (req, res) => {
   try {
