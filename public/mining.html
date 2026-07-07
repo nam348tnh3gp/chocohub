@@ -947,6 +947,7 @@
         // Node auto-discovery
         let currentServer = '';  // '' = direct, or 'http://node:port'
         let selectedNode = null;
+        let heartbeatInterval = null;
 
         // ---------- UI helpers ----------
         function showToast(msg, isError = false) {
@@ -999,6 +1000,24 @@
                 currentServer = '';
                 selectedNode = null;
             }
+        }
+
+        // ---------- Miner heartbeat to node (updates connected_miners count) ----------
+        function startHeartbeat() {
+            stopHeartbeat();
+            heartbeatInterval = setInterval(async () => {
+                if (!selectedNode) return;
+                try {
+                    await fetch(`${selectedNode.url}/miner_heartbeat`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ miners: 1 })
+                    });
+                } catch (e) { /* silent */ }
+            }, 15000);
+        }
+        function stopHeartbeat() {
+            if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
         }
 
         function updateUI() {
@@ -1228,6 +1247,7 @@
                 startBtn.textContent = '⏸ Pause';
                 stopBtn.disabled = false;
                 log('Starting mining...', 'info');
+                startHeartbeat();
                 startMiningLoop();
             }
         }
@@ -1235,6 +1255,7 @@
         function onStop() {
             autoMineEnabled = false;
             stopMiningProcess(false);
+            stopHeartbeat();
             startBtn.textContent = '▶ Start Mining';
             stopBtn.disabled = true;
             log('Miner stopped completely.', 'warn');
