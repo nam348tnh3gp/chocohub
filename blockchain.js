@@ -5,7 +5,7 @@ const db = require('./db');
 
 // ─── Cấu hình ────────────────────────────────────
 const REWARD_PER_BLOCK = 0.05;                  // 0.05 CC
-const INITIAL_DIFFICULTY = 1;                  // mặc định cho worker mới
+const INITIAL_DIFFICULTY = 10;                  // mặc định cho worker mới
 const JOB_EXPIRE_SECONDS = 60;                  // job hết hạn sau 60s
 const MIN_DIFFICULTY = 1;
 const MAX_DIFFICULTY = 1000000;
@@ -64,7 +64,7 @@ const DEVICE_REWARD_MULTIPLIERS = {
   'mobile': 2.0,
   'android': 2.0,
   'ios': 2.0,
-  'web_miner': 1.3,
+  'web_miner': 1.0,
   'cpu': 1.0,
   'cpu_miner': 1.0,
   'gpu': 1.0, // Changed from 0.5 to 1.0
@@ -305,7 +305,7 @@ function getDeviceMultiplier(deviceType) {
 }
 
 // ─── Submit solution ────────────────────────────
-function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, instanceId) {
+function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, instanceId, nodeId) {
   const diffKey = instanceId ? workerName + ':' + instanceId : workerName;
   const userName = diffKey.includes(':') ? diffKey.split(':')[0] : diffKey;
   const job = db.getActiveJob(jobId);
@@ -370,13 +370,23 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     console.log(`⚠️ Legacy job ${jobId} using device_type multiplier: ${deviceMultiplier}x`);
   }
 
-  // 🆕 Reward split: 5% to PoS pool (flat, always), 95% to miner (before boost)
+  // 🆕 Reward split: 5% to PoS pool (flat, always), rest to miner
+  // If nodeId: 90% miner / 5% node / 5% PoS
+  // If no node: 95% miner / 5% PoS
   const POS_REWARD_SHARE = 0.05;
-  const MINER_REWARD_SHARE = 0.95;
   const posContribution = parseFloat((REWARD_PER_BLOCK * POS_REWARD_SHARE).toFixed(8)); // always 0.0025 CC
-  const minerBase = parseFloat((REWARD_PER_BLOCK * MINER_REWARD_SHARE).toFixed(8));     // always 0.0475 CC
 
-  // miner reward = 0.0475 × tier_multiplier
+  let minerShare, nodeContribution;
+  if (nodeId) {
+    minerShare = 0.90;
+    nodeContribution = parseFloat((REWARD_PER_BLOCK * 0.05).toFixed(8)); // 0.0025 CC
+  } else {
+    minerShare = 0.95;
+    nodeContribution = 0;
+  }
+  const minerBase = parseFloat((REWARD_PER_BLOCK * minerShare).toFixed(8));
+
+  // miner reward = minerBase × tier_multiplier
   const deviceReward = parseFloat((minerBase * deviceMultiplier).toFixed(8));
 
   // ─── Mining Boost: multiplicador 1.3x se ativo ──
@@ -407,8 +417,14 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   // Lưu block
   db.insertBlock(newBlock);
 
-  // Pay miner (95% × multiplier × boost) — credit the user account
+  // Pay miner (minerBase × multiplier × boost) — credit the user account
   db.updateBalance(userName, finalReward);
+
+  // 🆕 Credit node earnings
+  if (nodeId && nodeContribution > 0) {
+    db.addMiningNodeEarnings(nodeId, nodeContribution);
+    console.log(`📡 Node ${nodeId} earned ${nodeContribution} CC`);
+  }
 
   if (bonusReward > 0) {
     console.log(`⚡ Mining boost active for ${diffKey}: ${deviceReward} → ${finalReward} CC (${boostMultiplier}x)`);
@@ -470,9 +486,9 @@ function adjustWorkerDifficulty(workerName, solveTime) {
 
   // Tính toán difficulty mới
   let idealDiff = currentDiff * (targetTime / solveTime);
-  let newDiff = currentDiff + (idealDiff - currentDiff) * DIFFICULTY_ADJUSTMENT_FACTOR;
-  // Giới hạn thay đổi tối đa 25% để tránh biến động mạnh
-  const maxChange = currentDiff * 2;
+  let newDiff = currentDiff + (idealDiff - currentDiff) * 0.75;
+  // Giới hạn thay đổi tối đa 200% để ramp nhanh hơn
+  const maxChange = currentDiff * 2.0;
   newDiff = Math.max(currentDiff - maxChange, Math.min(currentDiff + maxChange, newDiff));
   newDiff = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, newDiff));
   newDiff = Math.round(newDiff * 10) / 10;

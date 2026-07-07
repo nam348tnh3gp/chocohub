@@ -1025,7 +1025,86 @@ db.exec(`
     cleared_at INTEGER DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS idx_worker_flags_suspended ON worker_flags(suspended);
+
+  -- 🆕 Mining Nodes table
+  CREATE TABLE IF NOT EXISTS mining_nodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    url TEXT UNIQUE NOT NULL,
+    auth_token TEXT UNIQUE NOT NULL,
+    owner TEXT DEFAULT '',
+    location TEXT DEFAULT '',
+    status TEXT DEFAULT 'active',
+    connected_miners INTEGER DEFAULT 0,
+    cpu_load REAL DEFAULT 0,
+    ping_ms REAL DEFAULT 0,
+    last_heartbeat TEXT DEFAULT (datetime('now')),
+    total_earned REAL DEFAULT 0,
+    total_blocks_relayed INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
 `);
+
+// ═══════════════════════════════════════════════════
+// 🆕 MINING NODE FUNCTIONS
+// ═══════════════════════════════════════════════════
+
+function registerMiningNode(name, url, owner, location) {
+  const crypto = require('crypto');
+  const authToken = 'node_' + crypto.randomBytes(16).toString('hex');
+  db.prepare(`
+    INSERT INTO mining_nodes (name, url, auth_token, owner, location)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(name, url, authToken, owner || '', location || '');
+  return { name, url, auth_token: authToken, owner, location };
+}
+
+function getMiningNodeByToken(token) {
+  return db.prepare('SELECT * FROM mining_nodes WHERE auth_token = ?').get(token);
+}
+
+function getMiningNodeById(id) {
+  return db.prepare('SELECT * FROM mining_nodes WHERE id = ?').get(id);
+}
+
+function getMiningNodeByUrl(url) {
+  return db.prepare('SELECT * FROM mining_nodes WHERE url = ?').get(url);
+}
+
+function updateMiningNodeHeartbeat(id, miners, cpuLoad, ping) {
+  db.prepare(`
+    UPDATE mining_nodes
+    SET connected_miners = ?, cpu_load = ?, ping_ms = ?,
+        last_heartbeat = datetime('now'), status = 'active'
+    WHERE id = ?
+  `).run(miners, cpuLoad, ping, id);
+}
+
+function getActiveMiningNodes() {
+  return db.prepare(`
+    SELECT * FROM mining_nodes
+    WHERE status = 'active'
+    AND (strftime('%s', 'now') - strftime('%s', last_heartbeat)) < 300
+    ORDER BY ping_ms ASC, connected_miners ASC
+  `).all();
+}
+
+function addMiningNodeEarnings(id, amount) {
+  db.prepare(`
+    UPDATE mining_nodes
+    SET total_earned = total_earned + ?,
+        total_blocks_relayed = total_blocks_relayed + 1
+    WHERE id = ?
+  `).run(amount, id);
+}
+
+function deleteMiningNode(id) {
+  db.prepare('DELETE FROM mining_nodes WHERE id = ?').run(id);
+}
+
+function deactivateMiningNode(id) {
+  db.prepare("UPDATE mining_nodes SET status = 'offline' WHERE id = ?").run(id);
+}
 
 // ─── Exports ─────────────────────────────────────
 module.exports = {
@@ -1111,5 +1190,15 @@ module.exports = {
   addWorkerWarning,
   suspendWorker,
   clearWorkerSuspension,
-  getFlaggedWorkers
+  getFlaggedWorkers,
+  // 🆕 Mining Nodes
+  registerMiningNode,
+  getMiningNodeByToken,
+  getMiningNodeById,
+  getMiningNodeByUrl,
+  updateMiningNodeHeartbeat,
+  getActiveMiningNodes,
+  addMiningNodeEarnings,
+  deleteMiningNode,
+  deactivateMiningNode
 };

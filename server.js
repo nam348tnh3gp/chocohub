@@ -27,6 +27,7 @@ const NodeFeesRouter = require('./routes/node_fees');
 
 // admin users
 const ADMIN_USERS = ['chocoetom', 'Nam2010'];
+const NODE_MASTER_TOKEN = process.env.NODE_MASTER_TOKEN || 'chocohub-node-master';
 
 function isAdmin(username) {
     return ADMIN_USERS.includes(username);
@@ -1978,6 +1979,180 @@ app.post('/api/backup/sync', (req, res) => {
   }
 });
 
+// ════════════════════════════════════════════════════
+//  MINING NODE MANAGEMENT
+// ════════════════════════════════════════════════════
+
+// Register a new mining node (requires master token)
+app.post('/api/nodes/register', (req, res) => {
+  try {
+    const { name, url, token, owner, location } = req.body;
+    if (!name || !url || !token) {
+      return res.status(400).json({ status: 'error', message: 'Missing name, url, or token' });
+    }
+    if (token !== NODE_MASTER_TOKEN) {
+      return res.status(401).json({ status: 'error', message: 'Invalid master token' });
+    }
+    const existing = db.getMiningNodeByUrl(url);
+    if (existing) {
+      return res.json({ status: 'success', message: 'Node already registered', auth_token: existing.auth_token, id: existing.id });
+    }
+    const node = db.registerMiningNode(name, url, owner || '', location || '');
+    console.log(`📡 Mining node registered: ${name} (${url})`);
+    res.json({ status: 'success', message: 'Node registered', auth_token: node.auth_token, id: node });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+// Node heartbeat (requires node auth token)
+app.post('/api/nodes/heartbeat', (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ status: 'error', message: 'Missing auth token' });
+    }
+    const token = authHeader.split(' ')[1];
+    const node = db.getMiningNodeByToken(token);
+    if (!node) {
+      return res.status(401).json({ status: 'error', message: 'Invalid node token' });
+    }
+    const { connected_miners, cpu_load, ping_ms } = req.body;
+    db.updateMiningNodeHeartbeat(node.id, connected_miners || 0, cpu_load || 0, ping_ms || 0);
+    res.json({ status: 'success', message: 'Heartbeat received' });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+// List active nodes (public — for miner discovery)
+app.get('/api/nodes', (req, res) => {
+  try {
+    const nodes = db.getActiveMiningNodes();
+    const safeNodes = nodes.map(n => ({
+      id: n.id,
+      name: n.name,
+      url: n.url,
+      location: n.location,
+      connected_miners: n.connected_miners,
+      cpu_load: n.cpu_load,
+      ping_ms: n.ping_ms,
+      total_blocks_relayed: n.total_blocks_relayed,
+      total_earned: n.total_earned
+    }));
+    res.json({ status: 'success', nodes: safeNodes });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+// Internal: Node gets job (proxied from main server)
+app.post('/api/nodes/get_job', (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ status: 'error', message: 'Missing auth token' });
+    }
+    const token = authHeader.split(' ')[1];
+    const node = db.getMiningNodeByToken(token);
+    if (!node) {
+      return res.status(401).json({ status: 'error', message: 'Invalid node token' });
+    }
+    const { worker_name, instance_id, device_type } = req.body;
+    if (!worker_name) {
+      return res.status(400).json({ status: 'error', message: 'Missing worker_name' });
+    }
+    const job = blockchain.getJobForWorker(worker_name, instance_id, device_type);
+    if (!job) {
+      return res.status(404).json({ status: 'error', message: 'No job available' });
+    }
+    res.json(job);
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+// Internal: Node submits solution (tagged with node_id)
+app.post('/api/nodes/submit_solution', (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ status: 'error', message: 'Missing auth token' });
+    }
+    const token = authHeader.split(' ')[1];
+    const node = db.getMiningNodeByToken(token);
+    if (!node) {
+      return res.status(401).json({ status: 'error', message: 'Invalid node token' });
+    }
+    const { bounty_id, nonce, worker_name, instance_id, device_type, hashrate_reported } = req.body;
+    if (!bounty_id || !nonce || !worker_name) {
+      return res.status(400).json({ status: 'error', message: 'Missing bounty_id, nonce, or worker_name' });
+    }
+    const result = blockchain.submitSolution(bounty_id, nonce, worker_name, device_type, hashrate_reported, instance_id, node.id);
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ status: 'error', message: e.message });
+  }
+});
+
+// Node sync blocks (for node to sync blockchain from main server)
+app.get('/api/nodes/sync-blocks', (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ status: 'error', message: 'Missing auth token' });
+    }
+    const token = authHeader.split(' ')[1];
+    const node = db.getMiningNodeByToken(token);
+    if (!node) {
+      return res.status(401).json({ status: 'error', message: 'Invalid node token' });
+    }
+    const sinceHeight = parseInt(req.query.since) || 0;
+    const allBlocks = db.getBlocks(1000);
+    const blocks = sinceHeight > 0 ? allBlocks.filter(b => b.height > sinceHeight) : allBlocks;
+    const lastBlock = db.getLastBlock();
+    res.json({ status: 'success', blocks, last_block: lastBlock, total: db.getBlockCount() });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+// Node restore blockchain to main server (emergency recovery)
+app.post('/api/nodes/restore-blockchain', (req, res) => {
+  try {
+    const { token, blocks } = req.body;
+    if (token !== NODE_MASTER_TOKEN) {
+      return res.status(401).json({ status: 'error', message: 'Invalid master token' });
+    }
+    if (!blocks || !Array.isArray(blocks) || blocks.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'Missing or empty blocks array' });
+    }
+    const currentCount = db.getBlockCount();
+    if (currentCount > 0) {
+      return res.json({ status: 'skipped', message: `Main server already has ${currentCount} blocks` });
+    }
+    blocks.sort((a, b) => a.height - b.height);
+    for (const block of blocks) {
+      try { db.insertBlock(block); } catch (e) { /* skip duplicates */ }
+    }
+    console.log(`📥 Blockchain restored from node: ${blocks.length} blocks imported`);
+    res.json({ status: 'success', message: `Restored ${blocks.length} blocks`, last_height: blocks[blocks.length - 1]?.height });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+// Admin: delete a node
+app.delete('/api/nodes/:id', requireAdminSession, (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    db.deleteMiningNode(id);
+    res.json({ status: 'success', message: `Node ${id} deleted` });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
 // ─── SPA fallback ──────────────────────────────────────
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, 'public', 'index.html');
@@ -2020,6 +2195,40 @@ app.listen(PORT, () => {
   console.log('╚══════════════════════════════════════╝');
   console.log('');
   backupClient.start();
+
+  // ─── Startup blockchain restoration from mining nodes ──
+  setTimeout(async () => {
+    const blockCount = db.getBlockCount();
+    if (blockCount === 0) {
+      console.log('⚠️ Blockchain is empty, attempting restore from mining nodes...');
+      try {
+        const nodes = db.getActiveMiningNodes();
+        if (nodes.length > 0) {
+          for (const node of nodes) {
+            try {
+              const resp = await fetch(`${node.url}/api/nodes/sync-blocks?since=0`, {
+                headers: { 'Authorization': `Bearer ${node.auth_token}` }
+              });
+              if (resp.ok) {
+                const data = await resp.json();
+                if (data.blocks && data.blocks.length > 0) {
+                  for (const block of data.blocks) {
+                    try { db.insertBlock(block); } catch (e) { /* skip */ }
+                  }
+                  console.log(`📥 Restored ${data.blocks.length} blocks from node: ${node.name}`);
+                  break;
+                }
+              }
+            } catch (e) {
+              console.warn(`⚠️ Could not restore from node ${node.name}: ${e.message}`);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('⚠️ Blockchain restore failed:', e.message);
+      }
+    }
+  }, 3000);
 });
 
 const http2Server = http2.createSecureServer({ key: tlsKey, cert: tlsCert, allowHTTP1: true, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.3' }, app);
