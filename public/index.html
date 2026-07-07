@@ -185,30 +185,61 @@
         #toast.success { border-color: var(--accent-green); color: var(--accent-green); }
         #toast.error { border-color: var(--accent-red); color: var(--accent-red); }
 
-        /* ---------- App shell ---------- */
-        .dashboard-container {
-            width: min(1080px, 94vw);
-            margin: 0 auto 60px;
+        /* ---------- App shell (sidebar layout) ---------- */
+        .app-shell {
+            width: min(1400px, 96vw);
+            margin: 24px auto 60px;
             padding: 0 16px;
             position: relative; z-index: 1;
+            display: flex;
+            align-items: flex-start;
+            gap: 26px;
             opacity: 0; transform: translateY(28px);
             transition: opacity 0.6s var(--ease-liquid), transform 0.6s var(--ease-liquid);
         }
-        .dashboard-container.loaded { opacity: 1; transform: translateY(0); }
+        .app-shell.loaded { opacity: 1; transform: translateY(0); }
+
+        /* ---------- Sidebar (services live here, scales independently of main column) ---------- */
+        .sidebar {
+            width: 300px; flex-shrink: 0;
+            position: sticky; top: 24px;
+            display: flex; flex-direction: column; gap: 22px;
+            max-height: calc(100vh - 48px);
+        }
+        .sidebar-inner {
+            padding: 22px 18px;
+            display: flex; flex-direction: column; gap: 22px;
+            overflow-y: auto;
+        }
+        .logo { display: flex; align-items: center; gap: 10px; padding: 2px 4px 16px; border-bottom: 1px solid var(--glass-border); }
+        .logo .logo-icon { font-size: 24px; animation: logoBounce 3s ease-in-out infinite; filter: drop-shadow(0 2px 6px rgba(255,159,10,0.5)); }
+        .logo-text h1 {
+            font-size: 1.1rem; font-weight: 800; letter-spacing: -0.02em;
+            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange) 45%, var(--accent-pink));
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+        }
+        .logo-text .brand-sub { font-size: 0.6rem; color: var(--text-tertiary); font-family: 'Space Mono', monospace; letter-spacing: 0.08em; text-transform: uppercase; }
+
+        .nav-group { display: flex; flex-direction: column; gap: 8px; }
+        .nav-group-label {
+            font-size: 0.64rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+            color: var(--text-tertiary); padding: 0 6px 2px;
+        }
+        .nav-more-hint { font-size: 0.64rem; color: var(--text-tertiary); padding: 4px 6px 0; opacity: 0.6; font-style: italic; }
+
+        .sidebar-footer {
+            margin-top: auto; padding-top: 16px; border-top: 1px solid var(--glass-border);
+            display: flex; flex-direction: column; gap: 12px;
+        }
+
+        /* ---------- Main column ---------- */
+        .main-col { flex: 1; min-width: 0; }
 
         /* Topbar */
         .dashboard-header {
             display: flex; align-items: center; justify-content: space-between;
-            flex-wrap: wrap; gap: 14px; padding: 14px 22px; margin: 20px 0 1.6rem;
+            flex-wrap: wrap; gap: 14px; padding: 14px 22px; margin: 0 0 1.6rem;
         }
-        .logo { display: flex; align-items: center; gap: 10px; }
-        .logo .logo-icon { font-size: 24px; animation: logoBounce 3s ease-in-out infinite; filter: drop-shadow(0 2px 6px rgba(255,159,10,0.5)); }
-        .logo-text h1 {
-            font-size: 1.2rem; font-weight: 800; letter-spacing: -0.02em;
-            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange) 45%, var(--accent-pink));
-            -webkit-background-clip: text; background-clip: text; color: transparent;
-        }
-        .logo-text .brand-sub { font-size: 0.62rem; color: var(--text-tertiary); font-family: 'Space Mono', monospace; letter-spacing: 0.08em; text-transform: uppercase; }
 
         .topbar-widgets { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
@@ -308,56 +339,43 @@
         .section-title::after { content: ''; flex: 1; height: 1px; background: var(--glass-border); min-width: 30px; }
         .section-title .ttl-icon { width: 18px; height: 18px; flex-shrink: 0; }
 
-        /* ---------- Service groups (scalable, side-by-side, room to grow) ---------- */
-        .service-groups {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 22px;
-            margin-bottom: 40px;
-        }
-        @media (min-width: 860px) {
-            .service-groups { grid-template-columns: 1fr 1fr; align-items: start; }
-        }
-        .service-group { display: flex; flex-direction: column; gap: 12px; }
-        .group-label {
-            font-size: 0.68rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
-            color: var(--text-tertiary); padding: 0 4px 2px;
-        }
-
+        /* ---------- Sidebar service nav (scalable — new sections just add vertical space in the sidebar, never widen the page) ---------- */
         .service-row {
-            display: flex; align-items: center; gap: 16px;
-            padding: 16px 18px;
-            transition: transform 0.25s var(--ease-liquid), border-color 0.25s var(--ease-liquid);
+            display: flex; align-items: center; gap: 13px;
+            padding: 12px 12px;
+            border-radius: var(--radius-md);
+            border: 1px solid transparent;
+            background: var(--glass-bg);
+            transition: transform 0.2s var(--ease-liquid), border-color 0.2s var(--ease-liquid), background 0.2s var(--ease-liquid);
             position: relative;
         }
-        .service-row:hover { transform: translateY(-3px); border-color: rgba(255,159,10,0.4); }
+        .service-row:hover { transform: translateX(3px); border-color: rgba(255,159,10,0.35); background: var(--glass-bg-strong); }
         .service-row:active { transform: scale(0.98); }
 
         .service-icon {
-            width: 46px; height: 46px; flex-shrink: 0;
-            border-radius: 14px;
+            width: 38px; height: 38px; flex-shrink: 0;
+            border-radius: 11px;
             display: flex; align-items: center; justify-content: center;
             background: linear-gradient(135deg, rgba(255,159,10,0.18), rgba(255,55,95,0.1));
             border: 1px solid rgba(255,159,10,0.2);
         }
-        .service-icon svg { width: 24px; height: 24px; }
+        .service-icon svg { width: 19px; height: 19px; }
 
         .service-body { flex: 1; min-width: 0; }
-        .service-name-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 3px; }
-        .service-name { font-size: 1rem; font-weight: 700; letter-spacing: -0.01em; }
-        .service-desc { font-size: 0.78rem; color: var(--text-secondary); line-height: 1.4; }
+        .service-name-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 2px; }
+        .service-name { font-size: 0.86rem; font-weight: 700; letter-spacing: -0.01em; }
+        .service-desc { font-size: 0.7rem; color: var(--text-secondary); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
         .service-badge {
-            padding: 3px 11px; border-radius: var(--radius-pill);
-            font-size: 0.6rem; font-weight: 800; letter-spacing: 0.05em;
+            padding: 2px 9px; border-radius: var(--radius-pill);
+            font-size: 0.56rem; font-weight: 800; letter-spacing: 0.05em;
             background: rgba(255,159,10,0.14); color: var(--accent-orange);
             border: 1px solid rgba(255,159,10,0.25);
         }
         .service-badge.beta { background: rgba(50,215,75,0.12); color: var(--accent-green); border-color: rgba(50,215,75,0.25); }
         .service-badge.swap { background: rgba(10,132,255,0.14); color: var(--accent-blue); border-color: rgba(10,132,255,0.28); }
 
-        .service-arrow { color: var(--text-tertiary); font-size: 1.1rem; flex-shrink: 0; transition: transform 0.2s var(--ease-liquid); }
-        .service-row:hover .service-arrow { transform: translateX(3px); color: var(--accent-orange); }
+        .service-arrow { display: none; }
 
         /* ---------- Network monitor ---------- */
         .network-monitor { margin-top: 10px; }
@@ -421,18 +439,26 @@
         .login-hint { font-size: 0.72rem; color: var(--text-tertiary); margin-top: 18px; line-height: 1.5; }
 
         /* ---------- Responsive ---------- */
+        @media (max-width: 1080px) {
+            .app-shell { flex-direction: column; }
+            .sidebar { width: 100%; position: static; max-height: none; }
+            .sidebar-inner { max-height: none; overflow-y: visible; }
+            .nav-group { flex-direction: row; flex-wrap: wrap; }
+            .nav-group .service-row { flex: 1 1 260px; }
+            .sidebar-footer { flex-direction: row; align-items: center; justify-content: space-between; }
+        }
         @media (max-width: 768px) {
             .main-card { flex-direction: column; text-align: center; padding: 28px 24px; gap: 20px; }
             .balance-info .amount { justify-content: center; }
             .account-meta { justify-content: center; }
             .dashboard-header { flex-direction: column; align-items: flex-start; }
             .topbar-widgets { width: 100%; justify-content: space-between; }
+            .nav-group { flex-direction: column; }
         }
         @media (max-width: 420px) {
             .main-card { padding: 22px 18px; }
             .login-box { padding: 30px 20px; }
-            .service-row { padding: 14px; gap: 12px; }
-            .service-icon { width: 40px; height: 40px; }
+            .service-icon { width: 36px; height: 36px; }
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -474,161 +500,164 @@
 </div>
 
 <!-- DASHBOARD (hidden until login) -->
-<div class="dashboard-container" id="dash-ui">
-    <header class="dashboard-header glass">
-        <div class="logo">
-            <span class="logo-icon" aria-hidden="true">🍫</span>
-            <div class="logo-text">
-                <h1>CHOCO HUB</h1>
-                <div class="brand-sub">Hybrid PoW + PoS</div>
+<div class="app-shell" id="dash-ui">
+
+    <!-- SIDEBAR: all feature/service cards live here, grouped in sections.
+         Adding more services only grows this column's scroll area — it never
+         lengthens the main page. -->
+    <aside class="sidebar glass">
+        <div class="sidebar-inner">
+            <div class="logo">
+                <span class="logo-icon" aria-hidden="true">🍫</span>
+                <div class="logo-text">
+                    <h1>CHOCO HUB</h1>
+                    <div class="brand-sub">Hybrid PoW + PoS</div>
+                </div>
             </div>
-        </div>
-        <div class="topbar-widgets">
-            <div class="status-pill glass glass-pill" aria-live="polite">
-                <span class="pulse-dot" aria-hidden="true"></span> ONLINE
-            </div>
-            <div class="clock-widget">
-                <span class="time" id="liveClock">00:00:00</span>
-                <span class="date" id="liveDate">—</span>
-            </div>
-            <button class="theme-toggle" id="themeToggle" aria-label="Toggle day and night mode" title="Toggle theme">
-                <span class="toggle-track">
-                    <span class="toggle-thumb">
-                        <svg id="themeIcon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" stroke="#0A84FF" stroke-width="2" stroke-linejoin="round"/>
-                        </svg>
+
+            <nav class="nav-group">
+                <div class="nav-group-label">Earn</div>
+
+                <a href="snake.html" class="service-row">
+                    <span class="service-icon">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 14c0-2 1.5-3 3-3s3 1 3 3-1.5 3-3 3M4 14v-4c0-3 2-5 5-5s5 2 5 5v4c0 3 2 5 5 5s5-2 5-5-1.5-3-3-3" stroke="#FFD60A" stroke-width="2" stroke-linecap="round"/><circle cx="18" cy="7" r="1.2" fill="#FFD60A"/></svg>
                     </span>
-                </span>
-            </button>
-        </div>
-    </header>
-
-    <div class="greeting">
-        <h1 id="welcome-msg">Good morning, Guest</h1>
-        <p class="subtitle">Ready to earn CC with mining & staking?</p>
-    </div>
-
-    <section class="main-card glass">
-        <div class="balance-info">
-            <div class="label">Total Vault Balance</div>
-            <div class="amount" id="balance-val">0000 <span class="currency">CC</span></div>
-            <div class="rate-hint">Reference rate · 10 CC ≈ 1 DUCO</div>
-        </div>
-        <div class="account-meta">
-            <div class="session-chip"><span class="dot"></span> Session Active</div>
-            <button class="btn-logout" id="logout-btn">LOGOUT</button>
-        </div>
-    </section>
-
-    <h3 class="section-title">
-        <svg class="ttl-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 12h16M4 6h16M4 18h10" stroke="#FF9F0A" stroke-width="2" stroke-linecap="round"/></svg>
-        Available Services
-    </h3>
-
-    <div class="service-groups">
-        <div class="service-group">
-            <div class="group-label">Earn</div>
-
-            <a href="snake.html" class="service-row glass">
-                <span class="service-icon">
-                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 14c0-2 1.5-3 3-3s3 1 3 3-1.5 3-3 3M4 14v-4c0-3 2-5 5-5s5 2 5 5v4c0 3 2 5 5 5s5-2 5-5-1.5-3-3-3" stroke="#FFD60A" stroke-width="2" stroke-linecap="round"/><circle cx="18" cy="7" r="1.2" fill="#FFD60A"/></svg>
-                </span>
-                <div class="service-body">
-                    <div class="service-name-row">
-                        <span class="service-name">Snake Faucet</span>
-                        <span class="service-badge">HOT</span>
+                    <div class="service-body">
+                        <div class="service-name-row">
+                            <span class="service-name">Snake Faucet</span>
+                            <span class="service-badge">HOT</span>
+                        </div>
+                        <p class="service-desc">Classic Snake, up to 50 CC per claim in Hardcore Mode.</p>
                     </div>
-                    <p class="service-desc">Classic Snake, up to 50 CC per claim in Hardcore Mode.</p>
-                </div>
-                <span class="service-arrow">→</span>
-            </a>
+                </a>
 
-            <a href="mining.html" class="service-row glass">
-                <span class="service-icon">
-                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 3.5 20.5 9.5M6 13 3 21l8-3 8.5-8.5a3 3 0 0 0-4.24-4.24L6 13Z" stroke="#FF9F0A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </span>
-                <div class="service-body">
-                    <div class="service-name-row">
-                        <span class="service-name">Web Miner</span>
-                        <span class="service-badge">PoW</span>
+                <a href="mining.html" class="service-row">
+                    <span class="service-icon">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 3.5 20.5 9.5M6 13 3 21l8-3 8.5-8.5a3 3 0 0 0-4.24-4.24L6 13Z" stroke="#FF9F0A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <div class="service-body">
+                        <div class="service-name-row">
+                            <span class="service-name">Web Miner</span>
+                            <span class="service-badge">PoW</span>
+                        </div>
+                        <p class="service-desc">Mine CC with your browser's CPU via Proof-of-Work.</p>
                     </div>
-                    <p class="service-desc">Mine CC with your browser's CPU via Proof-of-Work.</p>
-                </div>
-                <span class="service-arrow">→</span>
-            </a>
+                </a>
 
-            <a href="staking.html" class="service-row glass">
-                <span class="service-icon">
-                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 21h18M4 21V10l8-6 8 6v11M9 21v-6h6v6" stroke="#FF375F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </span>
-                <div class="service-body">
-                    <div class="service-name-row">
-                        <span class="service-name">Staking Vault</span>
-                        <span class="service-badge">PoS</span>
+                <a href="staking.html" class="service-row">
+                    <span class="service-icon">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 21h18M4 21V10l8-6 8 6v11M9 21v-6h6v6" stroke="#FF375F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <div class="service-body">
+                        <div class="service-name-row">
+                            <span class="service-name">Staking Vault</span>
+                            <span class="service-badge">PoS</span>
+                        </div>
+                        <p class="service-desc">Stake CC to validate blocks and earn steady rewards.</p>
                     </div>
-                    <p class="service-desc">Stake CC to validate blocks and earn steady rewards.</p>
-                </div>
-                <span class="service-arrow">→</span>
-            </a>
-        </div>
+                </a>
+            </nav>
 
-        <div class="service-group">
-            <div class="group-label">Transfer</div>
+            <nav class="nav-group">
+                <div class="nav-group-label">Transfer</div>
 
-            <a href="send.html" class="service-row glass">
-                <span class="service-icon">
-                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 12h14M13 6l7 6-7 6" stroke="#32D74B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </span>
-                <div class="service-body">
-                    <div class="service-name-row">
-                        <span class="service-name">Send CC</span>
-                        <span class="service-badge beta">NEW</span>
+                <a href="send.html" class="service-row">
+                    <span class="service-icon">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 12h14M13 6l7 6-7 6" stroke="#32D74B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <div class="service-body">
+                        <div class="service-name-row">
+                            <span class="service-name">Send CC</span>
+                            <span class="service-badge beta">NEW</span>
+                        </div>
+                        <p class="service-desc">Transfer Choco Coins to any user instantly.</p>
                     </div>
-                    <p class="service-desc">Transfer Choco Coins to any user instantly.</p>
-                </div>
-                <span class="service-arrow">→</span>
-            </a>
+                </a>
 
-            <a href="swap.html" class="service-row glass">
-                <span class="service-icon">
-                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 7h11l-3-3M17 17H6l3 3" stroke="#0A84FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </span>
-                <div class="service-body">
-                    <div class="service-name-row">
-                        <span class="service-name">Swap Center</span>
-                        <span class="service-badge swap">SWAP</span>
+                <a href="swap.html" class="service-row">
+                    <span class="service-icon">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 7h11l-3-3M17 17H6l3 3" stroke="#0A84FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <div class="service-body">
+                        <div class="service-name-row">
+                            <span class="service-name">Swap Center</span>
+                            <span class="service-badge swap">SWAP</span>
+                        </div>
+                        <p class="service-desc">Convert CC to DUCO or XNO at fixed rates.</p>
                     </div>
-                    <p class="service-desc">Convert CC to DUCO or XNO at fixed rates.</p>
+                </a>
+
+                <div class="nav-more-hint">More services coming soon</div>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="status-pill glass glass-pill" aria-live="polite">
+                    <span class="pulse-dot" aria-hidden="true"></span> ONLINE
                 </div>
-                <span class="service-arrow">→</span>
-            </a>
-
-            <div class="group-label" style="margin-top: 8px; opacity: 0.5;">More coming soon</div>
-        </div>
-    </div>
-
-    <div class="network-monitor">
-        <h3 class="section-title">
-            <svg class="ttl-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 12h4l2-8 4 16 2-8h6" stroke="#FF9F0A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            Network Activity
-        </h3>
-        <div class="monitor-grid">
-            <div class="panel-dark glass">
-                <h4>
-                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 3.5 20.5 9.5M6 13 3 21l8-3 8.5-8.5a3 3 0 0 0-4.24-4.24L6 13Z" stroke="#FF9F0A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    Recently Mined / Forged
-                </h4>
-                <ul id="mined-blocks-log" class="log-list">
-                    <li class="empty-state">Awaiting activity...</li>
-                </ul>
+                <button class="theme-toggle" id="themeToggle" aria-label="Toggle day and night mode" title="Toggle theme">
+                    <span class="toggle-track">
+                        <span class="toggle-thumb">
+                            <svg id="themeIcon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" stroke="#0A84FF" stroke-width="2" stroke-linejoin="round"/>
+                            </svg>
+                        </span>
+                    </span>
+                </button>
             </div>
-            <div class="panel-dark glass">
-                <h4>
-                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4Z" stroke="#32D74B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    Active Validators
-                </h4>
-                <div id="active-miners-list">
-                    <div class="empty-state">No active validators</div>
+        </div>
+    </aside>
+
+    <!-- MAIN COLUMN: balance + network activity. Stays a fixed, predictable
+         height regardless of how many services exist in the sidebar. -->
+    <div class="main-col">
+        <header class="dashboard-header glass">
+            <div class="greeting" style="margin-bottom: 0; padding: 0;">
+                <h1 id="welcome-msg" style="font-size: 1.3rem;">Good morning, Guest</h1>
+                <p class="subtitle">Ready to earn CC with mining & staking?</p>
+            </div>
+            <div class="topbar-widgets">
+                <div class="clock-widget">
+                    <span class="time" id="liveClock">00:00:00</span>
+                    <span class="date" id="liveDate">—</span>
+                </div>
+            </div>
+        </header>
+
+        <section class="main-card glass">
+            <div class="balance-info">
+                <div class="label">Total Vault Balance</div>
+                <div class="amount" id="balance-val">0000 <span class="currency">CC</span></div>
+                <div class="rate-hint">Reference rate · 10 CC ≈ 1 DUCO</div>
+            </div>
+            <div class="account-meta">
+                <div class="session-chip"><span class="dot"></span> Session Active</div>
+                <button class="btn-logout" id="logout-btn">LOGOUT</button>
+            </div>
+        </section>
+
+        <div class="network-monitor">
+            <h3 class="section-title">
+                <svg class="ttl-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 12h4l2-8 4 16 2-8h6" stroke="#FF9F0A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Network Activity
+            </h3>
+            <div class="monitor-grid">
+                <div class="panel-dark glass">
+                    <h4>
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 3.5 20.5 9.5M6 13 3 21l8-3 8.5-8.5a3 3 0 0 0-4.24-4.24L6 13Z" stroke="#FF9F0A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        Recently Mined / Forged
+                    </h4>
+                    <ul id="mined-blocks-log" class="log-list">
+                        <li class="empty-state">Awaiting activity...</li>
+                    </ul>
+                </div>
+                <div class="panel-dark glass">
+                    <h4>
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4Z" stroke="#32D74B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        Active Validators
+                    </h4>
+                    <div id="active-miners-list">
+                        <div class="empty-state">No active validators</div>
+                    </div>
                 </div>
             </div>
         </div>
