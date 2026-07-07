@@ -2163,6 +2163,30 @@ app.post('/api/proxy/submit_solution', nodeRateLimit, async (req, res) => {
   }
 });
 
+// Public proxy: miner sends heartbeat through main server (bypasses 511)
+app.post('/api/proxy/heartbeat', nodeRateLimit, async (req, res) => {
+  try {
+    const { node_id, miners } = req.body;
+    if (!node_id) {
+      return res.status(400).json({ status: 'error', message: 'Missing node_id' });
+    }
+    const node = db.getMiningNodeById(parseInt(node_id));
+    if (!node) {
+      return res.status(404).json({ status: 'error', message: 'Node not found' });
+    }
+    const resp = await fetch(`${node.url}/miner_heartbeat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ miners: miners || 1 })
+    });
+    const data = await resp.json();
+    res.json(data);
+  } catch (e) {
+    console.error('Proxy heartbeat error:', e.message);
+    res.status(502).json({ status: 'error', message: 'Node unreachable' });
+  }
+});
+
 // Internal: Node gets job (proxied from main server)
 app.post('/api/nodes/get_job', nodeRateLimit, (req, res) => {
   try {
