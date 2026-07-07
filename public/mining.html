@@ -969,10 +969,10 @@
             return n.toString();
         }
 
-        // ---------- Node Auto-Discovery ----------
+        // ---------- Node Auto-Discovery (server-side ping) ----------
         async function discoverBestNode() {
             try {
-                const resp = await fetch('/api/nodes');
+                const resp = await fetch('/api/nodes/discover');
                 const data = await resp.json();
                 if (data.status !== 'success' || !data.nodes || data.nodes.length === 0) {
                     log('No mining nodes found. Using direct connection.', 'info');
@@ -981,33 +981,17 @@
                 }
                 log(`Found ${data.nodes.length} node(s). Testing latency...`, 'info');
 
-                const results = await Promise.all(data.nodes.map(async (node) => {
-                    try {
-                        const start = Date.now();
-                        const r = await fetch(`${node.url}/ping`, { signal: AbortSignal.timeout(10000) });
-                        await r.json();
-                        const latency = Date.now() - start;
-                        return { ...node, latency, load: node.cpu_load || 0 };
-                    } catch (e) {
-                        return { ...node, latency: Infinity, load: 100 };
-                    }
-                }));
-
-                // Sort: 70% latency weight, 30% load weight
-                results.sort((a, b) => {
-                    const scoreA = (a.latency * 0.7) + (a.load * 30);
-                    const scoreB = (b.latency * 0.7) + (b.load * 30);
-                    return scoreA - scoreB;
-                });
-
-                selectedNode = results[0];
-                if (selectedNode.latency === Infinity) {
+                // Filter reachable nodes
+                const reachable = data.nodes.filter(n => n.reachable && n.latency !== Infinity);
+                if (reachable.length === 0) {
                     log('All nodes unreachable. Using direct connection.', 'warn');
                     currentServer = '';
-                } else {
-                    currentServer = selectedNode.url;
-                    log(`Connected to: ${selectedNode.name} (${selectedNode.location}) — ${selectedNode.latency}ms`, 'info');
+                    return;
                 }
+
+                selectedNode = reachable[0]; // Already sorted by latency
+                currentServer = selectedNode.url;
+                log(`Connected to: ${selectedNode.name} (${selectedNode.location}) — ${selectedNode.latency}ms`, 'info');
             } catch (e) {
                 log(`Node discovery failed: ${e.message}. Using direct connection.`, 'warn');
                 currentServer = '';
