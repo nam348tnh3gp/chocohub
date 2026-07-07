@@ -938,8 +938,12 @@
         let lastTimestamp = Date.now();
         let currentHashrate = 0;
         let worker = null;
-        // Per-instance identity for independent difficulty tracking
-        const instanceId = Math.random().toString(36).substring(2, 10);
+        // Per-instance identity for independent difficulty tracking (persist across refreshes)
+        let instanceId = localStorage.getItem('choco_instance_id');
+        if (!instanceId) {
+            instanceId = Math.random().toString(36).substring(2, 10);
+            localStorage.setItem('choco_instance_id', instanceId);
+        }
         const effectiveWorker = workerName + ':' + instanceId;
         // Device type for starting difficulty hint
         const deviceType = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
