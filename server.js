@@ -27,7 +27,15 @@ const NodeFeesRouter = require('./routes/node_fees');
 
 // admin users
 const ADMIN_USERS = ['chocoetom', 'Nam2010'];
-const NODE_MASTER_TOKEN = process.env.NODE_MASTER_TOKEN || 'chocohub-node-master';
+const NODE_MASTER_TOKEN = process.env.NODE_MASTER_TOKEN;
+if (!NODE_MASTER_TOKEN || NODE_MASTER_TOKEN === 'chocohub-node-master') {
+  console.warn('⚠️ WARNING: NODE_MASTER_TOKEN is default/weak. Set a real token in .env!');
+}
+
+// ─── Rate limiters for node endpoints ──────────
+const nodeRateLimit = rateLimit({ windowMs: 60 * 1000, max: 120, message: { status: 'error', message: 'Rate limit exceeded' } });
+const nodeSubmitLimit = rateLimit({ windowMs: 60 * 1000, max: 60, message: { status: 'error', message: 'Too many submissions' } });
+const nodeRegisterLimit = rateLimit({ windowMs: 5 * 60 * 1000, max: 10, message: { status: 'error', message: 'Too many registration attempts' } });
 
 function isAdmin(username) {
     return ADMIN_USERS.includes(username);
@@ -1984,7 +1992,7 @@ app.post('/api/backup/sync', (req, res) => {
 // ════════════════════════════════════════════════════
 
 // Register a new mining node (requires master token)
-app.post('/api/nodes/register', (req, res) => {
+app.post('/api/nodes/register', nodeRegisterLimit, (req, res) => {
   try {
     const { name, url, token, owner, location } = req.body;
     if (!name || !url || !token) {
@@ -1993,20 +2001,32 @@ app.post('/api/nodes/register', (req, res) => {
     if (token !== NODE_MASTER_TOKEN) {
       return res.status(401).json({ status: 'error', message: 'Invalid master token' });
     }
-    const existing = db.getMiningNodeByUrl(url);
+    // Input sanitization
+    const cleanName = String(name).trim().substring(0, 100);
+    const cleanUrl = String(url).trim().substring(0, 500);
+    const cleanOwner = String(owner || '').trim().substring(0, 100);
+    const cleanLocation = String(location || '').trim().substring(0, 100);
+    if (!cleanName || !cleanUrl) {
+      return res.status(400).json({ status: 'error', message: 'Invalid name or url' });
+    }
+    if (!/^https?:\/\/.+/i.test(cleanUrl)) {
+      return res.status(400).json({ status: 'error', message: 'URL must start with http:// or https://' });
+    }
+    const existing = db.getMiningNodeByUrl(cleanUrl);
     if (existing) {
       return res.json({ status: 'success', message: 'Node already registered', auth_token: existing.auth_token, id: existing.id });
     }
-    const node = db.registerMiningNode(name, url, owner || '', location || '');
-    console.log(`📡 Mining node registered: ${name} (${url})`);
+    const node = db.registerMiningNode(cleanName, cleanUrl, cleanOwner, cleanLocation);
+    console.log(`📡 Mining node registered: ${cleanName} (${cleanUrl})`);
     res.json({ status: 'success', message: 'Node registered', auth_token: node.auth_token, id: node });
   } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message });
+    console.error('Node register error:', e.message);
+    res.status(500).json({ status: 'error', message: 'Registration failed' });
   }
 });
 
 // Node heartbeat (requires node auth token)
-app.post('/api/nodes/heartbeat', (req, res) => {
+app.post('/api/nodes/heartbeat', nodeRateLimit, (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -2018,10 +2038,15 @@ app.post('/api/nodes/heartbeat', (req, res) => {
       return res.status(401).json({ status: 'error', message: 'Invalid node token' });
     }
     const { connected_miners, cpu_load, ping_ms } = req.body;
-    db.updateMiningNodeHeartbeat(node.id, connected_miners || 0, cpu_load || 0, ping_ms || 0);
+    // Validate ranges
+    const miners = Math.max(0, Math.min(10000, parseInt(connected_miners) || 0));
+    const cpu = Math.max(0, Math.min(100, parseFloat(cpu_load) || 0));
+    const ping = Math.max(0, Math.min(10000, parseFloat(ping_ms) || 0));
+    db.updateMiningNodeHeartbeat(node.id, miners, cpu, ping);
     res.json({ status: 'success', message: 'Heartbeat received' });
   } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message });
+    console.error('Heartbeat error:', e.message);
+    res.status(500).json({ status: 'error', message: 'Heartbeat failed' });
   }
 });
 
@@ -2042,12 +2067,13 @@ app.get('/api/nodes', (req, res) => {
     }));
     res.json({ status: 'success', nodes: safeNodes });
   } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message });
+    console.error('List nodes error:', e.message);
+    res.status(500).json({ status: 'error', message: 'Failed to list nodes' });
   }
 });
 
 // Internal: Node gets job (proxied from main server)
-app.post('/api/nodes/get_job', (req, res) => {
+app.post('/api/nodes/get_job', nodeRateLimit, (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -2059,21 +2085,25 @@ app.post('/api/nodes/get_job', (req, res) => {
       return res.status(401).json({ status: 'error', message: 'Invalid node token' });
     }
     const { worker_name, instance_id, device_type } = req.body;
-    if (!worker_name) {
-      return res.status(400).json({ status: 'error', message: 'Missing worker_name' });
+    if (!worker_name || typeof worker_name !== 'string') {
+      return res.status(400).json({ status: 'error', message: 'Missing or invalid worker_name' });
     }
-    const job = blockchain.getJobForWorker(worker_name, instance_id, device_type);
+    const cleanWorker = worker_name.trim().substring(0, 100);
+    const cleanInstance = (instance_id || 'default').trim().substring(0, 50);
+    const cleanDevice = (device_type || 'unknown').trim().substring(0, 50);
+    const job = blockchain.getJobForWorker(cleanWorker, cleanInstance, cleanDevice);
     if (!job) {
       return res.status(404).json({ status: 'error', message: 'No job available' });
     }
     res.json(job);
   } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message });
+    console.error('get_job error:', e.message);
+    res.status(500).json({ status: 'error', message: 'Failed to get job' });
   }
 });
 
 // Internal: Node submits solution (tagged with node_id)
-app.post('/api/nodes/submit_solution', (req, res) => {
+app.post('/api/nodes/submit_solution', nodeSubmitLimit, (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -2085,18 +2115,24 @@ app.post('/api/nodes/submit_solution', (req, res) => {
       return res.status(401).json({ status: 'error', message: 'Invalid node token' });
     }
     const { bounty_id, nonce, worker_name, instance_id, device_type, hashrate_reported } = req.body;
-    if (!bounty_id || !nonce || !worker_name) {
+    if (!bounty_id || nonce === undefined || !worker_name) {
       return res.status(400).json({ status: 'error', message: 'Missing bounty_id, nonce, or worker_name' });
     }
-    const result = blockchain.submitSolution(bounty_id, nonce, worker_name, device_type, hashrate_reported, instance_id, node.id);
+    // Validate nonce is a number
+    const parsedNonce = parseInt(nonce);
+    if (isNaN(parsedNonce) || parsedNonce < 0) {
+      return res.status(400).json({ status: 'error', message: 'Invalid nonce' });
+    }
+    const result = blockchain.submitSolution(bounty_id, parsedNonce, String(worker_name).trim().substring(0, 100), (device_type || 'unknown').trim().substring(0, 50), hashrate_reported, (instance_id || 'default').trim().substring(0, 50), node.id);
     res.json(result);
   } catch (e) {
-    res.status(400).json({ status: 'error', message: e.message });
+    console.error('submit_solution error:', e.message);
+    res.status(400).json({ status: 'error', message: 'Solution rejected' });
   }
 });
 
 // Node sync blocks (for node to sync blockchain from main server)
-app.get('/api/nodes/sync-blocks', (req, res) => {
+app.get('/api/nodes/sync-blocks', nodeRateLimit, (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -2107,18 +2143,20 @@ app.get('/api/nodes/sync-blocks', (req, res) => {
     if (!node) {
       return res.status(401).json({ status: 'error', message: 'Invalid node token' });
     }
-    const sinceHeight = parseInt(req.query.since) || 0;
-    const allBlocks = db.getBlocks(1000);
+    const sinceHeight = Math.max(0, parseInt(req.query.since) || 0);
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 500));
+    const allBlocks = db.getBlocks(limit);
     const blocks = sinceHeight > 0 ? allBlocks.filter(b => b.height > sinceHeight) : allBlocks;
     const lastBlock = db.getLastBlock();
     res.json({ status: 'success', blocks, last_block: lastBlock, total: db.getBlockCount() });
   } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message });
+    console.error('sync-blocks error:', e.message);
+    res.status(500).json({ status: 'error', message: 'Sync failed' });
   }
 });
 
 // Node restore blockchain to main server (emergency recovery)
-app.post('/api/nodes/restore-blockchain', (req, res) => {
+app.post('/api/nodes/restore-blockchain', nodeRegisterLimit, (req, res) => {
   try {
     const { token, blocks } = req.body;
     if (token !== NODE_MASTER_TOKEN) {
@@ -2127,18 +2165,47 @@ app.post('/api/nodes/restore-blockchain', (req, res) => {
     if (!blocks || !Array.isArray(blocks) || blocks.length === 0) {
       return res.status(400).json({ status: 'error', message: 'Missing or empty blocks array' });
     }
+    if (blocks.length > 2000) {
+      return res.status(400).json({ status: 'error', message: 'Too many blocks (max 2000)' });
+    }
     const currentCount = db.getBlockCount();
     if (currentCount > 0) {
       return res.json({ status: 'skipped', message: `Main server already has ${currentCount} blocks` });
     }
-    blocks.sort((a, b) => a.height - b.height);
+    // Validate and sanitize blocks
+    const validBlocks = [];
     for (const block of blocks) {
-      try { db.insertBlock(block); } catch (e) { /* skip duplicates */ }
+      if (!block || typeof block !== 'object') continue;
+      if (typeof block.height !== 'number' || block.height < 0) continue;
+      if (!block.hash || typeof block.hash !== 'string') continue;
+      if (!block.prev_hash || typeof block.prev_hash !== 'string') continue;
+      if (!block.miner || typeof block.miner !== 'string') continue;
+      validBlocks.push({
+        height: block.height,
+        hash: block.hash.substring(0, 128),
+        prev_hash: block.prev_hash.substring(0, 128),
+        miner: block.miner.substring(0, 200),
+        nonce: String(block.nonce || '0').substring(0, 50),
+        timestamp: block.timestamp || Math.floor(Date.now() / 1000),
+        reward: Math.min(100, Math.max(0, parseFloat(block.reward) || 0)),
+        difficulty: Math.max(1, parseFloat(block.difficulty) || 1),
+        tx_count: parseInt(block.tx_count) || 0,
+        total_fees: parseFloat(block.total_fees) || 0,
+        device_type: (block.device_type || 'unknown').substring(0, 50),
+        tier: (block.tier || 'unknown').substring(0, 20),
+        pos_contribution: parseFloat(block.pos_contribution) || 0
+      });
     }
-    console.log(`📥 Blockchain restored from node: ${blocks.length} blocks imported`);
-    res.json({ status: 'success', message: `Restored ${blocks.length} blocks`, last_height: blocks[blocks.length - 1]?.height });
+    validBlocks.sort((a, b) => a.height - b.height);
+    let imported = 0;
+    for (const block of validBlocks) {
+      try { db.insertBlock(block); imported++; } catch (e) { /* skip duplicates */ }
+    }
+    console.log(`📥 Blockchain restored from node: ${imported} blocks imported`);
+    res.json({ status: 'success', message: `Restored ${imported} blocks`, last_height: validBlocks[validBlocks.length - 1]?.height });
   } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message });
+    console.error('restore-blockchain error:', e.message);
+    res.status(500).json({ status: 'error', message: 'Restore failed' });
   }
 });
 

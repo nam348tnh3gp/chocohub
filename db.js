@@ -185,7 +185,14 @@ function authenticate(username, pin) {
       throw new Error('Invalid PIN');
     }
   }
-  const token = jwt.sign({ username: user.username }, process.env.JWT_SECRET || 'secret', { expiresIn: '24h' });
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret || jwtSecret === 'your_super_secret_random_string_here' || jwtSecret === 'secret') {
+    if (!process.env._JWT_WARNED) {
+      console.warn('⚠️ WARNING: JWT_SECRET is weak or default. Set a real secret in .env!');
+      process.env._JWT_WARNED = '1';
+    }
+  }
+  const token = jwt.sign({ username: user.username }, jwtSecret || crypto.randomBytes(32).toString('hex'), { expiresIn: '24h' });
   return { status: 'success', message: user ? 'Authenticated' : 'Account created', token, balance: user.balance };
 }
 
@@ -1043,20 +1050,36 @@ db.exec(`
     total_blocks_relayed INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
   );
+  CREATE INDEX IF NOT EXISTS idx_mining_nodes_status ON mining_nodes(status);
+  CREATE INDEX IF NOT EXISTS idx_mining_nodes_heartbeat ON mining_nodes(last_heartbeat);
 `);
 
 // ═══════════════════════════════════════════════════
 // 🆕 MINING NODE FUNCTIONS
 // ═══════════════════════════════════════════════════
 
+const MAX_MINING_NODES = 50;
+
 function registerMiningNode(name, url, owner, location) {
   const crypto = require('crypto');
+  // Input validation
+  if (!name || typeof name !== 'string' || name.length > 100) {
+    throw new Error('Invalid node name (1-100 chars)');
+  }
+  if (!url || typeof url !== 'string' || url.length > 500 || !/^https?:\/\/.+/i.test(url)) {
+    throw new Error('Invalid node URL (must start with http:// or https://)');
+  }
+  // Limit total nodes
+  const count = db.prepare('SELECT COUNT(*) as c FROM mining_nodes').get().c;
+  if (count >= MAX_MINING_NODES) {
+    throw new Error(`Maximum node limit reached (${MAX_MINING_NODES})`);
+  }
   const authToken = 'node_' + crypto.randomBytes(16).toString('hex');
   db.prepare(`
     INSERT INTO mining_nodes (name, url, auth_token, owner, location)
     VALUES (?, ?, ?, ?, ?)
-  `).run(name, url, authToken, owner || '', location || '');
-  return { name, url, auth_token: authToken, owner, location };
+  `).run(name.trim(), url.trim(), authToken, (owner || '').trim().substring(0, 100), (location || '').trim().substring(0, 100));
+  return { name: name.trim(), url: url.trim(), auth_token: authToken, owner, location };
 }
 
 function getMiningNodeByToken(token) {
@@ -1090,12 +1113,30 @@ function getActiveMiningNodes() {
 }
 
 function addMiningNodeEarnings(id, amount) {
+  if (!id || typeof id !== 'number' || id <= 0) return;
+  if (!amount || typeof amount !== 'number' || amount <= 0 || !Number.isFinite(amount)) return;
   db.prepare(`
     UPDATE mining_nodes
     SET total_earned = total_earned + ?,
         total_blocks_relayed = total_blocks_relayed + 1
     WHERE id = ?
   `).run(amount, id);
+}
+
+// ─── Transaction-safe block submission ──────────
+function submitBlockTransaction(block, userName, finalReward, posContribution, nodeId, nodeContribution) {
+  const runTransaction = db.transaction(() => {
+    insertBlock(block);
+    updateBalance(userName, finalReward);
+    addPosRewardPool(posContribution);
+    if (nodeId && nodeContribution > 0) {
+      const node = getMiningNodeById(nodeId);
+      if (node) {
+        addMiningNodeEarnings(nodeId, nodeContribution);
+      }
+    }
+  });
+  runTransaction();
 }
 
 function deleteMiningNode(id) {
@@ -1199,6 +1240,7 @@ module.exports = {
   updateMiningNodeHeartbeat,
   getActiveMiningNodes,
   addMiningNodeEarnings,
+  submitBlockTransaction,
   deleteMiningNode,
   deactivateMiningNode
 };

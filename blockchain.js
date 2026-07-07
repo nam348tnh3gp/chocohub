@@ -141,13 +141,31 @@ function getJobForWorker(workerName, instanceId, deviceType) {
 
   // 🆕 Stale-job decay: if the current active job has expired without a solve,
   // decay difficulty before cleaning up so the next job is easier.
+  // Anti-exploit: penalize repeated timeouts with a minimum cooldown
   const staleJob = db.getJobForWorker(diffKey);
   if (staleJob) {
     const createdTs = parseFlexibleDate(staleJob.created_at);
     const ageSeconds = (Date.now() / 1000) - createdTs;
     if (ageSeconds > JOB_EXPIRE_SECONDS) {
       decayWorkerDifficulty(diffKey, ageSeconds);
+      // Anti-exploit: mark that this worker just timed out, enforce cooldown
+      db.setWorkerDifficulty(diffKey + '_timeout', Date.now(), Date.now());
     }
+  }
+
+  // Anti-exploit: enforce 10s cooldown after a timeout before giving a new job
+  const lastTimeout = db.getWorkerDifficulty(diffKey + '_timeout');
+  if (lastTimeout) {
+    const cooldownElapsed = (Date.now() - lastTimeout) / 1000;
+    if (cooldownElapsed < 10) {
+      // Still in cooldown — return the stale job if possible, else wait
+      const existingJob = db.getJobForWorker(diffKey);
+      if (existingJob) return mapJob(existingJob);
+      // Create a dummy response telling the miner to wait
+      return { status: 'cooldown', message: 'Wait before requesting a new job', retry_after: Math.ceil(10 - cooldownElapsed) };
+    }
+    // Cooldown passed — clear it
+    db.setWorkerDifficulty(diffKey + '_timeout', 0, 0);
   }
 
   // Dọn dẹp job hết hạn
@@ -394,10 +412,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   const finalReward = parseFloat((deviceReward * boostMultiplier).toFixed(8));
   const bonusReward = parseFloat((finalReward - deviceReward).toFixed(8));
 
-  // 🆕 Credit PoS pool
-  db.addPosRewardPool(posContribution);
-
-  // Tạo block
+  // 🆕 Credit PoS pool + miner + node — ALL in one transaction to prevent race condition
   const newBlock = {
     height: job.height,
     hash: hashHex,
@@ -410,19 +425,14 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     tx_count: 0,
     total_fees: 0,
     device_type: deviceType || 'unknown',
-    tier: tier,           // 🆕 server-controlled tier
-    pos_contribution: posContribution  // 🆕 flat PoS contribution
+    tier: tier,
+    pos_contribution: posContribution
   };
 
-  // Lưu block
-  db.insertBlock(newBlock);
+  // Atomic: block insert + balance + PoS pool + node earnings — rolls back on failure
+  db.submitBlockTransaction(newBlock, userName, finalReward, posContribution, nodeId, nodeContribution);
 
-  // Pay miner (minerBase × multiplier × boost) — credit the user account
-  db.updateBalance(userName, finalReward);
-
-  // 🆕 Credit node earnings
   if (nodeId && nodeContribution > 0) {
-    db.addMiningNodeEarnings(nodeId, nodeContribution);
     console.log(`📡 Node ${nodeId} earned ${nodeContribution} CC`);
   }
 
