@@ -984,7 +984,7 @@
                 const results = await Promise.all(data.nodes.map(async (node) => {
                     try {
                         const start = Date.now();
-                        const r = await fetch(`${node.url}/ping`, { signal: AbortSignal.timeout(5000) });
+                        const r = await fetch(`${node.url}/ping`, { signal: AbortSignal.timeout(10000) });
                         await r.json();
                         const latency = Date.now() - start;
                         return { ...node, latency, load: node.cpu_load || 0 };
