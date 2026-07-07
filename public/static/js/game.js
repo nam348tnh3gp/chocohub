@@ -57,6 +57,8 @@ document.addEventListener('DOMContentLoaded', () => {
         handleInput(e.key);
     }, false);
 
+    setupTouchControls();
+
     loadBestScore();
     loadLb();
     console.log("Snake Engine Loaded (Synced v2)");
@@ -66,6 +68,53 @@ document.addEventListener('DOMContentLoaded', () => {
 function dpadHit(dir, event) {
     if (event) { event.preventDefault(); event.stopPropagation(); }
     setDir(dir);
+}
+
+// ── TOUCH CONTROLS (finger-following) ──
+let touchStartX = 0, touchStartY = 0;
+let touchActive = false;
+
+function setupTouchControls() {
+    const cvs = document.getElementById('snakeCanvas');
+    if (!cvs) return;
+
+    // Detect touch device
+    const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    if (isTouchDevice) {
+        document.body.classList.add('touch-active');
+        touchActive = true;
+    }
+
+    cvs.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+    }, { passive: false });
+
+    cvs.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if (dead || paused || !window.currentUser) return;
+
+        const touch = e.touches[0];
+        const dx = touch.clientX - touchStartX;
+        const dy = touch.clientY - touchStartY;
+
+        // Minimum movement threshold to avoid jitter
+        const threshold = 10;
+        if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) return;
+
+        // Determine direction based on dominant axis
+        if (Math.abs(dx) > Math.abs(dy)) {
+            setDir(dx > 0 ? 'RIGHT' : 'LEFT');
+        } else {
+            setDir(dy > 0 ? 'DOWN' : 'UP');
+        }
+    }, { passive: false });
+
+    cvs.addEventListener('touchend', (e) => {
+        e.preventDefault();
+    }, { passive: false });
 }
 
 // ── DRAW ──
