@@ -1150,6 +1150,7 @@ function deactivateMiningNode(id) {
 // ─── Exports ─────────────────────────────────────
 module.exports = {
   _db: db,
+  prepare: (sql) => db.prepare(sql),
   authenticate,
   getUser,
   updateBalance,
