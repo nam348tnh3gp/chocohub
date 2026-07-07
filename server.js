@@ -2037,12 +2037,13 @@ app.post('/api/nodes/heartbeat', nodeRateLimit, (req, res) => {
     if (!node) {
       return res.status(401).json({ status: 'error', message: 'Invalid node token' });
     }
-    const { connected_miners, cpu_load, ping_ms } = req.body;
+    const { connected_miners, cpu_load, ping_ms, blockchain_height } = req.body;
     // Validate ranges
     const miners = Math.max(0, Math.min(10000, parseInt(connected_miners) || 0));
     const cpu = Math.max(0, Math.min(100, parseFloat(cpu_load) || 0));
     const ping = Math.max(0, Math.min(10000, parseFloat(ping_ms) || 0));
-    db.updateMiningNodeHeartbeat(node.id, miners, cpu, ping);
+    const blockHeight = Math.max(0, parseInt(blockchain_height) || 0);
+    db.updateMiningNodeHeartbeat(node.id, miners, cpu, ping, blockHeight);
     res.json({ status: 'success', message: 'Heartbeat received' });
   } catch (e) {
     console.error('Heartbeat error:', e.message);
@@ -2063,7 +2064,8 @@ app.get('/api/nodes', (req, res) => {
       cpu_load: n.cpu_load,
       ping_ms: n.ping_ms,
       total_blocks_relayed: n.total_blocks_relayed,
-      total_earned: n.total_earned
+      total_earned: n.total_earned,
+      last_block_height: n.last_block_height || 0
     }));
     res.json({ status: 'success', nodes: safeNodes });
   } catch (e) {
@@ -2321,6 +2323,65 @@ app.post('/api/nodes/restore-blockchain', nodeRegisterLimit, (req, res) => {
   } catch (e) {
     console.error('restore-blockchain error:', e.message);
     res.status(500).json({ status: 'error', message: 'Restore failed' });
+  }
+});
+
+// Admin: trigger restore from best backup node
+app.post('/api/nodes/trigger-restore', nodeRegisterLimit, async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (token !== NODE_MASTER_TOKEN) {
+      return res.status(401).json({ status: 'error', message: 'Invalid master token' });
+    }
+
+    const currentCount = db.getBlockCount();
+    const bestNode = db.getBestBackupNode();
+
+    if (!bestNode) {
+      return res.json({
+        status: 'error',
+        message: 'No backup nodes available with blockchain data',
+        current_blocks: currentCount
+      });
+    }
+
+    console.log(`🔄 Triggering restore from node: ${bestNode.name} (height: ${bestNode.last_block_height})`);
+
+    // Fetch full chain from the backup node
+    const nodeUrl = bestNode.url.replace(/\/+$/, '');
+    const resp = await fetch(`${nodeUrl}/full-chain`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${NODE_MASTER_TOKEN}` },
+      timeout: 30000
+    });
+
+    if (!resp.ok) {
+      return res.json({ status: 'error', message: `Node returned HTTP ${resp.status}` });
+    }
+
+    const data = await resp.json();
+    if (data.status !== 'success' || !data.blocks || data.blocks.length === 0) {
+      return res.json({ status: 'error', message: 'Node returned empty chain' });
+    }
+
+    // Import blocks
+    let imported = 0;
+    for (const block of data.blocks) {
+      try { db.insertBlock(block); imported++; } catch (e) { /* skip duplicates */ }
+    }
+
+    console.log(`✅ Restore complete: ${imported} blocks imported from ${bestNode.name}`);
+    res.json({
+      status: 'success',
+      message: `Restored ${imported} blocks from ${bestNode.name}`,
+      source_node: bestNode.name,
+      source_height: bestNode.last_block_height,
+      imported,
+      total: db.getBlockCount()
+    });
+  } catch (e) {
+    console.error('trigger-restore error:', e.message);
+    res.status(500).json({ status: 'error', message: 'Restore failed: ' + e.message });
   }
 });
 

@@ -527,7 +527,7 @@ function getBlockByHash(hash) {
 function insertBlock(block) {
   const { height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count, total_fees, device_type, tier, pos_contribution } = block;
   db.prepare(`
-    INSERT INTO blocks (height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count, total_fees, device_type, tier, pos_contribution)
+    INSERT OR IGNORE INTO blocks (height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count, total_fees, device_type, tier, pos_contribution)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(height, hash, prev_hash, miner, nonce, timestamp, reward, difficulty, tx_count || 0, total_fees || 0, device_type || 'unknown', tier || 'unknown', pos_contribution || 0);
 }
@@ -1015,6 +1015,7 @@ ensureColumn('mining_jobs', 'tier', 'TEXT DEFAULT "cpu"');
 ensureColumn('mining_jobs', 'reward_multiplier', 'REAL DEFAULT 1.0');
 ensureColumn('blocks', 'tier', 'TEXT DEFAULT "unknown"');
 ensureColumn('blocks', 'pos_contribution', 'REAL DEFAULT 0');
+ensureColumn('mining_nodes', 'last_block_height', 'INTEGER DEFAULT 0');
 
 // ═══════════════════════════════════════════════════
 // 🆕 CREATE WORKER_FLAGS TABLE
@@ -1094,13 +1095,14 @@ function getMiningNodeByUrl(url) {
   return db.prepare('SELECT * FROM mining_nodes WHERE url = ?').get(url);
 }
 
-function updateMiningNodeHeartbeat(id, miners, cpuLoad, ping) {
+function updateMiningNodeHeartbeat(id, miners, cpuLoad, ping, blockchainHeight) {
   db.prepare(`
     UPDATE mining_nodes
     SET connected_miners = ?, cpu_load = ?, ping_ms = ?,
-        last_heartbeat = datetime('now'), status = 'active'
+        last_heartbeat = datetime('now'), status = 'active',
+        last_block_height = ?
     WHERE id = ?
-  `).run(miners, cpuLoad, ping, id);
+  `).run(miners, cpuLoad, ping, blockchainHeight || 0, id);
 }
 
 function getActiveMiningNodes() {
@@ -1110,6 +1112,17 @@ function getActiveMiningNodes() {
     AND (strftime('%s', 'now') - strftime('%s', last_heartbeat)) < 300
     ORDER BY ping_ms ASC, connected_miners ASC
   `).all();
+}
+
+function getBestBackupNode() {
+  return db.prepare(`
+    SELECT * FROM mining_nodes
+    WHERE status = 'active'
+    AND (strftime('%s', 'now') - strftime('%s', last_heartbeat)) < 300
+    AND last_block_height > 0
+    ORDER BY last_block_height DESC, ping_ms ASC
+    LIMIT 1
+  `).get();
 }
 
 function addMiningNodeEarnings(id, amount) {
@@ -1240,6 +1253,7 @@ module.exports = {
   getMiningNodeByUrl,
   updateMiningNodeHeartbeat,
   getActiveMiningNodes,
+  getBestBackupNode,
   addMiningNodeEarnings,
   submitBlockTransaction,
   deleteMiningNode,
