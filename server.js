@@ -2072,6 +2072,48 @@ app.get('/api/nodes', (req, res) => {
   }
 });
 
+// Server-side node discovery (pings nodes from server, not browser)
+app.get('/api/nodes/discover', async (req, res) => {
+  try {
+    const nodes = db.getActiveMiningNodes();
+    if (nodes.length === 0) {
+      return res.json({ status: 'success', nodes: [] });
+    }
+    const results = await Promise.all(nodes.map(async (node) => {
+      try {
+        const start = Date.now();
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const resp = await fetch(`${node.url}/ping`, { signal: controller.signal });
+        clearTimeout(timeout);
+        await resp.json();
+        const latency = Date.now() - start;
+        return { ...node, latency, reachable: true };
+      } catch (e) {
+        return { ...node, latency: Infinity, reachable: false };
+      }
+    }));
+    // Sort by latency
+    results.sort((a, b) => a.latency - b.latency);
+    const safeResults = results.map(n => ({
+      id: n.id,
+      name: n.name,
+      url: n.url,
+      location: n.location,
+      connected_miners: n.connected_miners,
+      cpu_load: n.cpu_load,
+      latency: n.latency,
+      reachable: n.reachable,
+      total_blocks_relayed: n.total_blocks_relayed,
+      total_earned: n.total_earned
+    }));
+    res.json({ status: 'success', nodes: safeResults });
+  } catch (e) {
+    console.error('Node discover error:', e.message);
+    res.status(500).json({ status: 'error', message: 'Discovery failed' });
+  }
+});
+
 // Internal: Node gets job (proxied from main server)
 app.post('/api/nodes/get_job', nodeRateLimit, (req, res) => {
   try {
