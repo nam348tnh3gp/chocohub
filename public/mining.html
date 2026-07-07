@@ -977,6 +977,7 @@
                 if (data.status !== 'success' || !data.nodes || data.nodes.length === 0) {
                     log('No mining nodes found. Using direct connection.', 'info');
                     currentServer = '';
+                    selectedNode = null;
                     return;
                 }
                 log(`Found ${data.nodes.length} node(s). Testing latency...`, 'info');
@@ -986,15 +987,17 @@
                 if (reachable.length === 0) {
                     log('All nodes unreachable. Using direct connection.', 'warn');
                     currentServer = '';
+                    selectedNode = null;
                     return;
                 }
 
                 selectedNode = reachable[0]; // Already sorted by latency
-                currentServer = selectedNode.url;
+                currentServer = '/api/proxy'; // Route through main server
                 log(`Connected to: ${selectedNode.name} (${selectedNode.location}) — ${selectedNode.latency}ms`, 'info');
             } catch (e) {
                 log(`Node discovery failed: ${e.message}. Using direct connection.`, 'warn');
                 currentServer = '';
+                selectedNode = null;
             }
         }
 
@@ -1025,13 +1028,19 @@
             }, 1000);
         }
 
-        // ---------- Job handling (hỗ trợ cả server cũ và mới) ----------
+        // ---------- Job handling ----------
         async function fetchNewJob() {
             try {
-                const res = await fetch(`${currentServer}/get_job`, {
+                const body = { worker_name: workerName, instance_id: instanceId, device_type: deviceType };
+                // When using node proxy, include node_id
+                if (currentServer === '/api/proxy' && selectedNode) {
+                    body.node_id = selectedNode.id;
+                }
+                const url = currentServer === '/api/proxy' ? '/api/proxy/get_job' : `${currentServer}/get_job`;
+                const res = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ worker_name: workerName, instance_id: instanceId, device_type: deviceType })
+                    body: JSON.stringify(body)
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const job = await res.json();
@@ -1144,16 +1153,21 @@
         async function submitSolution(jobId, nonce, wName, instId) {
             log(`Submitting solution for #${jobId.substring(0,8)}...`, 'info');
             try {
-                const res = await fetch(`${currentServer}/submit_solution`, {
+                const body = {
+                    bounty_id: jobId,
+                    nonce: nonce,
+                    worker_name: wName,
+                    instance_id: instId,
+                    device_type: deviceType
+                };
+                if (currentServer === '/api/proxy' && selectedNode) {
+                    body.node_id = selectedNode.id;
+                }
+                const url = currentServer === '/api/proxy' ? '/api/proxy/submit_solution' : `${currentServer}/submit_solution`;
+                const res = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        bounty_id: jobId,
-                        nonce: nonce,
-                        worker_name: wName,
-                        instance_id: instId,
-                        device_type: deviceType
-                    })
+                    body: JSON.stringify(body)
                 });
                 const result = await res.json();
                 if (res.ok && result.status === 'success') {
