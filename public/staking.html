@@ -11,7 +11,7 @@
     <title>CHOCO HUB · Staking Vault</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
             --radius-xl: 30px;
@@ -27,6 +27,7 @@
             --accent-red: #FA5252;
             --ease-liquid: cubic-bezier(.22,1,.36,1);
         }
+
         html[data-theme="dark"] {
             --bg-base: #07060A;
             --text-primary: #F1EAE0;
@@ -39,35 +40,54 @@
             --glass-shadow: rgba(0,0,0,0.55);
             --field-bg: rgba(0,0,0,0.35);
             --field-border: rgba(255,255,255,0.12);
+            --field-border-hi: rgba(255,214,10,0.35);
             --blob-opacity: 0.25;
             --blob-blur: 74px;
         }
+
+        html[data-theme="light"] {
+            --bg-base: #EFEFF6;
+            --text-primary: #1B1A22;
+            --text-secondary: #5B5766;
+            --text-tertiary: #8B879A;
+            --glass-bg: rgba(255,255,255,0.5);
+            --glass-bg-strong: rgba(255,255,255,0.75);
+            --glass-border: rgba(255,255,255,0.9);
+            --glass-highlight: rgba(255,255,255,0.95);
+            --glass-shadow: rgba(31,32,71,0.14);
+            --field-bg: rgba(255,255,255,0.6);
+            --field-border: rgba(0,0,0,0.1);
+            --field-border-hi: rgba(255,214,10,0.5);
+            --blob-opacity: 0.7;
+            --blob-blur: 80px;
+        }
+
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         html { font-size: 14px; }
+
         body {
             background: var(--bg-base);
             color: var(--text-primary);
-            font-family: 'Outfit', sans-serif;
+            font-family: 'Plus Jakarta Sans', sans-serif;
             overflow-x: hidden;
             min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
+            padding: 1.5rem 1rem 3rem;
             -webkit-font-smoothing: antialiased;
             transition: background-color .6s var(--ease-liquid), color .5s var(--ease-liquid);
         }
+
         button { font-family: inherit; cursor: pointer; border: none; outline: none; }
         a { color: inherit; text-decoration: none; }
 
+        /* ── Blobs ── */
         .bg-blobs {
             position: fixed; inset: 0; z-index: -2; overflow: hidden;
             filter: blur(var(--blob-blur)) saturate(160%);
             opacity: var(--blob-opacity);
+            transition: opacity .6s var(--ease-liquid);
             pointer-events: none;
         }
-        .blob { position: absolute; border-radius: 50%; }
+        .blob { position: absolute; border-radius: 50%; will-change: transform; }
         .blob-yellow { width: 46vw; height: 46vw; top: -12%; left: -8%; background: radial-gradient(circle at 40% 40%, var(--accent-yellow) 0%, transparent 72%); animation: float1 24s var(--ease-liquid) infinite alternate; }
         .blob-blue { width: 52vw; height: 52vw; bottom: -20%; right: -12%; background: radial-gradient(circle at 60% 60%, var(--accent-blue) 0%, transparent 72%); animation: float2 30s var(--ease-liquid) infinite alternate; }
         .blob-pink { width: 38vw; height: 38vw; top: 22%; right: 10%; background: radial-gradient(circle at 50% 50%, var(--accent-pink) 0%, transparent 72%); animation: float3 20s var(--ease-liquid) infinite alternate; }
@@ -76,11 +96,14 @@
         @keyframes float2 { 0%{transform:translate(0,0) scale(1);} 50%{transform:translate(-7vw,-6vh) scale(1.1);} 100%{transform:translate(3vw,-9vh) scale(0.92);} }
         @keyframes float3 { 0%{transform:translate(0,0) scale(1);} 50%{transform:translate(-5vw,7vh) scale(0.9);} 100%{transform:translate(6vw,3vh) scale(1.15);} }
         @keyframes float4 { 0%{transform:translate(0,0) scale(1);} 50%{transform:translate(5vw,-5vh) scale(1.08);} 100%{transform:translate(-6vw,-2vh) scale(0.94);} }
+
         .grain {
             position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: 0.035;
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
             mix-blend-mode: overlay;
         }
+
+        /* ── Glass ── */
         .glass {
             position: relative;
             background: var(--glass-bg);
@@ -89,6 +112,7 @@
             border: 1px solid var(--glass-border);
             border-radius: var(--radius-lg);
             box-shadow: 0 10px 34px var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+            transition: background-color .5s var(--ease-liquid), border-color .5s var(--ease-liquid), box-shadow .5s var(--ease-liquid);
             overflow: hidden;
         }
         .glass::before {
@@ -96,190 +120,155 @@
             background: linear-gradient(130deg, rgba(255,255,255,0.22), transparent 45%);
             pointer-events: none; opacity: 0.7;
         }
+        .glass-pill { border-radius: var(--radius-pill) !important; }
 
-        .container {
-            width: 100%;
-            max-width: 480px;
-            padding: 36px 32px;
+        /* ── App shell ── */
+        .app-shell { max-width: 480px; margin: 0 auto; position: relative; z-index: 1; }
+
+        .topbar {
+            display: flex; justify-content: space-between; align-items: center;
+            flex-wrap: wrap; gap: 14px; padding: 10px 18px; margin-bottom: 0.8rem;
         }
-        .container > * { position: relative; z-index: 1; }
+        .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
+        .brand-icon { font-size: 20px; filter: drop-shadow(0 2px 6px rgba(255,159,10,0.5)); }
+        .brand h1 {
+            font-size: 1rem; font-weight: 800; letter-spacing: -0.02em;
+            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange) 45%, var(--accent-pink));
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+        }
+        .brand-sub { font-size: 0.65rem; color: var(--text-tertiary); font-family:'DM Mono',monospace; letter-spacing:0.06em; text-transform: uppercase; }
+
+        .topbar-widgets { display: flex; align-items: center; gap: 12px; }
+
+        .theme-toggle { appearance: none; border: none; background: none; cursor: pointer; padding: 0; }
+        .toggle-track {
+            width: 56px; height: 30px; border-radius: var(--radius-pill);
+            background: linear-gradient(135deg, #2b2540, #171425);
+            border: 1px solid var(--glass-border);
+            display: flex; align-items: center; padding: 3px;
+            transition: background .45s var(--ease-liquid);
+            position: relative; box-shadow: inset 0 2px 6px rgba(0,0,0,0.4);
+        }
+        html[data-theme="light"] .toggle-track { background: linear-gradient(135deg, #FFE28A, #FFB347); }
+        .toggle-thumb {
+            width: 24px; height: 24px; border-radius: 50%; background: #fff;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+            display: flex; align-items: center; justify-content: center;
+            transform: translateX(0); transition: transform .45s var(--ease-liquid);
+        }
+        html[data-theme="light"] .toggle-thumb { transform: translateX(26px); }
+        .toggle-thumb svg { width: 14px; height: 14px; }
 
         .back-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            margin-bottom: 20px;
-            color: var(--text-secondary);
-            font-size: 0.82rem;
-            font-weight: 500;
-            transition: color 0.2s;
+            display: inline-flex; align-items: center; gap: 6px;
+            margin-bottom: 20px; color: var(--text-secondary);
+            font-size: 0.82rem; font-weight: 500; transition: color 0.2s, gap 0.2s;
         }
-        .back-link:hover { color: var(--accent-yellow); }
+        .back-link:hover { gap: 10px; color: var(--accent-orange); }
 
-        h1 {
-            font-size: 1.7rem;
-            font-weight: 800;
-            letter-spacing: -0.02em;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            color: var(--accent-yellow);
-            margin-bottom: 28px;
+        /* ── Content ── */
+        .container { padding: 2rem; }
+        .container > * { position: relative; z-index: 1; }
+
+        .page-title {
+            font-size: 1.5rem; font-weight: 800; letter-spacing: -0.02em;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange) 45%, var(--accent-pink));
+            -webkit-background-clip: text; background-clip: text; color: transparent;
         }
 
-        .stat-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin-bottom: 24px;
-        }
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 1.5rem; }
         .stat-card {
-            padding: 16px;
-            border-radius: var(--radius-md);
-            background: var(--glass-bg-strong);
-            border: 1px solid var(--glass-border);
+            padding: 14px; border-radius: var(--radius-md);
+            background: var(--glass-bg); border: 1px solid var(--glass-border);
         }
         .stat-card .label {
-            font-family: 'Space Mono', monospace;
-            font-size: 0.65rem;
-            color: var(--text-tertiary);
-            letter-spacing: 1px;
-            text-transform: uppercase;
-            margin-bottom: 6px;
+            font-family: 'DM Mono', monospace; font-size: 0.65rem;
+            color: var(--text-tertiary); letter-spacing: 1px;
+            text-transform: uppercase; margin-bottom: 6px;
         }
-        .stat-card .value {
-            font-weight: 700;
-            font-family: 'Space Mono', monospace;
-            font-size: 1.1rem;
-        }
+        .stat-card .value { font-weight: 700; font-family: 'DM Mono', monospace; font-size: 1.1rem; }
         .stat-card .value.amber { color: var(--accent-yellow); }
         .stat-card .value.green { color: var(--accent-green); }
         .stat-card .value.pink { color: var(--accent-pink); }
 
         .status-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 0.7rem;
-            font-weight: 700;
-            padding: 4px 10px;
-            border-radius: var(--radius-pill);
-            font-family: 'Space Mono', monospace;
+            display: inline-flex; align-items: center; gap: 6px;
+            font-size: 0.7rem; font-weight: 700; padding: 4px 10px;
+            border-radius: var(--radius-pill); font-family: 'DM Mono', monospace;
         }
         .status-badge.active {
-            background: rgba(50,215,75,0.12);
-            color: var(--accent-green);
+            background: rgba(50,215,75,0.12); color: var(--accent-green);
             border: 1px solid rgba(50,215,75,0.25);
         }
         .status-badge.inactive {
-            background: rgba(255,55,95,0.1);
-            color: var(--accent-pink);
+            background: rgba(255,55,95,0.1); color: var(--accent-pink);
             border: 1px solid rgba(255,55,95,0.2);
         }
         .pulse-dot {
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background: currentColor;
-            box-shadow: 0 0 8px currentColor;
+            width: 7px; height: 7px; border-radius: 50%;
+            background: currentColor; box-shadow: 0 0 8px currentColor;
             animation: pulseDot 2s infinite;
         }
-        @keyframes pulseDot {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
-        }
+        @keyframes pulseDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
+        .field-group { margin-bottom: 12px; }
         .field-lbl {
-            font-family: 'Space Mono', monospace;
-            font-size: 0.65rem;
-            color: var(--text-tertiary);
-            letter-spacing: 1px;
-            text-transform: uppercase;
-            margin-bottom: 8px;
-            display: block;
+            font-family: 'DM Mono', monospace; font-size: 0.65rem;
+            color: var(--text-tertiary); letter-spacing: 1px;
+            text-transform: uppercase; margin-bottom: 8px; display: block;
         }
         .field-inp {
-            width: 100%;
-            padding: 14px 18px;
-            background: var(--field-bg);
-            border: 1px solid var(--field-border);
-            border-radius: var(--radius-sm);
-            color: var(--text-primary);
-            font-family: 'Space Mono', monospace;
-            font-size: 1rem;
-            outline: none;
-            transition: border-color 0.2s;
+            width: 100%; padding: 14px 18px; background: var(--field-bg);
+            border: 1px solid var(--field-border); border-radius: var(--radius-sm);
+            color: var(--text-primary); font-family: 'DM Mono', monospace;
+            font-size: 1rem; outline: none; transition: border-color 0.2s;
         }
-        .field-inp:focus { border-color: var(--accent-yellow); }
+        .field-inp:focus { border-color: var(--field-border-hi); }
         .field-inp::placeholder { color: var(--text-tertiary); }
 
         .btn {
-            width: 100%;
-            padding: 14px;
-            border-radius: var(--radius-sm);
-            font-weight: 700;
-            font-size: 0.9rem;
-            letter-spacing: 0.5px;
-            cursor: pointer;
-            transition: all 0.25s var(--ease-liquid);
-            margin-top: 12px;
+            width: 100%; padding: 14px; border-radius: var(--radius-sm);
+            font-weight: 700; font-size: 0.9rem; letter-spacing: 0.5px;
+            cursor: pointer; transition: all 0.25s var(--ease-liquid); margin-top: 10px;
         }
         .btn-stake {
-            background: var(--accent-yellow);
-            color: #000;
+            background: var(--accent-yellow); color: #000;
             box-shadow: 0 4px 20px rgba(255,214,10,0.25);
         }
-        .btn-stake:hover { background: #ffe44d; transform: translateY(-2px); box-shadow: 0 6px 28px rgba(255,214,10,0.35); }
+        .btn-stake:hover { transform: translateY(-2px); box-shadow: 0 6px 28px rgba(255,214,10,0.35); }
         .btn-unstake {
-            background: transparent;
-            color: var(--accent-pink);
+            background: transparent; color: var(--accent-pink);
             border: 1px solid rgba(255,55,95,0.3);
         }
         .btn-unstake:hover {
-            background: rgba(255,55,95,0.1);
-            border-color: var(--accent-pink);
+            background: rgba(255,55,95,0.1); border-color: var(--accent-pink);
             transform: translateY(-2px);
         }
         .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; }
 
-        .divider {
-            height: 1px;
-            background: var(--glass-border);
-            margin: 20px 0;
-        }
+        .divider { height: 1px; background: var(--glass-border); margin: 20px 0; }
 
         .hint {
-            margin-top: 20px;
-            font-size: 0.72rem;
-            color: var(--text-tertiary);
-            text-align: center;
-            line-height: 1.5;
+            margin-top: 20px; font-size: 0.72rem; color: var(--text-tertiary);
+            text-align: center; line-height: 1.5;
         }
 
         #toast {
-            position: fixed;
-            bottom: 24px;
-            left: 50%;
+            position: fixed; bottom: 24px; left: 50%;
             transform: translateX(-50%) translateY(20px);
-            background: var(--glass-bg-strong);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid var(--glass-border);
-            padding: 12px 24px;
-            border-radius: var(--radius-pill);
-            font-weight: 600;
-            font-size: 0.85rem;
-            opacity: 0;
-            transition: all 0.35s var(--ease-liquid);
-            z-index: 999;
-            pointer-events: none;
+            background: var(--glass-bg-strong); backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px); border: 1px solid var(--glass-border);
+            padding: 12px 24px; border-radius: var(--radius-pill);
+            font-weight: 600; font-size: 0.85rem; opacity: 0;
+            transition: all 0.35s var(--ease-liquid); z-index: 999; pointer-events: none;
         }
         #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
         #toast.error { border-color: var(--accent-red); color: var(--accent-red); }
         #toast.success { border-color: var(--accent-green); color: var(--accent-green); }
 
         @media (max-width: 480px) {
-            .container { padding: 24px 18px; }
+            .container { padding: 1.5rem; }
             .stat-grid { grid-template-columns: 1fr; }
         }
     </style>
@@ -293,42 +282,89 @@
     </div>
     <div class="grain"></div>
 
-    <div class="container glass">
-        <a href="index.html" class="back-link">← Dashboard</a>
-        <h1>🏦 STAKING VAULT</h1>
-
-        <div class="stat-grid">
-            <div class="stat-card">
-                <div class="label">Balance</div>
-                <div class="value amber" id="user-balance">-- CC</div>
+    <div class="app-shell">
+        <div class="topbar glass glass-pill">
+            <a href="index.html" class="back-link">← Dashboard</a>
+            <div class="brand">
+                <span class="brand-icon">🍫</span>
+                <div>
+                    <h1>CHOCO HUB</h1>
+                    <div class="brand-sub">Staking Vault</div>
+                </div>
             </div>
-            <div class="stat-card">
-                <div class="label">Staked</div>
-                <div class="value green" id="staked-amount">-- CC</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">Pending Reward</div>
-                <div class="value" id="pending-reward">0.0 CC</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">Status</div>
-                <span id="validator-status" class="status-badge inactive"><span class="pulse-dot"></span> INACTIVE</span>
+            <div class="topbar-widgets">
+                <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
+                    <div class="toggle-track">
+                        <div class="toggle-thumb">
+                            <svg id="theme-icon-dark" viewBox="0 0 24 24" fill="none" stroke="#FFD60A" stroke-width="2">
+                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                            </svg>
+                            <svg id="theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="#FF9F0A" stroke-width="2" style="display:none">
+                                <circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                            </svg>
+                        </div>
+                    </div>
+                </button>
             </div>
         </div>
 
-        <div class="divider"></div>
+        <div class="container glass">
+            <div class="page-title">Staking Vault</div>
 
-        <label class="field-lbl">Stake amount (min 10 CC)</label>
-        <input type="number" id="stake-input" class="field-inp" placeholder="10 CC" min="10" step="1">
-        <button class="btn btn-stake" id="stake-btn">STAKE</button>
-        <button class="btn btn-unstake" id="unstake-btn">UNSTAKE ALL</button>
+            <div class="stat-grid">
+                <div class="stat-card">
+                    <div class="label">Balance</div>
+                    <div class="value amber" id="user-balance">-- CC</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Staked</div>
+                    <div class="value green" id="staked-amount">-- CC</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Pending Reward</div>
+                    <div class="value" id="pending-reward">0.0 CC</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Status</div>
+                    <span id="validator-status" class="status-badge inactive"><span class="pulse-dot"></span> INACTIVE</span>
+                </div>
+            </div>
 
-        <div class="hint">
-            Staking rewards are distributed when you are chosen as the block proposer (PoS).
+            <div class="divider"></div>
+
+            <div class="field-group">
+                <label class="field-lbl">Stake amount (min 10 CC)</label>
+                <input type="number" id="stake-input" class="field-inp" placeholder="10 CC" min="10" step="1">
+            </div>
+            <button class="btn btn-stake" id="stake-btn">STAKE</button>
+            <button class="btn btn-unstake" id="unstake-btn">UNSTAKE ALL</button>
+
+            <div class="hint">
+                Staking rewards are distributed when you are chosen as the block proposer (PoS).
+            </div>
         </div>
     </div>
 
     <div id="toast"></div>
+
+    <script>
+        function toggleTheme() {
+            const html = document.documentElement;
+            const isDark = html.getAttribute('data-theme') === 'dark';
+            html.setAttribute('data-theme', isDark ? 'light' : 'dark');
+            document.getElementById('theme-icon-dark').style.display = isDark ? 'none' : 'block';
+            document.getElementById('theme-icon-light').style.display = isDark ? 'block' : 'none';
+            localStorage.setItem('staking-theme', isDark ? 'light' : 'dark');
+        }
+        (function() {
+            const saved = localStorage.getItem('staking-theme');
+            if (saved === 'light') {
+                document.documentElement.setAttribute('data-theme', 'light');
+                document.getElementById('theme-icon-dark').style.display = 'none';
+                document.getElementById('theme-icon-light').style.display = 'block';
+            }
+        })();
+    </script>
 
     <script>
         const isPreview = new URLSearchParams(window.location.search).has('preview');
