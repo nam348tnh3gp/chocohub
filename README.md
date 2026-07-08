@@ -66,8 +66,8 @@ newDifficulty = currentDifficulty * (targetSolveTime / actualSolveTime)
 | embedded_esp | 2.5x | 100,000 | ESP8266, NodeMCU (~5 kH/s) |
 | embedded_esp32 | 2.0x | 500,000 | ESP32, ESP32-S2, ESP32-C3 (~30 kH/s) |
 | mobile | 1.8x | 10,000 | Android, iOS browsers (~200 kH/s) |
-| cpu | 1.0x | 1,000,000,000 | Desktop browser miner (~1–10 MH/s) |
-| gpu | 1.0x | 1,000,000,000 | GPU mining (~10–500 MH/s) |
+| cpu | 1.0x | 1,000,000,000 | Desktop browser miner (~500 kH/s–5 MH/s) |
+| gpu | 1.0x | 1,000,000,000 | GPU mining (~5–100 MH/s) |
 
 Lower-power devices receive **higher multipliers**, ensuring fair rewards proportional to their computational contribution relative to their capability.
 
