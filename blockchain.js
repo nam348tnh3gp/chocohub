@@ -20,37 +20,37 @@ const TIER_CONFIG = {
   embedded_avr: {
     multiplier: 3.5,
     maxDifficulty: 5000,
-    description: 'Arduino, AVR microcontrollers (~400 H/s)'
+    description: 'Arduino, AVR microcontrollers (~30 H/s SHA-256)'
   },
   embedded_arm: {
     multiplier: 3.0,
     maxDifficulty: 50000,
-    description: 'Raspberry Pi Pico, RP2040 (~5 kH/s)'
+    description: 'Raspberry Pi Pico, RP2040 (~500 H/s SHA-256)'
   },
   embedded_esp: {
     multiplier: 2.5,
     maxDifficulty: 100000,
-    description: 'ESP8266, NodeMCU (~66 kH/s)'
+    description: 'ESP8266, NodeMCU (~5 kH/s SHA-256)'
   },
   embedded_esp32: {
     multiplier: 2.0,
     maxDifficulty: 500000,
-    description: 'ESP32, ESP32-S2, ESP32-C3 (~170 kH/s)'
+    description: 'ESP32, ESP32-S2, ESP32-C3 (~30 kH/s SHA-256)'
   },
   mobile: {
     multiplier: 1.8,
     maxDifficulty: 10000,
-    description: 'Android, iOS (~500 kH/s)'
+    description: 'Android, iOS (~200 kH/s SHA-256)'
   },
   cpu: {
     multiplier: 1.0,
     maxDifficulty: 1000000000,
-    description: 'Desktop CPU, web miner (~1-10 MH/s)'
+    description: 'Desktop CPU, web miner (~500 kH/s-5 MH/s SHA-256)'
   },
   gpu: {
     multiplier: 1.0,
     maxDifficulty: 1000000000,
-    description: 'GPU mining (~10-500 MH/s)'
+    description: 'GPU mining (~5-100 MH/s SHA-256)'
   }
 };
 
