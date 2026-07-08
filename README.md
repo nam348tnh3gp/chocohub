@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" width="260" style="height: 50px;">
 </a>
 
-**ChocoHub** is a decentralized mining platform built on a hybrid Proof-of-Work + Proof-of-Stake consensus. Mine CC (Choco Coin) directly from your browser, earn rewards through staking, play games, and swap across currencies — all in one place.
+**ChocoHub** is a centralized mining platform built on a hybrid Proof-of-Work + Proof-of-Stake consensus. Mine CC (Choco Coin) directly from your browser, earn rewards through staking, play games, and swap across currencies — all in one place.
 
 </div>
 
