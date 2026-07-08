@@ -61,11 +61,11 @@ newDifficulty = currentDifficulty * (targetSolveTime / actualSolveTime)
 
 | Tier | Multiplier | Max Difficulty | Examples |
 |:---:|:---:|:---:|---|
-| embedded_avr | 3.5x | 5,000 | Arduino Uno, Nano, Mega (~400 H/s) |
-| embedded_arm | 3.0x | 50,000 | Raspberry Pi Pico, RP2040 (~5 kH/s) |
-| embedded_esp | 2.5x | 100,000 | ESP8266, NodeMCU (~66 kH/s) |
-| embedded_esp32 | 2.0x | 500,000 | ESP32, ESP32-S2, ESP32-C3 (~170 kH/s) |
-| mobile | 1.8x | 10,000 | Android, iOS browsers (~500 kH/s) |
+| embedded_avr | 3.5x | 5,000 | Arduino Uno, Nano, Mega (~30 H/s) |
+| embedded_arm | 3.0x | 50,000 | Raspberry Pi Pico, RP2040 (~500 H/s) |
+| embedded_esp | 2.5x | 100,000 | ESP8266, NodeMCU (~5 kH/s) |
+| embedded_esp32 | 2.0x | 500,000 | ESP32, ESP32-S2, ESP32-C3 (~30 kH/s) |
+| mobile | 1.8x | 10,000 | Android, iOS browsers (~200 kH/s) |
 | cpu | 1.0x | 1,000,000,000 | Desktop browser miner (~1–10 MH/s) |
 | gpu | 1.0x | 1,000,000,000 | GPU mining (~10–500 MH/s) |
 
