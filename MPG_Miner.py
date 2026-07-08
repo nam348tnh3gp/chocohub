@@ -994,11 +994,19 @@ def interactive_setup():
     print(f"{ANSI.BOLD}{ANSI.CYN}║           CHOCOHUB MINER - INTERACTIVE SETUP             ║{ANSI.RST}")
     print(f"{ANSI.BOLD}{ANSI.CYN}╚══════════════════════════════════════════════════════════╝{ANSI.RST}\n")
 
+    # Show loaded config values if they exist
+    has_config = os.path.exists(CONFIG_FILE)
+    if has_config:
+        print(f"  {ANSI.GRY}[Loaded config.txt — press Enter to keep current value]{ANSI.RST}\n")
+
     while True:
-        wrk = input(f"  {ANSI.YEL}➤ Worker name{ANSI.RST}: ").strip()
+        default_val = f" [{DEFAULT_WORKER}]" if DEFAULT_WORKER else ""
+        wrk = input(f"  {ANSI.YEL}➤ Worker name{ANSI.RST}{default_val}: ").strip()
         if wrk:
             DEFAULT_WORKER = wrk
             break
+        if DEFAULT_WORKER:
+            break  # keep loaded value
         print(f"  {ANSI.RED}Please enter worker name!{ANSI.RST}")
 
     # PIN for JWT auth
@@ -1012,7 +1020,9 @@ def interactive_setup():
     print(f"     2) {ANSI.GRN}CPU (desktop/laptop){ANSI.RST}                  — 1.0x  multiplier")
     print(f"     3) {ANSI.MAG}GPU (Nvidia/AMD){ANSI.RST}                      — 1.0x  multiplier")
     print(f"     4) {ANSI.GRN}AVR (Arduino via COM){ANSI.RST}                 — 3.5x  multiplier")
-    dev_choice = input(f"  {ANSI.YEL}➤ Choice (1/2/3/4){ANSI.RST}: ").strip()
+    tier_hint = {"mobile": "1", "cpu": "2", "gpu": "3", "embedded_avr": "4"}.get(DEFAULT_GPU and "gpu" or "cpu", "")
+    hint_str = f" [{tier_hint}]" if tier_hint else ""
+    dev_choice = input(f"  {ANSI.YEL}➤ Choice (1/2/3/4){ANSI.RST}{hint_str}: ").strip()
     tier_map = {"1": "mobile", "2": "cpu", "3": "gpu", "4": "embedded_avr"}
     selected_tier = tier_map.get(dev_choice, "gpu")
     is_mobile = (dev_choice == "1")
@@ -1046,21 +1056,28 @@ def interactive_setup():
             print(f"\n  {ANSI.CYN}[?] Use GPU for mining?{ANSI.RST}")
             print(f"     1) {ANSI.GRN}CPU only{ANSI.RST}")
             print(f"     2) {ANSI.MAG}CPU + GPU{ANSI.RST}")
-            gpu_choice = input(f"  {ANSI.YEL}➤ Choice (1/2){ANSI.RST}: ").strip()
-            use_gpu = (gpu_choice == "2")
+            gpu_hint = " [2]" if DEFAULT_GPU else " [1]"
+            gpu_choice = input(f"  {ANSI.YEL}➤ Choice (1/2){ANSI.RST}{gpu_hint}: ").strip()
+            if not gpu_choice:
+                use_gpu = DEFAULT_GPU
+            else:
+                use_gpu = (gpu_choice == "2")
             DEFAULT_GPU = use_gpu
 
         suggested = suggest_threads("mobile" if is_mobile else "pc", use_gpu)
-        thr_input = input(f"\n  {ANSI.YEL}➤ CPU threads{ANSI.RST} (suggested: {suggested}): ").strip()
+        thr_hint = f" [{DEFAULT_THREADS}]" if DEFAULT_THREADS is not None else ""
+        thr_input = input(f"\n  {ANSI.YEL}➤ CPU threads{ANSI.RST} (suggested: {suggested}){thr_hint}: ").strip()
         if thr_input:
             try:
                 DEFAULT_THREADS = int(thr_input)
             except:
                 DEFAULT_THREADS = suggested
         else:
-            DEFAULT_THREADS = suggested
+            if DEFAULT_THREADS is None:
+                DEFAULT_THREADS = suggested
 
-    poll_input = input(f"\n  {ANSI.YEL}➤ Job poll interval (seconds){ANSI.RST} [default {DEFAULT_POLL}]: ").strip()
+    poll_hint = f" [{DEFAULT_POLL}]" if DEFAULT_POLL else ""
+    poll_input = input(f"\n  {ANSI.YEL}➤ Job poll interval (seconds){ANSI.RST}{poll_hint}: ").strip()
     if poll_input:
         try:
             DEFAULT_POLL = int(poll_input)
@@ -1079,9 +1096,12 @@ def parse_arguments():
     parser.add_argument("--tier", default="gpu", help="Device tier: embedded_avr, embedded_arm, embedded_esp, embedded_esp32, mobile, cpu, gpu (default: gpu)")
     parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="Number of CPU threads")
     parser.add_argument("--gpu", action="store_true", default=DEFAULT_GPU, help="Enable GPU mining (requires OpenCL)")
+    parser.add_argument("--no-gpu", action="store_true", default=False, help="Explicitly disable GPU mining (overrides saved config)")
     parser.add_argument("--arduino-port", default=DEFAULT_ARDUINO_PORT, help="Serial port for Arduino (e.g. COM3 or /dev/ttyACM0)")
     parser.add_argument("--arduino-baud", type=int, default=DEFAULT_ARDUINO_BAUD, help="Arduino serial baud rate (default: 115200)")
     parser.add_argument("--poll", type=int, default=DEFAULT_POLL, help="Job fetch interval in seconds")
+    parser.add_argument("--reset", action="store_true", default=False, help="Delete saved config and run fresh interactive setup")
+    parser.add_argument("--no-config", action="store_true", default=False, help="Ignore saved config, use defaults (no interactive setup)")
     return parser.parse_args()
 
 # ---------------------------------------------------------------------------
@@ -1090,7 +1110,14 @@ def parse_arguments():
 def main():
     global DEFAULT_SERVER, DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL, DEFAULT_ARDUINO_PORT, DEFAULT_ARDUINO_BAUD
 
-    config = load_config()
+    # Handle --reset: delete config and force fresh setup
+    if '--reset' in sys.argv[1:]:
+        if os.path.exists(CONFIG_FILE):
+            os.remove(CONFIG_FILE)
+            print(f"{ANSI.GRN}Config deleted. Starting fresh setup...{ANSI.RST}")
+            time.sleep(1)
+
+    config = {} if '--no-config' in sys.argv[1:] else load_config()
     DEFAULT_SERVER        = config.get("server", DEFAULT_SERVER)
     DEFAULT_WORKER        = config.get("worker", DEFAULT_WORKER)
     DEFAULT_THREADS       = config.get("threads", DEFAULT_THREADS)
@@ -1100,7 +1127,11 @@ def main():
     DEFAULT_ARDUINO_BAUD  = config.get("arduino_baud", DEFAULT_ARDUINO_BAUD)
 
     args_passed = sys.argv[1:]
-    has_essential = any(x in args_passed for x in ['--worker', '--threads', '--gpu', '--poll', '--pin'])
+    # Include all meaningful flags so passing them skips interactive setup
+    has_essential = any(x in args_passed for x in [
+        '--worker', '--threads', '--gpu', '--no-gpu', '--poll',
+        '--pin', '--tier', '--arduino-port', '--server'
+    ])
 
     pin_from_setup = None
     tier_from_setup = "embedded_avr" if '--arduino-port' in args_passed else "gpu"
@@ -1117,6 +1148,11 @@ def main():
                 sys.exit(1)
 
     args = parse_arguments()
+
+    # Handle --no-gpu: override any saved/config GPU value
+    if args.no_gpu:
+        args.gpu = False
+
     if args.worker is None:
         print(f"{ANSI.RED}Error: No worker name. Use --worker or run without parameters.{ANSI.RST}")
         sys.exit(1)
