@@ -1,503 +1,385 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>CHOCO HUB · Send CC</title>
-
-    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        /* ═══════════════════════════════════════════
-           CHOCO HUB · GLOBAL DESIGN SYSTEM
-           ═══════════════════════════════════════════ */
         :root {
-            --void:        #0a0a12;
-            --deep:        #0d0b0a;
-            --surface:     rgba(20, 20, 35, 0.7);
-            --raised:      #1d1d2e;
-            --overlay:     rgba(8, 8, 16, 0.94);
-            --border:      rgba(255, 149, 0, 0.08);
-            --border-mid:  rgba(255, 149, 0, 0.18);
-            --border-hi:   rgba(255, 149, 0, 0.35);
-            --text:        #eee4d8;
-            --mid:         #8b8296;
-            --dim:         #4a4458;
-            --amber:       #f58a00;
-            --amber-soft:  #ffb347;
-            --amber-glow:  rgba(245, 138, 0, 0.25);
-            --amber-faint: rgba(245, 138, 0, 0.04);
-            --gold:        #f2c94c;
-            --green:       #40c057;
-            --red:         #fa5252;
-            --pink:        #f06292;
-            --pending:     #f5a623;
-
-            --bg: var(--void);
+            --radius-xl: 30px;
+            --radius-lg: 24px;
+            --radius-md: 16px;
             --radius-sm: 12px;
-            --radius-md: 20px;
-            --radius-lg: 28px;
-            --radius-full: 99px;
-            --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.4);
-            --shadow-card-hover: 0 20px 48px rgba(0, 0, 0, 0.55);
-            --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
-            --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
-            --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+            --radius-pill: 999px;
+            --accent-yellow: #FFD60A;
+            --accent-orange: #FF9F0A;
+            --accent-blue: #0A84FF;
+            --accent-pink: #FF375F;
+            --accent-green: #32D74B;
+            --accent-red: #FA5252;
+            --accent-cyan: #64D2FF;
+            --ease-liquid: cubic-bezier(.22,1,.36,1);
+        }
+
+        html[data-theme="dark"] {
+            --bg-base: #07060A;
+            --text-primary: #F1EAE0;
+            --text-secondary: #9A93A6;
+            --text-tertiary: #5F5A6D;
+            --glass-bg: rgba(255,255,255,0.055);
+            --glass-bg-strong: rgba(255,255,255,0.09);
+            --glass-border: rgba(255,255,255,0.14);
+            --glass-highlight: rgba(255,255,255,0.22);
+            --glass-shadow: rgba(0,0,0,0.55);
+            --field-bg: rgba(0,0,0,0.35);
+            --field-border: rgba(255,255,255,0.12);
+            --field-border-hi: rgba(255,159,10,0.35);
+            --blob-opacity: 0.2;
+            --blob-blur: 70px;
+            --pending: #f5a623;
+        }
+
+        html[data-theme="light"] {
+            --bg-base: #EFEFF6;
+            --text-primary: #1B1A22;
+            --text-secondary: #5B5766;
+            --text-tertiary: #8B879A;
+            --glass-bg: rgba(255,255,255,0.5);
+            --glass-bg-strong: rgba(255,255,255,0.75);
+            --glass-border: rgba(255,255,255,0.9);
+            --glass-highlight: rgba(255,255,255,0.95);
+            --glass-shadow: rgba(31,32,71,0.14);
+            --field-bg: rgba(255,255,255,0.6);
+            --field-border: rgba(0,0,0,0.1);
+            --field-border-hi: rgba(255,159,10,0.5);
+            --blob-opacity: 0.7;
+            --blob-blur: 80px;
+            --pending: #e09400;
         }
 
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         html { font-size: 14px; }
 
         body {
-            margin: 0; padding: 0; background-color: #0a0807;
-            background-image:
-                radial-gradient(circle at 50% 40%, rgba(255, 120, 0, 0.08) 0%, transparent 70%),
-                radial-gradient(circle at 50% 50%, #140d0a 0%, #0a0807 100%);
-            background-attachment: fixed; color: var(--text); font-family: 'Outfit', sans-serif;
-            overflow-x: hidden; min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+            background: var(--bg-base);
+            color: var(--text-primary);
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            overflow-x: hidden;
+            min-height: 100vh;
+            padding: 1.5rem 1rem 3rem;
+            -webkit-font-smoothing: antialiased;
+            transition: background-color .6s var(--ease-liquid), color .5s var(--ease-liquid);
+            overflow-wrap: anywhere;
         }
 
         button { font-family: inherit; cursor: pointer; border: none; outline: none; }
-        a { color: var(--amber); text-decoration: none; }
+        a { color: inherit; text-decoration: none; }
 
-        @keyframes pulseGlow {
-            0% { box-shadow: 0 0 5px rgba(255, 149, 0, 0.05); }
-            50% { box-shadow: 0 0 15px rgba(255, 149, 0, 0.2); }
-            100% { box-shadow: 0 0 5px rgba(255, 149, 0, 0.05); }
-        }
-        @keyframes liquidMove {
-            0% { transform: translate(0, 0) scale(1) rotate(30deg); }
-            50% { transform: translate(-5%, 5%) scale(1.3) rotate(100deg); }
-            100% { transform: translate(5%, -5%) scale(1) rotate(-2deg); }
-        }
-        @keyframes logoBounce {
-            0%, 100% { transform: translateY(0); }
-            30% { transform: translateY(-6px); }
-            50% { transform: translateY(0); }
-            70% { transform: translateY(-3px); }
-        }
-        @keyframes shimmerRotate {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-        @keyframes pulsePending {
-            0%, 100% { opacity: 0.6; }
-            50% { opacity: 1; }
-        }
+        @keyframes pulsePending { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
 
-        .liquid-bg {
-            position: fixed; top: -25%; left: -25%; width: 150%; height: 150%;
-            background: radial-gradient(circle at center, rgba(255, 149, 0, 0.04) 0%, rgba(30, 20, 10, 0.2) 30%, transparent 60%);
-            z-index: -1; pointer-events: none; filter: blur(60px);
-            animation: liquidMove 20s ease-in-out infinite alternate;
-        }
-
-        /* Send Container */
-        .send-container {
-            width: min(560px, 94vw);
-            margin: 40px auto 60px;
-            padding: 0 16px;
-            position: relative;
-            z-index: 1;
-        }
-
-        /* Header */
-        .send-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 28px;
-            flex-wrap: wrap;
-            gap: 12px;
-        }
-
-        .logo {
-            font-size: 1.4rem;
-            font-weight: 800;
-            letter-spacing: -0.02em;
-            color: var(--amber);
-            text-shadow: 0 0 16px var(--amber-glow);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            user-select: none;
-        }
-        .logo .logo-icon {
-            display: inline-block;
-            font-size: 1.6rem;
-            animation: logoBounce 3s ease-in-out infinite;
-        }
-
-        .btn-back {
-            background: rgba(255,255,255,0.06);
-            color: var(--mid);
-            border: 1px solid var(--border);
-            padding: 8px 16px;
-            border-radius: var(--radius-full);
-            font-size: 0.78rem;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-            cursor: pointer;
-            transition: all 0.2s var(--ease-smooth);
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .btn-back:hover {
-            color: var(--amber);
-            border-color: var(--border-hi);
-            background: rgba(255,149,0,0.08);
-        }
-
-        /* Send Card */
-        .send-card {
-            background: var(--surface);
-            backdrop-filter: blur(14px) saturate(160%);
-            -webkit-backdrop-filter: blur(14px) saturate(160%);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            padding: 32px 28px;
-            box-shadow: var(--shadow-card);
-            position: relative;
-            overflow: hidden;
-            transition: border-color 0.4s var(--ease-smooth), box-shadow 0.4s var(--ease-smooth);
-            margin-bottom: 28px;
-        }
-        .send-card:hover {
-            border-color: var(--border-hi);
-            box-shadow: var(--shadow-card-hover), 0 0 20px rgba(245,166,35,0.08);
-        }
-        .send-card::after {
-            content: ''; position: absolute; top: -50%; left: -50%;
-            width: 200%; height: 200%;
-            background: radial-gradient(circle at 30% 40%, rgba(255,255,255,0.03) 0%, transparent 50%);
+        /* ── Blobs ── */
+        .bg-blobs {
+            position: fixed; inset: 0; z-index: -2; overflow: hidden;
+            filter: blur(var(--blob-blur)) saturate(160%);
+            opacity: var(--blob-opacity);
+            transition: opacity .6s var(--ease-liquid);
             pointer-events: none;
-            animation: shimmerRotate 20s linear infinite;
+        }
+        .blob { position: absolute; border-radius: 50%; will-change: transform; }
+        .blob-yellow { width: 46vw; height: 46vw; top: -12%; left: -8%; background: radial-gradient(circle at 40% 40%, var(--accent-yellow) 0%, transparent 72%); animation: float1 24s var(--ease-liquid) infinite alternate; }
+        .blob-blue { width: 52vw; height: 52vw; bottom: -20%; right: -12%; background: radial-gradient(circle at 60% 60%, var(--accent-blue) 0%, transparent 72%); animation: float2 30s var(--ease-liquid) infinite alternate; }
+        .blob-pink { width: 38vw; height: 38vw; top: 22%; right: 10%; background: radial-gradient(circle at 50% 50%, var(--accent-pink) 0%, transparent 72%); animation: float3 20s var(--ease-liquid) infinite alternate; }
+        .blob-orange { width: 36vw; height: 36vw; bottom: 4%; left: 18%; background: radial-gradient(circle at 50% 50%, var(--accent-orange) 0%, transparent 72%); animation: float4 26s var(--ease-liquid) infinite alternate; }
+        @keyframes float1 { 0%{transform:translate(0,0) scale(1) rotate(0deg);} 50%{transform:translate(6vw,8vh) scale(1.12) rotate(20deg);} 100%{transform:translate(-4vw,4vh) scale(0.95) rotate(-15deg);} }
+        @keyframes float2 { 0%{transform:translate(0,0) scale(1);} 50%{transform:translate(-7vw,-6vh) scale(1.1);} 100%{transform:translate(3vw,-9vh) scale(0.92);} }
+        @keyframes float3 { 0%{transform:translate(0,0) scale(1);} 50%{transform:translate(-5vw,7vh) scale(0.9);} 100%{transform:translate(6vw,3vh) scale(1.15);} }
+        @keyframes float4 { 0%{transform:translate(0,0) scale(1);} 50%{transform:translate(5vw,-5vh) scale(1.08);} 100%{transform:translate(-6vw,-2vh) scale(0.94);} }
+
+        .grain {
+            position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: 0.035;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+            mix-blend-mode: overlay;
         }
 
-        .send-title {
-            font-size: 1.5rem;
-            font-weight: 800;
-            letter-spacing: -0.02em;
-            margin-bottom: 6px;
+        /* ── Glass ── */
+        .glass {
             position: relative;
-            z-index: 1;
+            background: var(--glass-bg);
+            backdrop-filter: blur(26px) saturate(180%);
+            -webkit-backdrop-filter: blur(26px) saturate(180%);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 10px 34px var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+            transition: background-color .5s var(--ease-liquid), border-color .5s var(--ease-liquid), box-shadow .5s var(--ease-liquid);
+            overflow: hidden;
+            overflow-wrap: anywhere;
         }
-        .send-subtitle {
-            color: var(--mid);
-            font-size: 0.85rem;
-            margin-bottom: 28px;
-            position: relative;
-            z-index: 1;
+        .glass::before {
+            content: ""; position: absolute; inset: 0;
+            background: linear-gradient(130deg, rgba(255,255,255,0.08), transparent 50%);
+            pointer-events: none;
         }
+        html[data-theme="light"] .glass::before {
+            background: linear-gradient(130deg, rgba(255,255,255,0.35), transparent 50%);
+        }
+        .glass-pill { border-radius: var(--radius-pill) !important; }
 
-        /* Balance row */
+        /* ── App shell ── */
+        .app-shell { max-width: 560px; margin: 0 auto; position: relative; z-index: 1; min-width: 0; }
+
+        .topbar {
+            display: flex; justify-content: space-between; align-items: center;
+            flex-wrap: wrap; gap: 14px; padding: 10px 18px; margin-bottom: 0.8rem;
+            min-width: 0; overflow: hidden;
+        }
+        .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; min-width: 0; overflow: hidden; }
+        .brand-icon { font-size: 20px; filter: drop-shadow(0 2px 6px rgba(255,159,10,0.5)); }
+        .brand h1 {
+            font-size: 1rem; font-weight: 800; letter-spacing: -0.02em;
+            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange) 45%, var(--accent-pink));
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .brand-sub { font-size: 0.65rem; color: var(--text-tertiary); font-family:'DM Mono',monospace; letter-spacing:0.06em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        .topbar-widgets { display: flex; align-items: center; gap: 12px; }
+
+        .theme-toggle { appearance: none; border: none; background: none; cursor: pointer; padding: 0; }
+        .toggle-track {
+            width: 56px; height: 30px; border-radius: var(--radius-pill);
+            background: linear-gradient(135deg, #2b2540, #171425);
+            border: 1px solid var(--glass-border);
+            display: flex; align-items: center; padding: 3px;
+            transition: background .45s var(--ease-liquid);
+            position: relative; box-shadow: inset 0 2px 6px rgba(0,0,0,0.4);
+            overflow: hidden;
+        }
+        html[data-theme="light"] .toggle-track { background: linear-gradient(135deg, #FFE28A, #FFB347); }
+        .toggle-thumb {
+            width: 24px; height: 24px; border-radius: 50%; background: #fff;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+            display: flex; align-items: center; justify-content: center;
+            transform: translateX(0); transition: transform .45s var(--ease-liquid);
+            overflow: hidden;
+        }
+        html[data-theme="light"] .toggle-thumb { transform: translateX(26px); }
+        .toggle-thumb svg { width: 14px; height: 14px; }
+
+        .back-link {
+            display: inline-flex; align-items: center; gap: 6px;
+            color: var(--text-secondary); font-size: 0.82rem; font-weight: 500;
+            transition: color 0.2s, gap 0.2s; white-space: nowrap;
+        }
+        .back-link:hover { gap: 10px; color: var(--accent-orange); }
+
+        /* ── Content ── */
+        .send-container { padding: 1.5rem; margin-bottom: 1.5rem; overflow: hidden; min-width: 0; }
+        .send-container > * { position: relative; z-index: 1; }
+
+        .page-title {
+            font-size: 1.5rem; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 0.3rem;
+            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange) 45%, var(--accent-pink));
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+            word-break: break-word;
+        }
+        .page-sub { color: var(--text-secondary); font-size: 0.82rem; margin-bottom: 1.5rem; word-break: break-word; }
+        .page-sub .fee-tag { color: var(--text-tertiary); font-size: 0.7rem; }
+
+        /* ── Balance row ── */
         .balance-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 16px;
-            background: rgba(255,149,0,0.06);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-sm);
-            margin-bottom: 24px;
-            font-size: 0.85rem;
-            position: relative;
-            z-index: 1;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 16px; background: var(--glass-bg);
+            border: 1px solid var(--glass-border); border-radius: var(--radius-sm);
+            margin-bottom: 1.2rem; overflow: hidden;
         }
-        .balance-label {
-            color: var(--mid);
-            font-weight: 600;
-            letter-spacing: 0.03em;
-        }
-        .balance-value {
-            font-family: 'Space Mono', monospace;
-            color: var(--amber);
-            font-weight: 700;
-            font-size: 1rem;
-        }
+        .balance-label { color: var(--text-secondary); font-weight: 600; font-size: 0.85rem; overflow: hidden; }
+        .balance-value { font-family: 'DM Mono', monospace; color: var(--accent-orange); font-weight: 700; font-size: 1rem; overflow: hidden; }
 
-        /* Fee info */
+        /* ── Fee info ── */
         .fee-info {
-            display: flex;
-            justify-content: space-between;
-            padding: 6px 0 16px 0;
-            font-size: 0.75rem;
-            color: var(--dim);
-            position: relative;
-            z-index: 1;
-            border-bottom: 1px solid var(--border);
-            margin-bottom: 16px;
+            display: flex; justify-content: space-between;
+            padding: 0 0 12px 0; font-size: 0.75rem; color: var(--text-tertiary);
+            border-bottom: 1px solid var(--glass-border); margin-bottom: 12px;
+            overflow: hidden;
         }
-        .fee-info .fee-value {
-            color: var(--mid);
-            font-family: 'Space Mono', monospace;
-        }
+        .fee-info .fee-value { color: var(--text-secondary); font-family: 'DM Mono', monospace; overflow: hidden; }
 
-        /* Field */
+        /* ── Fields ── */
+        .field-group { margin-bottom: 14px; overflow: hidden; }
         .field-lbl {
-            font-family: 'Space Mono', monospace;
-            font-size: 0.65rem;
-            color: var(--dim);
-            letter-spacing: 1.5px;
-            text-transform: uppercase;
-            margin-bottom: 7px;
-            display: block;
-            position: relative;
-            z-index: 1;
+            font-family: 'DM Mono', monospace; font-size: 0.65rem;
+            color: var(--text-tertiary); letter-spacing: 1px;
+            text-transform: uppercase; margin-bottom: 7px; display: block;
+            overflow: hidden;
         }
         .field-inp {
-            width: 100%;
-            padding: 14px 16px;
-            background: rgba(10, 10, 20, 0.5);
-            border: 1px solid var(--border-mid);
-            border-radius: var(--radius-sm);
-            color: var(--text);
-            font-family: 'Space Mono', monospace;
-            font-size: 0.95rem;
-            outline: none;
-            transition: border-color 0.2s;
-            position: relative;
-            z-index: 1;
-            margin-bottom: 18px;
+            width: 100%; padding: 14px 16px; background: var(--field-bg);
+            border: 1px solid var(--field-border); border-radius: var(--radius-sm);
+            color: var(--text-primary); font-family: 'DM Mono', monospace;
+            font-size: 0.95rem; outline: none; transition: border-color 0.2s;
+            overflow-wrap: anywhere;
         }
-        .field-inp:focus {
-            border-color: var(--border-hi);
-        }
+        .field-inp:focus { border-color: var(--field-border-hi); }
+        .field-inp::placeholder { color: var(--text-tertiary); }
 
-        /* Send button */
+        /* ── Send button ── */
         .btn-send {
-            width: 100%;
-            background: linear-gradient(135deg, var(--amber) 0%, #ff6d00 100%);
-            color: #000;
-            border-radius: var(--radius-md);
-            padding: 16px;
-            font-weight: 800;
-            font-size: 1rem;
-            letter-spacing: 1px;
-            box-shadow: 0 4px 22px rgba(255,149,0,.3);
-            transition: all 0.25s var(--ease-out-expo);
-            position: relative;
-            z-index: 1;
-            margin-top: 8px;
-        }
-        .btn-send:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 32px rgba(255,149,0,.45);
-        }
-        .btn-send:active {
-            transform: scale(0.96);
-        }
-        .btn-send:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        /* History Card */
-        .history-card {
-            background: var(--surface);
-            backdrop-filter: blur(14px) saturate(160%);
-            -webkit-backdrop-filter: blur(14px) saturate(160%);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            padding: 28px 24px;
-            box-shadow: var(--shadow-card);
-            position: relative;
+            width: 100%; background: var(--accent-yellow); color: #000;
+            border-radius: var(--radius-md); padding: 16px;
+            font-weight: 800; font-size: 1rem; letter-spacing: 1px;
+            box-shadow: 0 4px 22px rgba(255,214,10,.3);
+            transition: all 0.25s var(--ease-liquid); margin-top: 6px;
             overflow: hidden;
         }
+        .btn-send:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(255,214,10,.45); }
+        .btn-send:active { transform: scale(0.96); }
+        .btn-send:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+        /* ── History card ── */
+        .history-card { padding: 1.5rem; }
+        .history-card > * { position: relative; z-index: 1; }
         .history-card h3 {
-            font-size: 1.2rem;
-            font-weight: 800;
-            margin-bottom: 18px;
-            color: var(--amber);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            justify-content: space-between;
+            font-size: 1.1rem; font-weight: 800; margin-bottom: 1rem;
+            display: flex; align-items: center; gap: 8px; justify-content: space-between;
+            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange) 45%, var(--accent-pink));
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+            word-break: break-word; overflow-wrap: break-word; overflow: hidden;
         }
-        .history-card h3 .pending-badge {
-            font-size: 0.6rem;
-            font-weight: 700;
-            color: var(--pending);
-            background: rgba(245, 166, 35, 0.15);
-            padding: 4px 12px;
-            border-radius: var(--radius-full);
-            letter-spacing: 0.5px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
+        .pending-badge {
+            font-size: 0.6rem; font-weight: 700; color: var(--pending);
+            background: rgba(245,166,35,0.15); padding: 4px 12px;
+            border-radius: var(--radius-pill); letter-spacing: 0.5px;
+            display: flex; align-items: center; gap: 6px; white-space: nowrap;
         }
-        .history-card h3 .pending-badge .dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: var(--pending);
-            animation: pulsePending 1.5s ease-in-out infinite;
-            display: inline-block;
+        .pending-badge .dot {
+            width: 6px; height: 6px; border-radius: 50%; background: var(--pending);
+            animation: pulsePending 1.5s ease-in-out infinite; display: inline-block;
         }
 
         .history-list {
-            list-style: none;
-            max-height: 300px;
-            overflow-y: auto;
-            font-family: 'Space Mono', monospace;
-            font-size: 0.78rem;
-            color: var(--mid);
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
+            max-height: 300px; overflow-y: auto;
+            font-family: 'DM Mono', monospace; font-size: 0.78rem;
+            color: var(--text-secondary); display: flex; flex-direction: column; gap: 8px;
+            overflow: hidden;
         }
         .history-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 12px;
-            background: rgba(255,255,255,0.02);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-sm);
-            flex-wrap: wrap;
-            gap: 4px;
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 12px; background: var(--glass-bg);
+            border: 1px solid var(--glass-border); border-radius: var(--radius-sm);
+            flex-wrap: wrap; gap: 4px; overflow-wrap: anywhere;
         }
-        .history-item.pending-item {
-            border-color: rgba(245, 166, 35, 0.3);
-            background: rgba(245, 166, 35, 0.05);
-        }
-        .history-item .tx-type {
-            font-weight: 700;
-            color: var(--amber);
-            min-width: 45px;
-            font-size: 0.7rem;
-        }
-        .history-item .tx-type.receive {
-            color: var(--green);
-        }
-        .history-item .tx-type.pending-type {
-            color: var(--pending);
-        }
-        .history-item .tx-details {
-            flex: 1;
-            text-align: left;
-            color: var(--text);
-            font-size: 0.75rem;
-            padding: 0 6px;
-        }
-        .history-item .tx-amount {
-            font-weight: 700;
-            font-size: 0.8rem;
-        }
-        .history-item .tx-amount.negative {
-            color: var(--red);
-        }
-        .history-item .tx-amount.positive {
-            color: var(--green);
-        }
-        .history-item .tx-amount.pending-amount {
-            color: var(--pending);
-        }
-        .history-item .tx-time {
-            font-size: 0.6rem;
-            color: var(--dim);
-            min-width: 60px;
-            text-align: right;
-        }
+        .history-item.pending-item { border-color: rgba(245,166,35,0.3); background: rgba(245,166,35,0.05); }
+        .history-item .tx-type { font-weight: 700; color: var(--accent-orange); min-width: 45px; font-size: 0.7rem; overflow: hidden; }
+        .history-item .tx-type.receive { color: var(--accent-green); }
+        .history-item .tx-type.pending-type { color: var(--pending); }
+        .history-item .tx-details { flex: 1; text-align: left; color: var(--text-primary); font-size: 0.75rem; padding: 0 6px; overflow: hidden; }
+        .history-item .tx-amount { font-weight: 700; font-size: 0.8rem; overflow: hidden; }
+        .history-item .tx-amount.negative { color: var(--accent-red); }
+        .history-item .tx-amount.positive { color: var(--accent-green); }
+        .history-item .tx-amount.pending-amount { color: var(--pending); }
+        .history-item .tx-time { font-size: 0.6rem; color: var(--text-tertiary); min-width: 60px; text-align: right; overflow: hidden; }
         .history-item .tx-status {
-            font-size: 0.55rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            padding: 2px 8px;
-            border-radius: var(--radius-full);
+            font-size: 0.55rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.5px; padding: 2px 8px; border-radius: var(--radius-pill);
+            overflow: hidden; white-space: nowrap;
         }
-        .history-item .tx-status.pending-status {
-            color: var(--pending);
-            background: rgba(245, 166, 35, 0.15);
-        }
-        .history-item .tx-status.confirmed-status {
-            color: var(--green);
-            background: rgba(64, 192, 87, 0.15);
-        }
-        .empty-history {
-            color: var(--dim);
-            text-align: center;
-            padding: 20px 0;
-            font-style: italic;
-        }
+        .history-item .tx-status.pending-status { color: var(--pending); background: rgba(245,166,35,0.15); }
+        .history-item .tx-status.confirmed-status { color: var(--accent-green); background: rgba(50,215,75,0.15); }
+        .empty-history { color: var(--text-tertiary); text-align: center; padding: 20px 0; font-style: italic; overflow: hidden; }
 
-        /* Toast */
+        /* ── Toast ── */
         #toast {
-            position: fixed; bottom: 30px; left: 50%;
+            position: fixed; bottom: 24px; left: 50%;
             transform: translateX(-50%) translateY(20px);
-            background: #111; padding: 14px 28px; border-radius: 50px;
-            border: 1px solid var(--amber); color: #fff; font-weight: 600;
-            font-size: 0.85rem; opacity: 0; transition: 0.3s; z-index: 10005;
-            pointer-events: none;
-            max-width: 90vw;
-            text-align: center;
+            background: var(--glass-bg-strong); backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px); border: 1px solid var(--glass-border);
+            padding: 12px 24px; border-radius: var(--radius-pill);
+            font-weight: 600; font-size: 0.85rem; opacity: 0;
+            transition: all 0.35s var(--ease-liquid); z-index: 9999; pointer-events: none;
+            max-width: 90vw; text-align: center; overflow: hidden;
         }
         #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-        #toast.success { border-color: var(--green); color: var(--green); }
-        #toast.error { border-color: var(--red); color: var(--red); }
+        #toast.success { border-color: var(--accent-green); color: var(--accent-green); }
+        #toast.error { border-color: var(--accent-red); color: var(--accent-red); }
         #toast.pending { border-color: var(--pending); color: var(--pending); }
 
-        @media (max-width: 400px) {
-            .send-card { padding: 22px 16px; }
-            .history-card { padding: 20px 16px; }
-            .history-item { flex-wrap: wrap; gap: 4px; }
+        @media (max-width: 480px) {
+            .send-container { padding: 0; }
+            .history-card { padding: 1.2rem; }
             .history-item .tx-details { width: 100%; text-align: left; }
         }
     </style>
 </head>
 <body>
+    <div class="bg-blobs">
+        <div class="blob blob-yellow"></div>
+        <div class="blob blob-blue"></div>
+        <div class="blob blob-pink"></div>
+        <div class="blob blob-orange"></div>
+    </div>
+    <div class="grain"></div>
 
-    <div class="liquid-bg" aria-hidden="true"></div>
-
-    <div class="send-container">
-        <!-- Header -->
-        <div class="send-header">
-            <div class="logo">
-                <span class="logo-icon" aria-hidden="true">💸</span> SEND CC
+    <div class="app-shell">
+        <div class="topbar glass glass-pill">
+            <a href="index.html" class="back-link">← Dashboard</a>
+            <div class="brand">
+                <span class="brand-icon">🍫</span>
+                <div>
+                    <h1>CHOCO HUB</h1>
+                    <div class="brand-sub">Send CC</div>
+                </div>
             </div>
-            <a href="index.html" class="btn-back">← Dashboard</a>
+            <div class="topbar-widgets">
+                <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
+                    <div class="toggle-track">
+                        <div class="toggle-thumb">
+                            <svg id="theme-icon-dark" viewBox="0 0 24 24" fill="none" stroke="#FFD60A" stroke-width="2">
+                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                            </svg>
+                            <svg id="theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="#FF9F0A" stroke-width="2" style="display:none">
+                                <circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                            </svg>
+                        </div>
+                    </div>
+                </button>
+            </div>
         </div>
 
         <!-- Send Card -->
-        <div class="send-card">
-            <h1 class="send-title">Transfer Choco Coins</h1>
-            <p class="send-subtitle">Send CC to any ChocoHub user. <span style="color:var(--dim);font-size:0.7rem;">Fee: 1%</span></p>
+        <div class="send-container glass">
+            <div class="page-title">Transfer Choco Coins</div>
+            <p class="page-sub">Send CC to any ChocoHub user. <span class="fee-tag">Fee: 1%</span></p>
 
-            <!-- Current Balance -->
             <div class="balance-row">
                 <span class="balance-label">Your Balance</span>
                 <span class="balance-value" id="current-balance">— CC</span>
             </div>
 
-            <!-- Fee Info -->
             <div class="fee-info">
                 <span>Transaction Fee (1%)</span>
                 <span class="fee-value" id="fee-display">0.0000 CC</span>
             </div>
 
-            <!-- Recipient -->
-            <label class="field-lbl">Recipient Username</label>
-            <input type="text" id="recipient" class="field-inp" placeholder="e.g. ChocoKing" spellcheck="false">
+            <div class="field-group">
+                <label class="field-lbl">Recipient Username</label>
+                <input type="text" id="recipient" class="field-inp" placeholder="e.g. ChocoKing" spellcheck="false">
+            </div>
 
-            <!-- Amount -->
-            <label class="field-lbl">Amount (CC)</label>
-            <input type="number" id="amount" class="field-inp" placeholder="0.0" min="0.001" step="any">
+            <div class="field-group">
+                <label class="field-lbl">Amount (CC)</label>
+                <input type="number" id="amount" class="field-inp" placeholder="0.0" min="0.001" step="any">
+            </div>
 
-            <!-- Send Button -->
             <button class="btn-send" id="send-btn">SEND CC</button>
         </div>
 
         <!-- Transaction History -->
-        <div class="history-card">
+        <div class="send-container history-card glass">
             <h3>
-                📋 Transaction History
+                Transaction History
                 <span class="pending-badge" id="pending-badge" style="display:none;">
                     <span class="dot"></span> <span id="pending-count">0</span> pending
                 </span>
@@ -508,14 +390,30 @@
         </div>
     </div>
 
-    <!-- Toast -->
     <div id="toast" role="status" aria-live="polite"></div>
 
     <script>
-        // ─── Configuration ──────────────────────────────────────────────
-        const PENDING_CHECK_INTERVAL = 10000; // 10 giây
+        function toggleTheme() {
+            const html = document.documentElement;
+            const isDark = html.getAttribute('data-theme') === 'dark';
+            html.setAttribute('data-theme', isDark ? 'light' : 'dark');
+            document.getElementById('theme-icon-dark').style.display = isDark ? 'none' : 'block';
+            document.getElementById('theme-icon-light').style.display = isDark ? 'block' : 'none';
+            localStorage.setItem('send-theme', isDark ? 'light' : 'dark');
+        }
+        (function() {
+            const saved = localStorage.getItem('send-theme');
+            if (saved === 'light') {
+                document.documentElement.setAttribute('data-theme', 'light');
+                document.getElementById('theme-icon-dark').style.display = 'none';
+                document.getElementById('theme-icon-light').style.display = 'block';
+            }
+        })();
+    </script>
 
-        // ─── DOM Elements ──────────────────────────────────────────────
+    <script>
+        const PENDING_CHECK_INTERVAL = 10000;
+
         const sendBtn = document.getElementById('send-btn');
         const recipientEl = document.getElementById('recipient');
         const amountEl = document.getElementById('amount');
@@ -529,7 +427,6 @@
         let pendingTxIds = new Set();
         let pendingCheckInterval = null;
 
-        // ─── Toast Helper ──────────────────────────────────────────────
         function showToast(msg, type = '') {
             const t = document.getElementById('toast');
             if (!t) return;
@@ -539,22 +436,13 @@
             t._timeout = setTimeout(() => { t.className = ''; }, 4000);
         }
 
-        // ─── Date Formatting ──────────────────────────────────────────
         function formatDate(dateStr) {
             if (!dateStr) return '—';
             try {
                 const date = new Date(dateStr);
                 if (isNaN(date.getTime())) return '—';
-                return date.toLocaleString('en-US', {
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit'
-                });
-            } catch {
-                return '—';
-            }
+                return date.toLocaleString('en-US', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            } catch { return '—'; }
         }
 
         function formatTimeAgo(dateStr) {
@@ -567,25 +455,20 @@
                 if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
                 if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
                 return Math.floor(diff / 86400) + 'd ago';
-            } catch {
-                return '—';
-            }
+            } catch { return '—'; }
         }
 
-        // ─── Fee Calculator ───────────────────────────────────────────
         function calculateFee(amount) {
             if (!amount || isNaN(amount) || amount <= 0) return 0;
             return parseFloat((amount * 0.01).toFixed(8));
         }
 
-        // ─── Update Fee Display ──────────────────────────────────────
         amountEl.addEventListener('input', function() {
             const amount = parseFloat(this.value);
             const fee = calculateFee(amount);
             feeDisplay.textContent = fee > 0 ? fee.toFixed(4) + ' CC' : '0.0000 CC';
         });
 
-        // ─── Load Balance ─────────────────────────────────────────────
         async function loadBalance() {
             const user = localStorage.getItem('choco_user');
             const token = localStorage.getItem('choco_token');
@@ -618,92 +501,65 @@
             }
         }
 
-        // ─── Load Pending Transactions ────────────────────────────────
         async function loadPendingTransactions() {
             try {
                 const res = await fetch('/node_fees/mempool/status');
                 if (!res.ok) throw new Error('Failed to fetch mempool');
                 const data = await res.json();
                 const pending = data.transactions || [];
-
-                // Update badge
                 if (pending.length > 0) {
                     pendingBadge.style.display = 'flex';
                     pendingCountEl.textContent = pending.length;
                 } else {
                     pendingBadge.style.display = 'none';
                 }
-
-                // Store pending tx ids for display
                 pendingTxIds = new Set(pending.map(tx => tx.id));
                 return pending;
             } catch (e) {
                 console.warn('Failed to load pending:', e.message);
-                // Nếu lỗi, vẫn hiển thị badge ẩn
                 pendingBadge.style.display = 'none';
                 return [];
             }
         }
 
-        // ─── Load Transaction History ─────────────────────────────────
         async function loadHistory() {
             const user = localStorage.getItem('choco_user');
             if (!user) {
                 historyContainer.innerHTML = '<p class="empty-history">Login to see history.</p>';
                 return;
             }
-
             try {
-                // Load confirmed transactions (tăng limit lên 50)
                 const res = await fetch('/get_transactions?username=' + encodeURIComponent(user) + '&limit=50');
                 if (!res.ok) throw new Error('Failed to fetch history');
                 const data = await res.json();
                 const transactions = data.transactions || [];
-
-                // Load pending transactions
                 const pending = await loadPendingTransactions();
 
-                // Combine: pending first (with status), then confirmed
                 const allItems = [];
-
-                // Add pending transactions (only those involving the user)
-                const userPending = pending.filter(tx =>
-                    tx.from === user || tx.to === user
-                );
+                const userPending = pending.filter(tx => tx.from === user || tx.to === user);
                 for (const tx of userPending) {
                     const isSender = tx.from === user;
                     allItems.push({
-                        id: tx.id,
-                        from: tx.from,
-                        to: tx.to,
-                        amount: parseFloat(tx.amount),
-                        fee: parseFloat(tx.fee),
-                        total: parseFloat(tx.total),
-                        created_at: tx.created_at,
-                        status: 'pending',
-                        isSender: isSender,
+                        id: tx.id, from: tx.from, to: tx.to,
+                        amount: parseFloat(tx.amount), fee: parseFloat(tx.fee),
+                        total: parseFloat(tx.total), created_at: tx.created_at,
+                        status: 'pending', isSender: isSender,
                         counterpart: isSender ? tx.to : tx.from,
                         type: isSender ? 'Sent' : 'Received'
                     });
                 }
-
-                // Add confirmed transactions
                 for (const tx of transactions) {
                     const isSender = tx.from_username === user;
                     allItems.push({
                         id: tx.id || 'tx_' + Date.now(),
-                        from: tx.from_username,
-                        to: tx.to_username,
-                        amount: parseFloat(tx.amount),
-                        created_at: tx.created_at,
-                        status: 'confirmed',
-                        isSender: isSender,
+                        from: tx.from_username, to: tx.to_username,
+                        amount: parseFloat(tx.amount), created_at: tx.created_at,
+                        status: 'confirmed', isSender: isSender,
                         counterpart: isSender ? tx.to_username : tx.from_username,
                         type: isSender ? 'Sent' : 'Received'
                     });
                 }
 
-                // Sort: pending first (newest first), then confirmed (newest first)
                 allItems.sort((a, b) => {
                     if (a.status === 'pending' && b.status !== 'pending') return -1;
                     if (a.status !== 'pending' && b.status === 'pending') return 1;
@@ -731,24 +587,15 @@
                     const amountClass = isPending ? 'pending-amount' : (isSender ? 'negative' : 'positive');
                     const amountPrefix = isSender ? '-' : '+';
 
-                    let statusHtml = '';
-                    if (isPending) {
-                        statusHtml = `<span class="tx-status pending-status">⏳ Pending</span>`;
-                    } else {
-                        statusHtml = `<span class="tx-status confirmed-status">✅ Done</span>`;
-                    }
+                    let statusHtml = isPending
+                        ? `<span class="tx-status pending-status">⏳ Pending</span>`
+                        : `<span class="tx-status confirmed-status">✅ Done</span>`;
 
-                    let feeHtml = '';
-                    if (isPending && tx.fee) {
-                        feeHtml = ` (fee: ${tx.fee.toFixed(4)} CC)`;
-                    }
+                    let feeHtml = (isPending && tx.fee) ? ` (fee: ${tx.fee.toFixed(4)} CC)` : '';
 
                     item.innerHTML = `
                         <span class="tx-type ${typeClass}">${tx.type}</span>
-                        <span class="tx-details">
-                            ${isSender ? '→' : '←'} <strong>${tx.counterpart}</strong>
-                            ${feeHtml}
-                        </span>
+                        <span class="tx-details">${isSender ? '→' : '←'} <strong>${tx.counterpart}</strong>${feeHtml}</span>
                         <span class="tx-amount ${amountClass}">${amountPrefix}${amount} CC</span>
                         <span class="tx-time">${time}</span>
                         ${statusHtml}
@@ -760,11 +607,10 @@
                 historyContainer.appendChild(list);
             } catch (e) {
                 console.error('History load failed:', e.message);
-                historyContainer.innerHTML = '<p class="empty-history">Could not load history. <span style="color:var(--amber);cursor:pointer;" onclick="loadHistory()">↻ Retry</span></p>';
+                historyContainer.innerHTML = '<p class="empty-history">Could not load history. <span style="color:var(--accent-orange);cursor:pointer;" onclick="loadHistory()">↻ Retry</span></p>';
             }
         }
 
-        // ─── Handle Send ──────────────────────────────────────────────
         async function handleSend() {
             const user = localStorage.getItem('choco_user');
             const token = localStorage.getItem('choco_token');
@@ -789,14 +635,8 @@
             try {
                 const res = await fetch('/send_cc', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + token
-                    },
-                    body: JSON.stringify({
-                        to_username: recipient,
-                        amount: amount
-                    })
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                    body: JSON.stringify({ to_username: recipient, amount: amount })
                 });
 
                 const data = await res.json();
@@ -809,14 +649,12 @@
                     currentBalance = newBalance;
                     balanceEl.textContent = currentBalance.toFixed(4) + ' CC';
 
-                    const msg = `✅ ${amount.toFixed(4)} CC sent to ${recipient} (fee: ${fee.toFixed(4)} CC). Pending confirmation.`;
-                    showToast(msg, 'pending');
+                    showToast(`✅ ${amount.toFixed(4)} CC sent to ${recipient} (fee: ${fee.toFixed(4)} CC). Pending confirmation.`, 'pending');
 
                     recipientEl.value = '';
                     amountEl.value = '';
                     feeDisplay.textContent = '0.0000 CC';
 
-                    // Reload history ngay lập tức và sau 2s
                     await loadHistory();
                     setTimeout(() => loadHistory(), 2000);
                 } else {
@@ -833,7 +671,6 @@
             sendBtn.textContent = 'SEND CC';
         }
 
-        // ─── Auto check pending periodically ─────────────────────────
         function startPendingCheck() {
             if (pendingCheckInterval) clearInterval(pendingCheckInterval);
             pendingCheckInterval = setInterval(() => {
@@ -844,7 +681,6 @@
             }, PENDING_CHECK_INTERVAL);
         }
 
-        // ─── Auth Check ──────────────────────────────────────────────
         (function checkAuth() {
             const token = localStorage.getItem('choco_token');
             if (!token) {
@@ -853,7 +689,6 @@
             }
         })();
 
-        // ─── Init ──────────────────────────────────────────────────────
         async function init() {
             await loadBalance();
             await loadHistory();
