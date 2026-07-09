@@ -5,7 +5,16 @@ const db = require('./db');
 
 // ─── Cấu hình ────────────────────────────────────
 const REWARD_PER_BLOCK = 0.05;                  // 0.05 CC
-const INITIAL_DIFFICULTY = 10;                  // mặc định cho worker mới
+const INITIAL_DIFFICULTY = 100;                  // mặc định cho worker mới (fallback)
+const TIER_INITIAL_DIFFICULTY = {
+  embedded_avr: 2,
+  embedded_arm: 5,
+  embedded_esp: 50,
+  embedded_esp32: 100,
+  mobile: 100,
+  cpu: 200,
+  gpu: 500
+};
 const JOB_EXPIRE_SECONDS = 60;                  // job hết hạn sau 60s
 const MIN_DIFFICULTY = 1;
 const MAX_DIFFICULTY = 1000000000;
@@ -197,11 +206,7 @@ function getJobForWorker(workerName, instanceId, deviceType) {
 
   let diff = db.getWorkerDifficulty(diffKey);
   if (diff === null) {
-    if (deviceType === 'mobile_web') {
-      diff = 100;
-    } else {
-      diff = INITIAL_DIFFICULTY;
-    }
+    diff = TIER_INITIAL_DIFFICULTY[tier] || INITIAL_DIFFICULTY;
     db.setWorkerDifficulty(diffKey, diff, Date.now());
   }
 
@@ -218,7 +223,7 @@ function getJobForWorker(workerName, instanceId, deviceType) {
   if (poolJob) {
     const poolTargetHex = difficultyToTarget(diff);
     db.prepare(
-      'UPDATE mining_jobs SET assigned_to = ?, difficulty = ?, target_hex = ? WHERE id = ?'
+      `UPDATE mining_jobs SET assigned_to = ?, difficulty = ?, target_hex = ?, created_at = datetime('now') WHERE id = ?`
     ).run(diffKey, diff, poolTargetHex, poolJob.id);
     return mapJob(Object.assign({}, poolJob, { difficulty: diff, target_hex: poolTargetHex }));
   }
@@ -646,6 +651,7 @@ initBlockchain();
 module.exports = {
   // Config (for other modules to read)
   TIER_CONFIG,
+  TIER_INITIAL_DIFFICULTY,
   // PoW mới
   getLastBlock: getLastBlock,
   getJobForWorker: getJobForWorker,
