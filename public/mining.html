@@ -612,10 +612,19 @@
         }
         .term-node-select.open .node-caret { transform: rotate(180deg); }
 
+        .node-dropdown-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 998;
+            background: rgba(0,0,0,0.4);
+            display: none;
+        }
+        .term-node-select.open .node-dropdown-backdrop { display: block; }
+
         .node-dropdown {
             position: fixed;
-            min-width: 260px;
-            max-width: 300px;
+            width: 300px;
+            max-width: calc(100vw - 24px);
             max-height: 70vh;
             overflow-y: auto;
             z-index: 999;
@@ -631,6 +640,17 @@
         .node-dropdown::-webkit-scrollbar { width: 6px; }
         .node-dropdown::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 10px; }
         .term-node-select.open .node-dropdown { display: block; }
+
+        /* On narrow screens, present as a centered sheet instead of an anchored popover */
+        @media (max-width: 640px) {
+            .node-dropdown {
+                left: 50% !important;
+                top: 50% !important;
+                transform: translate(-50%, -50%);
+                width: min(340px, calc(100vw - 32px));
+                max-height: 75vh;
+            }
+        }
 
         .node-option {
             display: flex;
@@ -799,6 +819,17 @@
             .job-header { flex-direction: column; align-items: flex-start; }
             .topbar-widgets { width: 100%; justify-content: space-between; }
             .clock-widget { align-items: flex-start; padding: 6px 4px; }
+
+            .terminal-titlebar { flex-wrap: wrap; row-gap: 6px; padding: 8px 10px; }
+            .terminal-title { font-size: 0.6rem; margin-left: 4px; }
+            .term-node-select { margin-left: auto; }
+            .node-btn { padding: 4px 8px 4px 7px; font-size: 0.58rem; }
+            .node-btn span:not(.node-dot):not(.node-caret) {
+                max-width: 34vw;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -898,6 +929,7 @@
                                 <span id="nodeSelectLabel">Detecting node...</span>
                                 <span class="node-caret">▾</span>
                             </button>
+                            <div class="node-dropdown-backdrop" id="nodeDropdownBackdrop"></div>
                             <div class="node-dropdown" id="nodeDropdown">
                                 <div class="node-dropdown-label">Mining Node</div>
                                 <button class="node-option" data-node="auto" id="nodeOptionAuto">
@@ -1162,7 +1194,7 @@
                 id: 'in-sreep',
                 name: 'Sree.P',
                 location: 'IN-India',
-                url: 'http://toby.hidencloud.com:24596/staking.html'
+                url: 'http://toby.hidencloud.com:24596/'
             }
         ];
 
@@ -1176,6 +1208,7 @@
         const ccNodeDotEl = document.getElementById('nodeSelectDot');
         const ccNodeLabelEl = document.getElementById('nodeSelectLabel');
         const ccNodeDropdownEl = document.getElementById('nodeDropdown');
+        const ccNodeBackdropEl = document.getElementById('nodeDropdownBackdrop');
         const ccNodeOptionsListEl = document.getElementById('nodeOptionsList');
         const ccNodeAutoOptionEl = document.getElementById('nodeOptionAuto');
         const ccNodeAutoDotEl = document.getElementById('nodeAutoDot');
@@ -1244,8 +1277,10 @@
 
         function setActiveCcNode(node, ms) {
             ccActiveNode = node;
-            currentServer = node.url.replace(/\/+$/, ''); // base URL, no trailing slash
-            selectedNode = { id: node.id, name: node.name, location: node.location, latency: ms };
+            // NOTE: job fetching always stays on the site's own backend (currentServer / selectedNode
+            // are left untouched here). These 3 nodes are external hosts with no shared job API and
+            // no CORS access from the browser, so we only use them for ping display + user preference,
+            // not as literal fetch targets.
             ccNodeLabelEl.textContent = `${node.name} \u00b7 ${ms !== null && ms !== undefined ? ms + 'ms' : '—'}`;
             ccNodeDotEl.className = ms === null ? 'node-dot bad' : 'node-dot ok';
             highlightSelectedOption();
@@ -1253,8 +1288,6 @@
 
         function setNoNodeAvailable() {
             ccActiveNode = null;
-            currentServer = '';
-            selectedNode = null;
             ccNodeLabelEl.textContent = 'All nodes unreachable';
             ccNodeDotEl.className = 'node-dot bad';
         }
@@ -1293,16 +1326,16 @@
                 if (reachable.length > 0) {
                     const best = reachable[0];
                     setActiveCcNode(best.node, best.ms);
-                    log(`Auto-connect: ${best.node.name} (${best.node.location}) — ${best.ms}ms (lowest ping)`, 'info');
+                    log(`Node ping: ${best.node.name} (${best.node.location}) — ${best.ms}ms (lowest ping)`, 'info');
                 } else {
                     setNoNodeAvailable();
-                    log('Auto-connect: all 3 mining nodes unreachable.', 'warn');
+                    log('Node ping: all 3 mining nodes unreachable.', 'warn');
                 }
             } else {
                 const manual = results.find(r => r.node.id === ccNodeMode);
                 if (manual && manual.ms !== null) {
                     setActiveCcNode(manual.node, manual.ms);
-                    log(`Connected to ${manual.node.name} (${manual.node.location}) — ${manual.ms}ms`, 'info');
+                    log(`Node selected: ${manual.node.name} (${manual.node.location}) — ${manual.ms}ms`, 'info');
                 } else if (manual) {
                     setActiveCcNode(manual.node, null);
                     log(`${manual.node.name} is not responding, but staying selected per your choice.`, 'warn');
@@ -1323,25 +1356,42 @@
             refreshCcNodes();
         }
 
+        function isMobileLayout() {
+            return window.innerWidth <= 640;
+        }
+
         function positionNodeDropdown() {
+            if (isMobileLayout()) {
+                // CSS handles centered "sheet" positioning on small screens
+                ccNodeDropdownEl.style.top = '';
+                ccNodeDropdownEl.style.left = '';
+                ccNodeDropdownEl.style.transform = '';
+                return;
+            }
             const btnRect = ccNodeBtnEl.getBoundingClientRect();
             const ddRect = ccNodeDropdownEl.getBoundingClientRect();
-            const margin = 8;
+            const margin = 10;
             const spaceBelow = window.innerHeight - btnRect.bottom;
             const spaceAbove = btnRect.top;
+            const ddHeight = ddRect.height || 260;
+            const ddWidth = ddRect.width || 300;
 
-            // Prefer opening upward (button sits inside a scrolling terminal log),
+            // Prefer opening upward (button often sits inside a scrolling terminal log),
             // fall back to downward if there isn't enough room above.
             let top;
-            if (spaceAbove >= ddRect.height + margin || spaceAbove >= spaceBelow) {
-                top = Math.max(margin, btnRect.top - ddRect.height - margin);
+            if (spaceAbove >= ddHeight + margin || spaceAbove >= spaceBelow) {
+                top = Math.max(margin, btnRect.top - ddHeight - margin);
             } else {
-                top = Math.min(window.innerHeight - ddRect.height - margin, btnRect.bottom + margin);
+                top = Math.min(window.innerHeight - ddHeight - margin, btnRect.bottom + margin);
             }
 
-            let left = btnRect.right - ddRect.width;
-            left = Math.max(margin, Math.min(left, window.innerWidth - ddRect.width - margin));
+            // Anchor to the button's right edge, but always stay fully inside the viewport
+            let left = btnRect.right - ddWidth;
+            const minLeft = margin;
+            const maxLeft = window.innerWidth - ddWidth - margin;
+            left = Math.max(minLeft, Math.min(left, maxLeft));
 
+            ccNodeDropdownEl.style.transform = '';
             ccNodeDropdownEl.style.top = `${top}px`;
             ccNodeDropdownEl.style.left = `${left}px`;
         }
@@ -1363,6 +1413,7 @@
             else openNodeDropdown();
         });
         ccNodeAutoOptionEl.addEventListener('click', () => selectCcNode('auto'));
+        ccNodeBackdropEl.addEventListener('click', () => closeNodeDropdown());
         document.addEventListener('click', (e) => {
             if (!ccNodeSelectEl.contains(e.target) && !ccNodeDropdownEl.contains(e.target)) closeNodeDropdown();
         });
@@ -1779,8 +1830,10 @@
             startBoostPolling();
             updateBoostUI();
             log(`Logged in as: ${workerName}`, 'info');
-            // Ping all 3 ChocoHub mining nodes and auto-connect to the lowest ping, then auto-mine
-            refreshCcNodes().then(() => {
+            // Ping the 3 ChocoHub nodes for the selector display (does not affect job routing)
+            refreshCcNodes();
+            // Discover the real mining backend, then auto-mine
+            discoverBestNode().then(() => {
                 setTimeout(() => {
                     autoMineEnabled = true;
                     startMiningLoop();
