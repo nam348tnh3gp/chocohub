@@ -375,6 +375,13 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     throw new Error('This job is assigned to another worker');
   }
 
+  // Reject if a block at this height already exists (prevents duplicates)
+  const existingBlock = db.getBlockByHeight(job.height);
+  if (existingBlock) {
+    db.deleteJobsAtHeight(job.height, jobId);
+    throw new Error(`Block ${job.height} already mined. Submit at next height.`);
+  }
+
   // Claim pool job for this worker
   if (job.assigned_to === '_pool') {
     db.prepare('UPDATE mining_jobs SET assigned_to = ? WHERE id = ?').run(diffKey, jobId);
@@ -544,8 +551,8 @@ function adjustWorkerDifficulty(workerName, solveTime) {
   const targetTime = TARGET_SOLVE_TIME;
 
   let idealDiff = currentDiff * (targetTime / solveTime);
-  let newDiff = currentDiff + (idealDiff - currentDiff) * 0.75;
-  const maxChange = currentDiff * 1.0;
+  let newDiff = currentDiff + (idealDiff - currentDiff) * DIFFICULTY_ADJUSTMENT_FACTOR;
+  const maxChange = currentDiff * 0.5;
   newDiff = Math.max(currentDiff - maxChange, Math.min(currentDiff + maxChange, newDiff));
   const tier = db.getWorkerTier(workerName) || 'cpu';
   const tierMax = TIER_CONFIG[tier] ? TIER_CONFIG[tier].maxDifficulty : MAX_DIFFICULTY;
