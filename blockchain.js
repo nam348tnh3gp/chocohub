@@ -39,7 +39,7 @@ const TIER_CONFIG = {
   },
   mobile: {
     multiplier: 1.8,
-    maxDifficulty: 10000,
+    maxDifficulty: 2500,
     description: 'Android, iOS (~200 kH/s SHA-256)'
   },
   cpu: {
@@ -186,9 +186,11 @@ function getJobForWorker(workerName, instanceId, deviceType) {
     tier = db.getWorkerTier(workerName);
   }
   if (!tier || tier === 'cpu') {
-    if (deviceType === 'mobile_web') {
+    if (deviceType === 'mobile_web' || deviceType === 'mobile') {
       tier = 'mobile';
       try { db.setWorkerTier(diffKey, 'mobile'); } catch (e) { }
+    } else if (deviceType === 'desktop_web') {
+      tier = 'cpu';
     }
   }
   const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cpu;
@@ -239,7 +241,7 @@ function getJobForWorker(workerName, instanceId, deviceType) {
   });
 
   // Pre-create jobs at next heights so other miners have work too
-  preCreateJobs(height + 1, 3, prevHash);
+  preCreateJobs(height + 1, 10, prevHash);
 
   const newJob = db.getActiveJob(jobId);
   return mapJob(newJob);
@@ -248,28 +250,30 @@ function getJobForWorker(workerName, instanceId, deviceType) {
 const JOB_POOL_SIZE = 1;
 
 function preCreateJobs(fromHeight, count, lastPrevHash) {
-  const h = fromHeight;
-  const existing = db.prepare(
-    'SELECT id FROM mining_jobs WHERE height = ? AND status = ?'
-  ).get(h, 'active');
-  if (existing) return;
+  for (let i = 0; i < count; i++) {
+    const h = fromHeight + i;
+    const existing = db.prepare(
+      'SELECT id FROM mining_jobs WHERE height = ? AND status = ?'
+    ).get(h, 'active');
+    if (existing) continue;
 
-  const blockAtHeight = db.getBlockByHeight(h);
-  if (blockAtHeight) return;
+    const blockAtHeight = db.getBlockByHeight(h);
+    if (blockAtHeight) continue;
 
-  const targetHex = difficultyToTarget(INITIAL_DIFFICULTY);
-  const jobId = 'job_' + crypto.randomBytes(6).toString('hex');
-  db.createJob({
-    id: jobId,
-    height: h,
-    prev_hash: lastPrevHash,
-    difficulty: INITIAL_DIFFICULTY,
-    target_hex: targetHex,
-    reward: REWARD_PER_BLOCK,
-    assigned_to: '_pool',
-    tier: 'cpu',
-    reward_multiplier: 1.0
-  });
+    const targetHex = difficultyToTarget(INITIAL_DIFFICULTY);
+    const jobId = 'job_' + crypto.randomBytes(6).toString('hex');
+    db.createJob({
+      id: jobId,
+      height: h,
+      prev_hash: lastPrevHash,
+      difficulty: INITIAL_DIFFICULTY,
+      target_hex: targetHex,
+      reward: REWARD_PER_BLOCK,
+      assigned_to: '_pool',
+      tier: 'cpu',
+      reward_multiplier: 1.0
+    });
+  }
 }
 
 // ─── Chuyển đổi job object ─────────────────────
@@ -539,13 +543,13 @@ function adjustWorkerDifficulty(workerName, solveTime) {
   const currentDiff = db.getWorkerDifficulty(workerName) || INITIAL_DIFFICULTY;
   const targetTime = TARGET_SOLVE_TIME;
 
-  // Tính toán difficulty mới
   let idealDiff = currentDiff * (targetTime / solveTime);
   let newDiff = currentDiff + (idealDiff - currentDiff) * 0.75;
-  // Giới hạn thay đổi tối đa 100% để tránh ramp quá nhanh
   const maxChange = currentDiff * 1.0;
   newDiff = Math.max(currentDiff - maxChange, Math.min(currentDiff + maxChange, newDiff));
-  newDiff = Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, newDiff));
+  const tier = db.getWorkerTier(workerName) || 'cpu';
+  const tierMax = TIER_CONFIG[tier] ? TIER_CONFIG[tier].maxDifficulty : MAX_DIFFICULTY;
+  newDiff = Math.max(MIN_DIFFICULTY, Math.min(tierMax, newDiff));
   newDiff = Math.round(newDiff * 10) / 10;
 
   db.setWorkerDifficulty(workerName, newDiff, Date.now());
