@@ -2086,7 +2086,8 @@ app.get('/api/nodes/discover', async (req, res) => {
         const start = Date.now();
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 8000);
-        const resp = await fetch(`${node.url}/ping`, { signal: controller.signal });
+        const pingUrl = node.url.replace(/\/+$/, '') + '/ping';
+        const resp = await fetch(pingUrl, { signal: controller.signal });
         clearTimeout(timeout);
         await resp.json();
         const latency = Date.now() - start;
