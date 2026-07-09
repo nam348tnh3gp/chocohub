@@ -568,6 +568,117 @@
         }
         .console::-webkit-scrollbar { width: 6px; }
         .console::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 10px; }
+
+        /* ---------- Node selector (added) ---------- */
+        .term-node-select {
+            margin-left: auto;
+            position: relative;
+        }
+        .node-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 10px 5px 8px;
+            border-radius: var(--radius-pill);
+            border: 1px solid var(--glass-border);
+            background: var(--glass-bg-strong);
+            color: var(--text-primary);
+            font-family: 'Space Mono', monospace;
+            font-size: 0.62rem;
+            letter-spacing: 0.02em;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background-color .25s var(--ease-liquid), transform .2s var(--ease-liquid);
+        }
+        .node-btn:hover { background: var(--glass-highlight); }
+        .node-btn:active { transform: scale(0.97); }
+        .node-dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: var(--text-tertiary);
+            flex-shrink: 0;
+            box-shadow: 0 0 0 2px transparent;
+        }
+        .node-dot.ok { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
+        .node-dot.bad { background: var(--accent-pink); }
+        .node-dot.pinging { background: var(--accent-yellow); animation: pulseDot 1s ease-in-out infinite; }
+        @keyframes pulseDot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.35; }
+        }
+        .node-caret {
+            font-size: 0.55rem;
+            color: var(--text-tertiary);
+            transition: transform .25s var(--ease-liquid);
+        }
+        .term-node-select.open .node-caret { transform: rotate(180deg); }
+
+        .node-dropdown {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            min-width: 260px;
+            z-index: 30;
+            padding: 8px;
+            display: none;
+            border-radius: var(--radius-md);
+            background: var(--glass-bg-strong);
+            backdrop-filter: blur(26px) saturate(180%);
+            -webkit-backdrop-filter: blur(26px) saturate(180%);
+            border: 1px solid var(--glass-border);
+            box-shadow: 0 14px 40px var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+        }
+        .term-node-select.open .node-dropdown { display: block; }
+
+        .node-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            padding: 9px 10px;
+            border-radius: var(--radius-md);
+            border: none;
+            background: transparent;
+            color: var(--text-primary);
+            cursor: pointer;
+            text-align: left;
+            font-family: 'Inter', sans-serif;
+            transition: background-color .2s var(--ease-liquid);
+        }
+        .node-option:hover { background: var(--input-track); }
+        .node-option.selected {
+            background: rgba(10,132,255,0.12);
+            border: 1px solid rgba(10,132,255,0.35);
+        }
+        .node-option-info { flex: 1; min-width: 0; }
+        .node-option-name {
+            font-size: 0.78rem;
+            font-weight: 600;
+        }
+        .node-option-loc {
+            font-size: 0.66rem;
+            color: var(--text-secondary);
+            margin-top: 1px;
+        }
+        .node-option-ping {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.68rem;
+            color: var(--text-tertiary);
+            flex-shrink: 0;
+        }
+        .node-option-ping.ok { color: var(--accent-green); }
+        .node-option-ping.bad { color: var(--accent-pink); }
+        .node-dropdown-divider {
+            height: 1px;
+            background: var(--glass-border);
+            margin: 6px 2px;
+        }
+        .node-dropdown-label {
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-tertiary);
+            padding: 4px 10px 6px;
+        }
         .log-line {
             padding: 2px 0;
             color: var(--accent-green);
@@ -777,6 +888,27 @@
                         <span class="term-dot yellow"></span>
                         <span class="term-dot green"></span>
                         <span class="terminal-title">chocohub@miner — zsh</span>
+
+                        <div class="term-node-select" id="nodeSelect">
+                            <button class="node-btn" id="nodeSelectBtn" type="button" aria-haspopup="true" aria-expanded="false">
+                                <span class="node-dot pinging" id="nodeSelectDot"></span>
+                                <span id="nodeSelectLabel">Detecting node...</span>
+                                <span class="node-caret">▾</span>
+                            </button>
+                            <div class="node-dropdown" id="nodeDropdown">
+                                <div class="node-dropdown-label">Mining Node</div>
+                                <button class="node-option" data-node="auto" id="nodeOptionAuto">
+                                    <span class="node-dot" id="nodeAutoDot"></span>
+                                    <span class="node-option-info">
+                                        <div class="node-option-name">Auto (Best Ping)</div>
+                                        <div class="node-option-loc">Connects to the fastest available node</div>
+                                    </span>
+                                    <span class="node-option-ping" id="nodeAutoPing">—</span>
+                                </button>
+                                <div class="node-dropdown-divider"></div>
+                                <div id="nodeOptionsList"><!-- populated by JS --></div>
+                            </div>
+                        </div>
                     </div>
                     <div class="console" id="console">
                         <div class="log-line log-info">&gt; Ready. Waiting for job...</div>
@@ -1007,6 +1139,207 @@
                 selectedNode = null;
             }
         }
+
+        // ---------- ChocoHub Mining Node Registry (added) ----------
+        // Fixed public mining nodes the user can pick between, or auto-connect to the fastest.
+        const CC_NODES = [
+            {
+                id: 'us-west',
+                name: 'ChocoHub US Node',
+                location: 'US West',
+                url: 'https://chocohub-mining-node-production.up.railway.app/'
+            },
+            {
+                id: 'asia-sg',
+                name: 'ChocoHub Asia Node',
+                location: 'Southeast Asia (Singapore)',
+                url: 'https://chocohub-mining-node-production-0366.up.railway.app/'
+            },
+            {
+                id: 'in-sreep',
+                name: 'Sree.P',
+                location: 'IN-India',
+                url: 'http://toby.hidencloud.com:24596/staking.html'
+            }
+        ];
+
+        // 'auto' = ping all 3 CC_NODES and connect to lowest ping
+        // otherwise holds a CC_NODES id for a manually-selected node
+        let ccNodeMode = 'auto';
+        let ccActiveNode = null;       // the CC_NODES entry currently connected
+        let ccPingResults = {};        // id -> ms (or null if unreachable)
+        const ccNodeSelectEl = document.getElementById('nodeSelect');
+        const ccNodeBtnEl = document.getElementById('nodeSelectBtn');
+        const ccNodeDotEl = document.getElementById('nodeSelectDot');
+        const ccNodeLabelEl = document.getElementById('nodeSelectLabel');
+        const ccNodeDropdownEl = document.getElementById('nodeDropdown');
+        const ccNodeOptionsListEl = document.getElementById('nodeOptionsList');
+        const ccNodeAutoOptionEl = document.getElementById('nodeOptionAuto');
+        const ccNodeAutoDotEl = document.getElementById('nodeAutoDot');
+        const ccNodeAutoPingEl = document.getElementById('nodeAutoPing');
+
+        // Build the manual node option rows once
+        CC_NODES.forEach(node => {
+            const row = document.createElement('button');
+            row.className = 'node-option';
+            row.dataset.node = node.id;
+            row.id = `nodeOption_${node.id}`;
+            row.innerHTML = `
+                <span class="node-dot" id="nodeDot_${node.id}"></span>
+                <span class="node-option-info">
+                    <div class="node-option-name">${node.name}</div>
+                    <div class="node-option-loc">${node.location}</div>
+                </span>
+                <span class="node-option-ping" id="nodePing_${node.id}">—</span>
+            `;
+            row.addEventListener('click', () => selectCcNode(node.id));
+            ccNodeOptionsListEl.appendChild(row);
+        });
+
+        function pingNode(node, timeoutMs = 6000) {
+            return new Promise(resolve => {
+                const start = performance.now();
+                let done = false;
+                const finish = ms => {
+                    if (done) return;
+                    done = true;
+                    resolve(ms);
+                };
+                const timer = setTimeout(() => finish(null), timeoutMs);
+                // no-cors: we can't read the response body/status cross-origin,
+                // but a resolved/rejected fetch still tells us whether the host answered in time.
+                fetch(node.url, { mode: 'no-cors', cache: 'no-store' })
+                    .then(() => { clearTimeout(timer); finish(Math.round(performance.now() - start)); })
+                    .catch(() => { clearTimeout(timer); finish(null); });
+            });
+        }
+
+        function updateNodePingUI(id, ms) {
+            const dotOpt = document.getElementById(`nodeDot_${id}`);
+            const pingOpt = document.getElementById(`nodePing_${id}`);
+            if (!dotOpt || !pingOpt) return;
+            if (ms === null) {
+                dotOpt.className = 'node-dot bad';
+                pingOpt.textContent = 'timeout';
+                pingOpt.className = 'node-option-ping bad';
+            } else {
+                dotOpt.className = 'node-dot ok';
+                pingOpt.textContent = ms + 'ms';
+                pingOpt.className = 'node-option-ping ok';
+            }
+        }
+
+        function highlightSelectedOption() {
+            document.querySelectorAll('.node-option').forEach(el => el.classList.remove('selected'));
+            if (ccNodeMode === 'auto') {
+                ccNodeAutoOptionEl.classList.add('selected');
+            } else {
+                const el = document.getElementById(`nodeOption_${ccNodeMode}`);
+                if (el) el.classList.add('selected');
+            }
+        }
+
+        function setActiveCcNode(node, ms) {
+            ccActiveNode = node;
+            currentServer = node.url.replace(/\/+$/, ''); // base URL, no trailing slash
+            selectedNode = { id: node.id, name: node.name, location: node.location, latency: ms };
+            ccNodeLabelEl.textContent = `${node.name} \u00b7 ${ms !== null && ms !== undefined ? ms + 'ms' : '—'}`;
+            ccNodeDotEl.className = ms === null ? 'node-dot bad' : 'node-dot ok';
+            highlightSelectedOption();
+        }
+
+        function setNoNodeAvailable() {
+            ccActiveNode = null;
+            currentServer = '';
+            selectedNode = null;
+            ccNodeLabelEl.textContent = 'All nodes unreachable';
+            ccNodeDotEl.className = 'node-dot bad';
+        }
+
+        // Ping all 3 fixed nodes, then either auto-connect to the fastest
+        // or (re)connect to whichever node the user manually selected.
+        async function refreshCcNodes() {
+            ccNodeDotEl.className = 'node-dot pinging';
+            ccNodeLabelEl.textContent = 'Pinging nodes...';
+            CC_NODES.forEach(n => {
+                const dotOpt = document.getElementById(`nodeDot_${n.id}`);
+                const pingOpt = document.getElementById(`nodePing_${n.id}`);
+                if (dotOpt) dotOpt.className = 'node-dot pinging';
+                if (pingOpt) { pingOpt.textContent = 'pinging...'; pingOpt.className = 'node-option-ping'; }
+            });
+            ccNodeAutoDotEl.className = 'node-dot pinging';
+            ccNodeAutoPingEl.textContent = 'pinging...';
+
+            const results = await Promise.all(CC_NODES.map(async node => {
+                const ms = await pingNode(node);
+                ccPingResults[node.id] = ms;
+                updateNodePingUI(node.id, ms);
+                return { node, ms };
+            }));
+
+            const reachable = results.filter(r => r.ms !== null).sort((a, b) => a.ms - b.ms);
+            if (reachable.length > 0) {
+                ccNodeAutoDotEl.className = 'node-dot ok';
+                ccNodeAutoPingEl.textContent = `best: ${reachable[0].ms}ms`;
+            } else {
+                ccNodeAutoDotEl.className = 'node-dot bad';
+                ccNodeAutoPingEl.textContent = 'none reachable';
+            }
+
+            if (ccNodeMode === 'auto') {
+                if (reachable.length > 0) {
+                    const best = reachable[0];
+                    setActiveCcNode(best.node, best.ms);
+                    log(`Auto-connect: ${best.node.name} (${best.node.location}) — ${best.ms}ms (lowest ping)`, 'info');
+                } else {
+                    setNoNodeAvailable();
+                    log('Auto-connect: all 3 mining nodes unreachable.', 'warn');
+                }
+            } else {
+                const manual = results.find(r => r.node.id === ccNodeMode);
+                if (manual && manual.ms !== null) {
+                    setActiveCcNode(manual.node, manual.ms);
+                    log(`Connected to ${manual.node.name} (${manual.node.location}) — ${manual.ms}ms`, 'info');
+                } else if (manual) {
+                    setActiveCcNode(manual.node, null);
+                    log(`${manual.node.name} is not responding, but staying selected per your choice.`, 'warn');
+                }
+            }
+        }
+
+        function selectCcNode(id) {
+            ccNodeMode = id; // 'auto' or a CC_NODES id
+            closeNodeDropdown();
+            if (id === 'auto') {
+                log('Switched to Auto (Best Ping) mode.', 'info');
+            } else {
+                const node = CC_NODES.find(n => n.id === id);
+                if (node) log(`Manually selected node: ${node.name} (${node.location})`, 'info');
+            }
+            highlightSelectedOption();
+            refreshCcNodes();
+        }
+
+        function openNodeDropdown() {
+            ccNodeSelectEl.classList.add('open');
+            ccNodeBtnEl.setAttribute('aria-expanded', 'true');
+        }
+        function closeNodeDropdown() {
+            ccNodeSelectEl.classList.remove('open');
+            ccNodeBtnEl.setAttribute('aria-expanded', 'false');
+        }
+        ccNodeBtnEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (ccNodeSelectEl.classList.contains('open')) closeNodeDropdown();
+            else openNodeDropdown();
+        });
+        ccNodeAutoOptionEl.addEventListener('click', () => selectCcNode('auto'));
+        document.addEventListener('click', (e) => {
+            if (!ccNodeSelectEl.contains(e.target)) closeNodeDropdown();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeNodeDropdown();
+        });
 
         // ---------- Miner heartbeat to node (updates connected_miners count) ----------
         function startHeartbeat() {
@@ -1411,8 +1744,8 @@
             startBoostPolling();
             updateBoostUI();
             log(`Logged in as: ${workerName}`, 'info');
-            // Discover best node, then auto-mine
-            discoverBestNode().then(() => {
+            // Ping all 3 ChocoHub mining nodes and auto-connect to the lowest ping, then auto-mine
+            refreshCcNodes().then(() => {
                 setTimeout(() => {
                     autoMineEnabled = true;
                     startMiningLoop();
