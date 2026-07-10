@@ -29,36 +29,43 @@ const TIER_CONFIG = {
   embedded_avr: {
     multiplier: 3.5,
     maxDifficulty: 5000,
+    maxHashrate: 50,
     description: 'Arduino, AVR microcontrollers (~30 H/s SHA-256)'
   },
   embedded_arm: {
     multiplier: 3.0,
     maxDifficulty: 50000,
+    maxHashrate: 1000,
     description: 'Raspberry Pi Pico, RP2040 (~500 H/s SHA-256)'
   },
   embedded_esp: {
     multiplier: 2.5,
     maxDifficulty: 100000,
+    maxHashrate: 10000,
     description: 'ESP8266, NodeMCU (~5 kH/s SHA-256)'
   },
   embedded_esp32: {
     multiplier: 2.0,
     maxDifficulty: 500000,
-    description: 'ESP32, ESP32-S2, ESP32-C3 (~30 kH/s SHA-256)'
+    maxHashrate: 15000,
+    description: 'ESP32, ESP32-S2, ESP32-C3 (~7 kH/s SHA-256)'
   },
   mobile: {
     multiplier: 1.8,
     maxDifficulty: 2500,
+    maxHashrate: 500000,
     description: 'Android, iOS (~200 kH/s SHA-256)'
   },
   cpu: {
     multiplier: 1.0,
-    maxDifficulty: 1000000000,
+    maxDifficulty: 10000,
+    maxHashrate: 10000000,
     description: 'Desktop CPU, web miner (~500 kH/s-5 MH/s SHA-256)'
   },
   gpu: {
     multiplier: 1.0,
-    maxDifficulty: 1000000000,
+    maxDifficulty: 100000,
+    maxHashrate: 200000000,
     description: 'GPU mining (~5-100 MH/s SHA-256)'
   }
 };
@@ -409,6 +416,29 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
 
   const timestamp = Math.floor(Date.now() / 1000);
 
+  // Read tier from job record
+  const tier = job.tier || 'cpu';
+  const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cpu;
+
+  // Cross-check reported hashrate vs device capability
+  if (hashrateReported && hashrateReported > 0 && tierConfig.maxHashrate) {
+    const reportedRatio = hashrateReported / tierConfig.maxHashrate;
+    if (reportedRatio > 1.3) {
+      const reason = `Reported ${hashrateReported.toExponential(2)} H/s for ${tier} (max ${tierConfig.maxHashrate.toExponential(2)} H/s, ${reportedRatio.toFixed(1)}x over). Device type mismatch.`;
+      db.addWorkerWarning(userName, reason);
+      console.warn(`⚠️ Impossible hashrate for device type: ${diffKey} - ${reason}`);
+      const updatedFlags = db.getWorkerFlags(userName);
+      if (updatedFlags.suspended) {
+        console.warn(`🚫 User ${userName} auto-suspended for device type fraud`);
+        return {
+          status: 'error',
+          reason: 'Worker suspended for device type fraud. Submit from correct device.',
+          warnings: updatedFlags.warning_count
+        };
+      }
+    }
+  }
+
   // 🆕 Hashrate validation (cross-check reported hashrate vs actual solve time)
   if (hashrateReported && hashrateReported > 0) {
     const jobCreatedTimestamp = parseFlexibleDate(job.created_at);
@@ -433,10 +463,30 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
         };
       }
     }
+
+    // Cross-check actual hashrate vs device capability
+    // (catches low reported hashrate + fast actual solve)
+    if (actualSolveTime > 0.1 && tierConfig.maxHashrate) {
+      const actualHashrate = job.difficulty / actualSolveTime;
+      const actualRatio = actualHashrate / tierConfig.maxHashrate;
+      if (actualRatio > 1.5) {
+        const reason = `Actual hashrate ${actualHashrate.toExponential(2)} H/s is ${actualRatio.toFixed(1)}x over ${tier} max (${tierConfig.maxHashrate.toExponential(2)} H/s). Device mismatch.`;
+        db.addWorkerWarning(userName, reason);
+        console.warn(`⚠️ Device fraud: ${diffKey} - ${reason}`);
+        const updatedFlags = db.getWorkerFlags(userName);
+        if (updatedFlags.suspended) {
+          console.warn(`🚫 User ${userName} auto-suspended for device type fraud`);
+          return {
+            status: 'error',
+            reason: 'Worker suspended for device type fraud. Submit from correct device.',
+            warnings: updatedFlags.warning_count
+          };
+        }
+      }
+    }
   }
 
   // 🆕 Read tier and multiplier from job record (immutable, server-controlled)
-  const tier = job.tier || 'cpu';
   const tierMultiplier = job.reward_multiplier || 1.0;
 
   // ─── Device multiplier: use tier from job, legacy fallback for old jobs ──

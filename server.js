@@ -1920,14 +1920,23 @@ app.get('/health', (req, res) => {
 
 // ─── BACKUP ENDPOINTS ──────────────────────────────────
 app.post('/api/backup/register', (req, res) => {
-  const { url, token, name, description, owner, platform, clientId } = req.body;
+  const { url, token, name, description, owner, platform, clientId, users, blocks, total_items } = req.body;
   if (!url || !token) return res.status(400).json({ status: 'error', message: 'Missing url or token' });
   const providedToken = req.body.token || '';
   const isTokenValid = providedToken === (process.env.BACKUP_TOKEN || 'chocohub-default-token');
   const session = clientId ? dhSessions.get(clientId) : null;
   if (!isTokenValid && !session) return res.status(401).json({ status: 'error', message: 'Invalid token or no valid session' });
-  registeredBackupNodes[url] = { name: name || 'Unknown', description: description || '', owner: owner || '', platform: platform || 'Unknown', last_seen: new Date().toISOString() };
-  console.log(`📡 Backup node registered: ${name || url} (${url})`);
+  registeredBackupNodes[url] = {
+    name: name || 'Unknown',
+    description: description || '',
+    owner: owner || '',
+    platform: platform || 'Unknown',
+    last_seen: new Date().toISOString(),
+    users: parseInt(users) || 0,
+    blocks: parseInt(blocks) || 0,
+    total_items: parseInt(total_items) || 0
+  };
+  console.log(`📡 Backup node registered: ${name || url} (${url}) — ${registeredBackupNodes[url].users} users, ${registeredBackupNodes[url].blocks} blocks`);
   res.json({ status: 'success', message: 'Node registered' });
 });
 
@@ -1939,6 +1948,9 @@ app.get('/api/backup/nodes', (req, res) => {
   res.json({ status: 'success', nodes: registeredBackupNodes });
 });
 
+// Track best snapshot seen globally (reset on server restart, but prevents back-to-back downgrades)
+let bestSnapshotMetrics = { users: 0, blocks: 0, total_items: 0 };
+
 app.post('/api/backup/sync', (req, res) => {
   try {
     const data = req.body;
@@ -1949,9 +1961,52 @@ app.post('/api/backup/sync', (req, res) => {
     if (!isTokenValid && !session) return res.status(401).json({ status: 'error', message: 'Invalid token or no valid session' });
     console.log(`📥 Received from backup: type=${data.type}, empty=${data.empty}`);
     if (data.type === 'FULL_SNAPSHOT' && data.state) {
-      console.log('📥 Receiving full DB snapshot from backup client...');
+      const incomingUsers = (data.state.users || []).length;
+      const incomingBlockCount = (data.state.blocks || []).length;
+
+      // Layer 1: compare against all registered backup nodes' reported data
+      const now = Date.now();
+      let bestKnownUsers = 0, bestKnownBlocks = 0;
+      for (const info of Object.values(registeredBackupNodes)) {
+        if (now - new Date(info.last_seen).getTime() > 600000) continue;
+        if (info.users > bestKnownUsers) bestKnownUsers = info.users;
+        if (info.blocks > bestKnownBlocks) bestKnownBlocks = info.blocks;
+      }
+
+      // Layer 2: also compare against best snapshot we've already accepted this session
+      if (bestSnapshotMetrics.users > bestKnownUsers) bestKnownUsers = bestSnapshotMetrics.users;
+      if (bestSnapshotMetrics.blocks > bestKnownBlocks) bestKnownBlocks = bestSnapshotMetrics.blocks;
+
+      // Reject if significantly behind peers or previously accepted state
+      if (bestKnownUsers > 0 && incomingUsers < bestKnownUsers * 0.8) {
+        console.warn(`🚫 Rejected FULL_SNAPSHOT: incoming has ${incomingUsers} users, best known is ${bestKnownUsers}. Refusing downgrade.`);
+        return res.json({ type: 'SNAPSHOT_REJECTED', status: 'error', message: `Best backup node has ${bestKnownUsers} users but this snapshot has only ${incomingUsers}. Refusing restore.` });
+      }
+      if (bestKnownBlocks > 0 && incomingBlockCount < bestKnownBlocks * 0.8) {
+        console.warn(`🚫 Rejected FULL_SNAPSHOT: incoming has ${incomingBlockCount} blocks, best known is ${bestKnownBlocks}. Refusing downgrade.`);
+        return res.json({ type: 'SNAPSHOT_REJECTED', status: 'error', message: `Best backup node has ${bestKnownBlocks} blocks but this snapshot has only ${incomingBlockCount}. Refusing restore.` });
+      }
+
+      // Layer 3: absolute floor — even if no peers exist, reject obviously empty snapshots
+      const ABSOLUTE_MIN_USERS = 5;
+      const ABSOLUTE_MIN_BLOCKS = 5;
+      if ((bestKnownUsers === 0 && bestKnownBlocks === 0) && (incomingUsers < ABSOLUTE_MIN_USERS || incomingBlockCount < ABSOLUTE_MIN_BLOCKS)) {
+        console.warn(`🚫 Rejected FULL_SNAPSHOT: too few data (${incomingUsers} users, ${incomingBlockCount} blocks) and no peers to compare against. Minimum floor: ${ABSOLUTE_MIN_USERS} users, ${ABSOLUTE_MIN_BLOCKS} blocks.`);
+        return res.json({ type: 'SNAPSHOT_REJECTED', status: 'error', message: `Snapshot has only ${incomingUsers} users and ${incomingBlockCount} blocks. Refusing restore.` });
+      }
+
+      console.log(`📥 Receiving full DB snapshot from backup client (${incomingUsers} users, ${incomingBlockCount} blocks)...`);
       db.importFullState(data.state);
       console.log('✅ Full database restored from backup client');
+
+      // Update best known snapshot metrics (prevents future downgrades in this session)
+      const incomingTotal = incomingUsers + incomingBlockCount
+        + (data.state.stakes || []).length
+        + (data.state.snake_claims || []).length
+        + (data.state.bounties || []).length;
+      if (incomingUsers > bestSnapshotMetrics.users) bestSnapshotMetrics.users = incomingUsers;
+      if (incomingBlockCount > bestSnapshotMetrics.blocks) bestSnapshotMetrics.blocks = incomingBlockCount;
+
       // Đảm bảo các tài khoản đặc biệt tồn tại sau khi restore
       NodeFeesRouter.ensureHoldingAccount();
       NodeFeesRouter.ensureNodeFeesAccount();
@@ -2282,7 +2337,10 @@ app.get('/api/nodes/sync-blocks', nodeRateLimit, (req, res) => {
 });
 
 // Node restore blockchain to main server (emergency recovery)
+// 🚫 DISABLED — archiver restores can conflict with backup-node full-snapshot restores.
+// Re-enable by removing the early return below in case of total data loss.
 app.post('/api/nodes/restore-blockchain', nodeRegisterLimit, (req, res) => {
+  return res.status(503).json({ status: 'error', message: 'Archiver blockchain restore is disabled. Use backup node snapshot restore instead.' });
   try {
     const { token, blocks } = req.body;
     if (token !== NODE_MASTER_TOKEN) {
@@ -2294,13 +2352,35 @@ app.post('/api/nodes/restore-blockchain', nodeRegisterLimit, (req, res) => {
     if (blocks.length > 2000) {
       return res.status(400).json({ status: 'error', message: 'Too many blocks (max 2000)' });
     }
+    if (blocks.length < 100) {
+      return res.status(400).json({ status: 'error', message: `Too few blocks (${blocks.length}) — minimum 100 required` });
+    }
+
     const currentCount = db.getBlockCount();
     if (currentCount > 0) {
       return res.json({ status: 'skipped', message: `Main server already has ${currentCount} blocks` });
     }
+
+    // Validate chain integrity: sort ASC, check prev_hash continuity
+    const sorted = [...blocks].sort((a, b) => a.height - b.height);
+    if (sorted[0].height !== 0) {
+      return res.status(400).json({ status: 'error', message: 'Chain must start at height 0' });
+    }
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i].height !== sorted[i - 1].height + 1) {
+        return res.status(400).json({ status: 'error', message: `Gap in chain at height ${sorted[i].height}: expected ${sorted[i - 1].height + 1}` });
+      }
+      if (sorted[i].prev_hash !== sorted[i - 1].hash) {
+        return res.status(400).json({ status: 'error', message: `Hash chain broken at height ${sorted[i].height}: prev_hash mismatch` });
+      }
+      if (!sorted[i].hash || typeof sorted[i].hash !== 'string') {
+        return res.status(400).json({ status: 'error', message: `Invalid hash at height ${sorted[i].height}` });
+      }
+    }
+
     // Validate and sanitize blocks
     const validBlocks = [];
-    for (const block of blocks) {
+    for (const block of sorted) {
       if (!block || typeof block !== 'object') continue;
       if (typeof block.height !== 'number' || block.height < 0) continue;
       if (!block.hash || typeof block.hash !== 'string') continue;
@@ -2322,7 +2402,6 @@ app.post('/api/nodes/restore-blockchain', nodeRegisterLimit, (req, res) => {
         pos_contribution: parseFloat(block.pos_contribution) || 0
       });
     }
-    validBlocks.sort((a, b) => a.height - b.height);
     let imported = 0;
     for (const block of validBlocks) {
       try { db.insertBlock(block); imported++; } catch (e) { /* skip duplicates */ }
@@ -2336,7 +2415,10 @@ app.post('/api/nodes/restore-blockchain', nodeRegisterLimit, (req, res) => {
 });
 
 // Admin: trigger restore from best backup node
+// 🚫 DISABLED — archiver restores can conflict with backup-node full-snapshot restores.
+// Re-enable by removing the early return below in case of total data loss.
 app.post('/api/nodes/trigger-restore', nodeRegisterLimit, async (req, res) => {
+  return res.status(503).json({ status: 'error', message: 'Archiver blockchain restore is disabled. Use backup node snapshot restore instead.' });
   try {
     const { token } = req.body;
     if (token !== NODE_MASTER_TOKEN) {
@@ -2371,6 +2453,25 @@ app.post('/api/nodes/trigger-restore', nodeRegisterLimit, async (req, res) => {
     const data = await resp.json();
     if (data.status !== 'success' || !data.blocks || data.blocks.length === 0) {
       return res.json({ status: 'error', message: 'Node returned empty chain' });
+    }
+
+    // Verify minimum block count
+    if (data.blocks.length < 100) {
+      return res.status(400).json({ status: 'error', message: `Node has only ${data.blocks.length} blocks (minimum 100 required)` });
+    }
+
+    // Validate chain integrity
+    const sorted = [...data.blocks].sort((a, b) => a.height - b.height);
+    if (sorted[0].height !== 0) {
+      return res.status(400).json({ status: 'error', message: 'Chain must start at height 0' });
+    }
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i].height !== sorted[i - 1].height + 1) {
+        return res.status(400).json({ status: 'error', message: `Gap in chain at height ${sorted[i].height}` });
+      }
+      if (sorted[i].prev_hash !== sorted[i - 1].hash) {
+        return res.status(400).json({ status: 'error', message: `Hash chain broken at height ${sorted[i].height}` });
+      }
     }
 
     // Import blocks
