@@ -2269,9 +2269,10 @@ app.get('/api/nodes/sync-blocks', nodeRateLimit, (req, res) => {
       return res.status(401).json({ status: 'error', message: 'Invalid node token' });
     }
     const sinceHeight = Math.max(0, parseInt(req.query.since) || 0);
-    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 500));
-    const allBlocks = db.getBlocks(limit);
-    const blocks = sinceHeight > 0 ? allBlocks.filter(b => b.height > sinceHeight) : allBlocks;
+    const limit = Math.min(5000, Math.max(1, parseInt(req.query.limit) || 5000));
+    const blocks = sinceHeight > 0
+      ? db.prepare('SELECT * FROM blocks WHERE height > ? ORDER BY height ASC LIMIT ?').all(sinceHeight, limit)
+      : db.prepare('SELECT * FROM blocks ORDER BY height ASC LIMIT ?').all(limit);
     const lastBlock = db.getLastBlock();
     res.json({ status: 'success', blocks, last_block: lastBlock, total: db.getBlockCount() });
   } catch (e) {
