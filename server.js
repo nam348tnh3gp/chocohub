@@ -2016,6 +2016,13 @@ app.post('/api/nodes/register', nodeRegisterLimit, (req, res) => {
     if (existing) {
       return res.json({ status: 'success', message: 'Node already registered', auth_token: existing.auth_token, id: existing.id });
     }
+    // If same name+owner exists with a different URL (e.g. localtunnel changed), update it
+    const sameNode = db.getMiningNodeByNameOwner(cleanName, cleanOwner);
+    if (sameNode) {
+      db.updateMiningNodeUrl(sameNode.id, cleanUrl);
+      console.log(`📡 Mining node URL updated: ${cleanName} (${cleanUrl})`);
+      return res.json({ status: 'success', message: 'Node URL updated', auth_token: sameNode.auth_token, id: sameNode.id });
+    }
     const node = db.registerMiningNode(cleanName, cleanUrl, cleanOwner, cleanLocation);
     console.log(`📡 Mining node registered: ${cleanName} (${cleanUrl})`);
     res.json({ status: 'success', message: 'Node registered', auth_token: node.auth_token, id: node.id });

@@ -1096,6 +1096,14 @@ function getMiningNodeByUrl(url) {
   return db.prepare('SELECT * FROM mining_nodes WHERE url = ?').get(url);
 }
 
+function getMiningNodeByNameOwner(name, owner) {
+  return db.prepare('SELECT * FROM mining_nodes WHERE name = ? AND owner = ? ORDER BY created_at DESC LIMIT 1').get(name, owner);
+}
+
+function updateMiningNodeUrl(id, url) {
+  db.prepare('UPDATE mining_nodes SET url = ?, status = \'active\', last_heartbeat = datetime(\'now\') WHERE id = ?').run(url, id);
+}
+
 function updateMiningNodeHeartbeat(id, miners, cpuLoad, ping, blockchainHeight) {
   db.prepare(`
     UPDATE mining_nodes
@@ -1260,6 +1268,8 @@ module.exports = {
   getMiningNodeByToken,
   getMiningNodeById,
   getMiningNodeByUrl,
+  getMiningNodeByNameOwner,
+  updateMiningNodeUrl,
   updateMiningNodeHeartbeat,
   getActiveMiningNodes,
   getBestBackupNode,
