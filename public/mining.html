@@ -1164,6 +1164,7 @@
                     if (manualNode) {
                         selectedNode = manualNode;
                         currentServer = '/api/proxy';
+                        setActiveCcNode(manualNode, manualNode.latency);
                         log(`Connected to: ${selectedNode.name} (${selectedNode.location})`, 'info');
                         return;
                     }
@@ -1175,11 +1176,13 @@
                     log('All nodes unreachable. Using direct connection.', 'warn');
                     currentServer = '';
                     selectedNode = null;
+                    setNoNodeAvailable();
                     return;
                 }
 
                 selectedNode = reachable[0]; // Already sorted by latency
                 currentServer = '/api/proxy'; // Route through main server
+                setActiveCcNode(selectedNode, selectedNode.latency);
                 log(`Connected to: ${selectedNode.name} (${selectedNode.location}) — ${selectedNode.latency}ms`, 'info');
             } catch (e) {
                 log(`Node discovery failed: ${e.message}. Using direct connection.`, 'warn');
