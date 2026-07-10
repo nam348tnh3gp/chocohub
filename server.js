@@ -2018,7 +2018,7 @@ app.post('/api/nodes/register', nodeRegisterLimit, (req, res) => {
     }
     const node = db.registerMiningNode(cleanName, cleanUrl, cleanOwner, cleanLocation);
     console.log(`📡 Mining node registered: ${cleanName} (${cleanUrl})`);
-    res.json({ status: 'success', message: 'Node registered', auth_token: node.auth_token, id: node });
+    res.json({ status: 'success', message: 'Node registered', auth_token: node.auth_token, id: node.id });
   } catch (e) {
     console.error('Node register error:', e.message);
     res.status(500).json({ status: 'error', message: 'Registration failed' });

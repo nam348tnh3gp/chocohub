@@ -1077,11 +1077,11 @@ function registerMiningNode(name, url, owner, location) {
     throw new Error(`Maximum node limit reached (${MAX_MINING_NODES})`);
   }
   const authToken = 'node_' + crypto.randomBytes(16).toString('hex');
-  db.prepare(`
+  const result = db.prepare(`
     INSERT INTO mining_nodes (name, url, auth_token, owner, location)
     VALUES (?, ?, ?, ?, ?)
   `).run(name.trim(), url.trim(), authToken, (owner || '').trim().substring(0, 100), (location || '').trim().substring(0, 100));
-  return { name: name.trim(), url: url.trim(), auth_token: authToken, owner, location };
+  return { id: result.lastInsertRowid, name: name.trim(), url: url.trim(), auth_token: authToken, owner, location };
 }
 
 function getMiningNodeByToken(token) {
