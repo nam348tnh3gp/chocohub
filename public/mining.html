@@ -1366,23 +1366,35 @@
                 ccNodeDropdownEl.style.top = '';
                 ccNodeDropdownEl.style.left = '';
                 ccNodeDropdownEl.style.transform = '';
+                ccNodeDropdownEl.style.maxHeight = '';
                 return;
             }
             const btnRect = ccNodeBtnEl.getBoundingClientRect();
-            const ddRect = ccNodeDropdownEl.getBoundingClientRect();
             const margin = 10;
-            const spaceBelow = window.innerHeight - btnRect.bottom;
-            const spaceAbove = btnRect.top;
-            const ddHeight = ddRect.height || 260;
+            const spaceBelow = window.innerHeight - btnRect.bottom - margin;
+            const spaceAbove = btnRect.top - margin;
+
+            // Reset maxHeight before measuring natural height
+            ccNodeDropdownEl.style.maxHeight = '';
+            const ddRect = ccNodeDropdownEl.getBoundingClientRect();
+            const naturalHeight = ddRect.height || 260;
             const ddWidth = ddRect.width || 300;
 
             // Prefer opening upward (button often sits inside a scrolling terminal log),
-            // fall back to downward if there isn't enough room above.
+            // fall back to downward if there's more room below.
+            const openUpward = spaceAbove >= spaceBelow;
+            const available = Math.max(120, openUpward ? spaceAbove : spaceBelow);
+
+            // Clamp height to whichever side we're opening into, so the panel
+            // can never extend past the top or bottom of the viewport.
+            const finalHeight = Math.min(naturalHeight, available);
+            ccNodeDropdownEl.style.maxHeight = `${finalHeight}px`;
+
             let top;
-            if (spaceAbove >= ddHeight + margin || spaceAbove >= spaceBelow) {
-                top = Math.max(margin, btnRect.top - ddHeight - margin);
+            if (openUpward) {
+                top = Math.max(margin, btnRect.top - finalHeight - margin);
             } else {
-                top = Math.min(window.innerHeight - ddHeight - margin, btnRect.bottom + margin);
+                top = Math.min(window.innerHeight - finalHeight - margin, btnRect.bottom + margin);
             }
 
             // Anchor to the button's right edge, but always stay fully inside the viewport
