@@ -32,6 +32,9 @@ app.use(express.json({ limit: '5000mb' }));
 let nodeAuthToken = null;
 let nodeId = null;
 let connectedMiners = 0;
+let lastBlockHeight = 0;
+const activeWorkers = new Map(); // worker_name → lastSeen timestamp (ms)
+const WORKER_TIMEOUT = 300000; // 5 min sem heartbeat = desconectado
 
 // ═══════════════════════════════════════════════════
 //  BACKUP: Canonical JSON
@@ -393,17 +396,31 @@ let lastCpuTime = Date.now();
 async function sendHeartbeat() {
   if (!nodeAuthToken) return;
   try {
+    const now = Date.now();
     const currentUsage = process.cpuUsage();
     const userDelta = currentUsage.user - lastCpuUsage.user;
     const sysDelta = currentUsage.system - lastCpuUsage.system;
-    const timeDelta = Date.now() - lastCpuTime;
+    const timeDelta = now - lastCpuTime;
     const cpuPercent = timeDelta > 0 ? Math.min(((userDelta + sysDelta) / (timeDelta * 1000)) * 100, 100) : 0;
     lastCpuUsage = currentUsage;
-    lastCpuTime = Date.now();
+    lastCpuTime = now;
+
+    // Count workers seen in last WORKER_TIMEOUT ms
+    for (const [worker, lastSeen] of activeWorkers) {
+      if (now - lastSeen > WORKER_TIMEOUT) activeWorkers.delete(worker);
+    }
+    const workerCount = activeWorkers.size;
+    const effectiveMiners = Math.max(connectedMiners, workerCount);
+
     await fetchWithTimeout(`${MASTER_NODE_URL}/api/nodes/heartbeat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${nodeAuthToken}` },
-      body: JSON.stringify({ connected_miners: connectedMiners, cpu_load: Math.round(cpuPercent * 10) / 10, ping_ms: 0, blockchain_height: 0 })
+      body: JSON.stringify({
+        connected_miners: effectiveMiners,
+        cpu_load: Math.round(cpuPercent * 10) / 10,
+        ping_ms: 0,
+        blockchain_height: lastBlockHeight
+      })
     });
   } catch (e) {
     if (e.message?.includes('401') || e.message?.includes('Unauthorized')) {
@@ -428,7 +445,7 @@ function rateLimit(key, maxPerMinute) {
 //  MINING: Endpoints
 // ═══════════════════════════════════════════════════
 app.get('/ping', (req, res) => {
-  res.json({ pong: true, time: Date.now(), node: NODE_NAME, miners: connectedMiners, url: PUBLIC_URL, blockchain_height: 0 });
+  res.json({ pong: true, time: Date.now(), node: NODE_NAME, miners: connectedMiners, url: PUBLIC_URL, blockchain_height: lastBlockHeight });
 });
 
 app.get('/status', (req, res) => {
@@ -441,8 +458,12 @@ app.post('/get_job', async (req, res) => {
   }
   try {
     const worker = (req.body?.worker_name || 'unknown').substring(0, 16);
-    log(`📦 Job for ${worker}`);
+    activeWorkers.set(worker, Date.now());
     const result = await proxyToMaster('/api/nodes/get_job', req.body);
+    if (result && result.height && result.height > lastBlockHeight) {
+      lastBlockHeight = result.height;
+    }
+    log(`📦 Job for ${worker}`);
     res.json(result);
   } catch (e) {
     err('get_job proxy error:', e.message);
@@ -457,6 +478,13 @@ app.post('/submit_solution', async (req, res) => {
   try {
     const worker = (req.body?.worker_name || 'unknown').substring(0, 16);
     const result = await proxyToMaster('/api/nodes/submit_solution', req.body);
+    if (result && result.status === 'success') {
+      if (result.block_height || (result.message && result.message.match(/Block (\d+)/))) {
+        const match = result.message ? result.message.match(/Block (\d+)/) : null;
+        const height = result.block_height || (match ? parseInt(match[1]) : 0);
+        if (height > lastBlockHeight) lastBlockHeight = height;
+      }
+    }
     log(`${result?.status === 'success' ? '✅ Accepted' : '❌ Rejected'} - ${worker}`);
     res.json(result);
   } catch (e) {
