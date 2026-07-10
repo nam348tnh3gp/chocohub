@@ -2071,12 +2071,12 @@ app.post('/api/nodes/register', nodeRegisterLimit, (req, res) => {
     if (existing) {
       return res.json({ status: 'success', message: 'Node already registered', auth_token: existing.auth_token, id: existing.id });
     }
-    // If same name+owner exists with a different URL (e.g. localtunnel changed), update it
-    const sameNode = db.getMiningNodeByNameOwner(cleanName, cleanOwner);
-    if (sameNode) {
-      db.updateMiningNodeUrl(sameNode.id, cleanUrl);
+    // If same name exists with a different URL (tunnel restarted), update it — prevents duplicates
+    const sameName = db.getMiningNodeByName(cleanName);
+    if (sameName) {
+      db.updateMiningNodeUrl(sameName.id, cleanUrl);
       console.log(`📡 Mining node URL updated: ${cleanName} (${cleanUrl})`);
-      return res.json({ status: 'success', message: 'Node URL updated', auth_token: sameNode.auth_token, id: sameNode.id });
+      return res.json({ status: 'success', message: 'Node URL updated', auth_token: sameName.auth_token, id: sameName.id });
     }
     const node = db.registerMiningNode(cleanName, cleanUrl, cleanOwner, cleanLocation);
     console.log(`📡 Mining node registered: ${cleanName} (${cleanUrl})`);
@@ -2176,6 +2176,48 @@ app.get('/api/nodes/discover', async (req, res) => {
   } catch (e) {
     console.error('Node discover error:', e.message);
     res.status(500).json({ status: 'error', message: 'Discovery failed' });
+  }
+});
+
+// Miner info endpoint — returns workers, difficulty, last share, uptime, last 10min rewards
+app.get('/api/miner-info', (req, res) => {
+  try {
+    const username = (req.query.username || '').trim();
+    if (!username) {
+      return res.status(400).json({ status: 'error', message: 'Missing username' });
+    }
+    const user = db.getUser(username);
+    if (!user) {
+      return res.status(404).json({ status: 'error', message: 'User not found' });
+    }
+    const workers = db.getWorkersByUsername(username);
+    const now = Math.floor(Date.now() / 1000);
+    const result = workers.map(w => {
+      const uptime = w.updated_at ? now - Math.floor(new Date(w.updated_at).getTime() / 1000) : 0;
+      return {
+        name: w.worker_name,
+        diff: w.difficulty,
+        last_share: w.last_solve_time || 0,
+        uptime_seconds: uptime,
+        reward_10m: 0
+      };
+    });
+    // Calculate per-worker and total 10m rewards from blocks_mined
+    const totalRow = db.getWorkerRewardsLast10Min(username);
+    const totalReward = totalRow ? totalRow.total : 0;
+    if (result.length > 0) {
+      const perWorkerShare = totalReward / result.length;
+      result.forEach(w => { w.reward_10m = perWorkerShare; });
+    }
+    res.json({
+      status: 'success',
+      username,
+      workers: result,
+      total_reward_10m: totalReward
+    });
+  } catch (e) {
+    console.error('Miner info error:', e.message);
+    res.status(500).json({ status: 'error', message: 'Failed to get miner info' });
   }
 });
 
@@ -2583,6 +2625,9 @@ app.listen(PORT, () => {
       }
     }
   }, 3000);
+
+  // Prune dead mining nodes every 60 seconds
+  setInterval(() => db.pruneMiningNodes(), 60000);
 });
 
 const http2Server = http2.createSecureServer({ key: tlsKey, cert: tlsCert, allowHTTP1: true, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.3' }, app);

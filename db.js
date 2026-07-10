@@ -1096,8 +1096,12 @@ function getMiningNodeByUrl(url) {
   return db.prepare('SELECT * FROM mining_nodes WHERE url = ?').get(url);
 }
 
-function getMiningNodeByNameOwner(name, owner) {
-  return db.prepare('SELECT * FROM mining_nodes WHERE name = ? AND owner = ? ORDER BY created_at DESC LIMIT 1').get(name, owner);
+function getMiningNodeByName(name) {
+  return db.prepare('SELECT * FROM mining_nodes WHERE name = ? ORDER BY created_at DESC LIMIT 1').get(name);
+}
+
+function pruneMiningNodes() {
+  db.prepare("UPDATE mining_nodes SET status = 'offline' WHERE status = 'active' AND (strftime('%s', 'now') - strftime('%s', last_heartbeat)) > 300").run();
 }
 
 function updateMiningNodeUrl(id, url) {
@@ -1175,6 +1179,23 @@ function deleteMiningNode(id) {
 
 function deactivateMiningNode(id) {
   db.prepare("UPDATE mining_nodes SET status = 'offline' WHERE id = ?").run(id);
+}
+
+function getWorkersByUsername(username) {
+  return db.prepare(`
+    SELECT * FROM worker_difficulty
+    WHERE worker_name = ? OR worker_name LIKE ?
+    ORDER BY last_solve_time DESC
+  `).all(username, username + ':%');
+}
+
+function getWorkerRewardsLast10Min(username) {
+  const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  return db.prepare(`
+    SELECT COALESCE(SUM(reward), 0) as total
+    FROM blocks_mined
+    WHERE username = ? AND mined_at >= ?
+  `).get(username, tenMinAgo);
 }
 
 // ─── Exports ─────────────────────────────────────
@@ -1268,7 +1289,7 @@ module.exports = {
   getMiningNodeByToken,
   getMiningNodeById,
   getMiningNodeByUrl,
-  getMiningNodeByNameOwner,
+  getMiningNodeByName,
   updateMiningNodeUrl,
   updateMiningNodeHeartbeat,
   getActiveMiningNodes,
@@ -1276,5 +1297,8 @@ module.exports = {
   addMiningNodeEarnings,
   submitBlockTransaction,
   deleteMiningNode,
-  deactivateMiningNode
+  deactivateMiningNode,
+  pruneMiningNodes,
+  getWorkersByUsername,
+  getWorkerRewardsLast10Min
 };
