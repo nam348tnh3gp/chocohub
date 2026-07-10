@@ -1147,6 +1147,14 @@ function submitBlockTransaction(block, userName, finalReward, posContribution, n
       const node = getMiningNodeById(nodeId);
       if (node) {
         addMiningNodeEarnings(nodeId, nodeContribution);
+        if (node.owner && node.owner.trim()) {
+          const ownerUser = db.prepare('SELECT username FROM users WHERE username = ?').get(node.owner.trim());
+          if (ownerUser) {
+            updateBalance(node.owner.trim(), nodeContribution);
+            addTransaction('mining_node_reward', node.owner.trim(), nodeContribution);
+            console.log(`📡 Node owner ${node.owner} earned ${nodeContribution} CC from block relay`);
+          }
+        }
       }
     }
   });
