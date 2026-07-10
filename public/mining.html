@@ -1156,6 +1156,19 @@
                 }
                 log(`Found ${data.nodes.length} node(s). Testing latency...`, 'info');
 
+                discoveredNodes = data.nodes;
+                rebuildNodeOptions(discoveredNodes);
+
+                if (ccNodeMode !== 'auto') {
+                    const manualNode = discoveredNodes.find(n => n.id === ccNodeMode);
+                    if (manualNode) {
+                        selectedNode = manualNode;
+                        currentServer = '/api/proxy';
+                        log(`Connected to: ${selectedNode.name} (${selectedNode.location})`, 'info');
+                        return;
+                    }
+                }
+
                 // Filter reachable nodes
                 const reachable = data.nodes.filter(n => n.reachable && n.latency !== Infinity);
                 if (reachable.length === 0) {
@@ -1175,39 +1188,11 @@
             }
         }
 
-        // ---------- ChocoHub Mining Node Registry (added) ----------
-        // Fixed public mining nodes the user can pick between, or auto-connect to the fastest.
-        const CC_NODES = [
-            {
-                id: 'us-west',
-                name: 'ChocoHub US Node',
-                location: 'US West',
-                url: 'https://chocohub-mining-node-production.up.railway.app/'
-            },
-            {
-                id: 'asia-sg',
-                name: 'ChocoHub Asia Node',
-                location: 'Southeast Asia (Singapore)',
-                url: 'https://chocohub-mining-node-production-0366.up.railway.app/'
-            },
-            {
-                id: 'mx-sreep',
-                name: 'Sree.P',
-                location: 'MX-Queretaro',
-                url: 'https://fscs.qzz.io//'
-            }
-            {
-                id: 'in-sreep',
-                name: 'Sree.P',
-                location: 'IN-India',
-                url: 'https://in.fscs.qzz.io///'
-            }
-        ];
-
-        // 'auto' = ping all 3 CC_NODES and connect to lowest ping
-        // otherwise holds a CC_NODES id for a manually-selected node
+        // 'auto' = ping all discovered nodes and connect to lowest ping
+        // otherwise holds a node id for a manually-selected node
+        let discoveredNodes = [];      // full list from /api/nodes/discover
         let ccNodeMode = 'auto';
-        let ccActiveNode = null;       // the CC_NODES entry currently connected
+        let ccActiveNode = null;       // the node entry currently connected
         let ccPingResults = {};        // id -> ms (or null if unreachable)
         const ccNodeSelectEl = document.getElementById('nodeSelect');
         const ccNodeBtnEl = document.getElementById('nodeSelectBtn');
@@ -1220,23 +1205,26 @@
         const ccNodeAutoDotEl = document.getElementById('nodeAutoDot');
         const ccNodeAutoPingEl = document.getElementById('nodeAutoPing');
 
-        // Build the manual node option rows once
-        CC_NODES.forEach(node => {
-            const row = document.createElement('button');
-            row.className = 'node-option';
-            row.dataset.node = node.id;
-            row.id = `nodeOption_${node.id}`;
-            row.innerHTML = `
-                <span class="node-dot" id="nodeDot_${node.id}"></span>
-                <span class="node-option-info">
-                    <div class="node-option-name">${node.name}</div>
-                    <div class="node-option-loc">${node.location}</div>
-                </span>
-                <span class="node-option-ping" id="nodePing_${node.id}">—</span>
-            `;
-            row.addEventListener('click', () => selectCcNode(node.id));
-            ccNodeOptionsListEl.appendChild(row);
-        });
+        function rebuildNodeOptions(nodes) {
+            // Clear existing options (keep the Auto option at the top)
+            while (ccNodeOptionsListEl.firstChild) ccNodeOptionsListEl.removeChild(ccNodeOptionsListEl.firstChild);
+            nodes.forEach(node => {
+                const row = document.createElement('button');
+                row.className = 'node-option';
+                row.dataset.node = node.id;
+                row.id = `nodeOption_${node.id}`;
+                row.innerHTML = `
+                    <span class="node-dot" id="nodeDot_${node.id}"></span>
+                    <span class="node-option-info">
+                        <div class="node-option-name">${node.name}</div>
+                        <div class="node-option-loc">${node.location}</div>
+                    </span>
+                    <span class="node-option-ping" id="nodePing_${node.id}">—</span>
+                `;
+                row.addEventListener('click', () => selectCcNode(node.id));
+                ccNodeOptionsListEl.appendChild(row);
+            });
+        }
 
         function pingNode(node, timeoutMs = 6000) {
             return new Promise(resolve => {
@@ -1283,10 +1271,6 @@
 
         function setActiveCcNode(node, ms) {
             ccActiveNode = node;
-            // NOTE: job fetching always stays on the site's own backend (currentServer / selectedNode
-            // are left untouched here). These 3 nodes are external hosts with no shared job API and
-            // no CORS access from the browser, so we only use them for ping display + user preference,
-            // not as literal fetch targets.
             ccNodeLabelEl.textContent = `${node.name} \u00b7 ${ms !== null && ms !== undefined ? ms + 'ms' : '—'}`;
             ccNodeDotEl.className = ms === null ? 'node-dot bad' : 'node-dot ok';
             highlightSelectedOption();
@@ -1298,12 +1282,14 @@
             ccNodeDotEl.className = 'node-dot bad';
         }
 
-        // Ping all 3 fixed nodes, then either auto-connect to the fastest
+        // Ping all discovered nodes, then either auto-connect to the fastest
         // or (re)connect to whichever node the user manually selected.
         async function refreshCcNodes() {
+            const nodes = discoveredNodes;
+            if (nodes.length === 0) return;
             ccNodeDotEl.className = 'node-dot pinging';
             ccNodeLabelEl.textContent = 'Pinging nodes...';
-            CC_NODES.forEach(n => {
+            nodes.forEach(n => {
                 const dotOpt = document.getElementById(`nodeDot_${n.id}`);
                 const pingOpt = document.getElementById(`nodePing_${n.id}`);
                 if (dotOpt) dotOpt.className = 'node-dot pinging';
@@ -1312,7 +1298,7 @@
             ccNodeAutoDotEl.className = 'node-dot pinging';
             ccNodeAutoPingEl.textContent = 'pinging...';
 
-            const results = await Promise.all(CC_NODES.map(async node => {
+            const results = await Promise.all(nodes.map(async node => {
                 const ms = await pingNode(node);
                 ccPingResults[node.id] = ms;
                 updateNodePingUI(node.id, ms);
@@ -1335,7 +1321,7 @@
                     log(`Node ping: ${best.node.name} (${best.node.location}) — ${best.ms}ms (lowest ping)`, 'info');
                 } else {
                     setNoNodeAvailable();
-                    log('Node ping: all 3 mining nodes unreachable.', 'warn');
+                    log('Node ping: all mining nodes unreachable.', 'warn');
                 }
             } else {
                 const manual = results.find(r => r.node.id === ccNodeMode);
@@ -1349,14 +1335,19 @@
             }
         }
 
-        function selectCcNode(id) {
-            ccNodeMode = id; // 'auto' or a CC_NODES id
+        async function selectCcNode(id) {
+            ccNodeMode = id; // 'auto' or a discovered node id
             closeNodeDropdown();
             if (id === 'auto') {
                 log('Switched to Auto (Best Ping) mode.', 'info');
+                await discoverBestNode();
             } else {
-                const node = CC_NODES.find(n => n.id === id);
-                if (node) log(`Manually selected node: ${node.name} (${node.location})`, 'info');
+                const node = discoveredNodes.find(n => n.id === id);
+                if (node) {
+                    selectedNode = node;
+                    currentServer = '/api/proxy';
+                    log(`Manually selected node: ${node.name} (${node.location})`, 'info');
+                }
             }
             highlightSelectedOption();
             refreshCcNodes();
@@ -1836,7 +1827,6 @@
             startBoostPolling();
             updateBoostUI();
             log(`Logged in as: ${workerName}`, 'info');
-            // Ping the 3 ChocoHub nodes for the selector display (does not affect job routing)
             refreshCcNodes();
             // Discover the real mining backend, then auto-mine
             discoverBestNode().then(() => {
