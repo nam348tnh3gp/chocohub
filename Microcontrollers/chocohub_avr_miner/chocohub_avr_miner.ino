@@ -1,37 +1,11 @@
-/*
- * chocohub_avr_miner.ino
- *
- * ChocoHub SHA-256 co-miner for ATmega328P (Arduino Uno/Nano, 16 MHz, 2KB RAM).
- * Acts as a slow (~200-500 H/s) worker that receives mining jobs from the
- * host (MPG_Miner.py) over USB serial and brute-forces nonces.
- *
- * Protocol (line-delimited JSON, 115200 baud by default):
- *   Host -> Arduino:
- *     {"cmd":"job","id":"job_abc123","last_hash":"<64 hex>","target_hex":"<64 hex>","worker":"miner_xyz"}
- *     {"cmd":"ping"}
- *     {"cmd":"stop"}
- *   Arduino -> Host:
- *     {"cmd":"pong","model":"ATmega328P","version":"1.0"}
- *     {"cmd":"found","job_id":"job_abc123","nonce":12345,"hash":"<64 hex>"}
- *     {"cmd":"status","hashes":12345,"hashrate":412,"uptime":60}
- *     {"cmd":"ack","msg":"job_abc123"}
- *
- * The SHA-256 inner-loop hot path (ROTR/CH/MAJ/EP0/EP1/SIG0/SIG1) is hand-written
- * in AVR assembly to squeeze every cycle out of the 16 MHz core. Everything
- * else (serial, state machine, job parsing, nonce loop) is plain C.
- *
- * Hash input format matches the server (blockchain.js submitSolution):
- *   SHA-256( last_hash_hex_string (64 ASCII bytes)
- *          + nonce as 20-digit zero-padded decimal ASCII
- *          + worker_name (ASCII) )
- *
- * Wiring: nothing — just plug the Arduino into USB. The sketch uses hardware
- * Serial (USB-UART) at 115200 baud. Make sure the host uses the same baud.
- *
- * Flash: open this .ino in Arduino IDE, select board + port, Upload.
- * Compatible: Arduino Uno, Nano, Pro Mini (ATmega328P @ 16 MHz).
- *            Arduino Mega 2560 (ATmega2560 @ 16 MHz) also works.
- */
+/* Hello ChocoMiner! Heres how to setup:
+
+Firstly, install the MPG_Miner.py on your PC (you need that for COM mining)
+then flash this AVR miner to your AVR device (Arduino Uno, Mega, R(1,2,3) or other)
+Open your MPG miner, enter your chocohub user and PIN (required for user safety)
+choose arduino mining, and its done!
+
+*/
 
 #include <Arduino.h>
 
