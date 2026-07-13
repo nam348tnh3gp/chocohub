@@ -459,7 +459,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     // Low-hashrate tier: check if solve time is realistic for the tier
     const minRealisticTime = job.difficulty / (tierConfig.maxHashrate * 1.5);
     console.log(`🔍 Anti-cheat: tier=${tier} maxHR=${tierConfig.maxHashrate} diff=${job.difficulty} solveTime=${actualSolveTime.toFixed(4)}s minRealistic=${minRealisticTime.toFixed(4)}s`);
-    if (actualSolveTime < minRealisticTime && actualSolveTime > 0) {
+    if (actualSolveTime <= minRealisticTime) {
       const actualHashrate = job.difficulty / Math.max(actualSolveTime, 0.001);
       const actualRatio = actualHashrate / tierConfig.maxHashrate;
       // Extra detail if hashrate was also missing/zero
@@ -479,9 +479,9 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
         };
       }
     }
-  } else if (actualSolveTime > 0.1 && tierConfig.maxHashrate) {
-    // High-capability tier: standard check
-    const actualHashrate = job.difficulty / actualSolveTime;
+  } else if (tierConfig.maxHashrate) {
+    // High-capability tier: check if actual hashrate exceeds max
+    const actualHashrate = job.difficulty / Math.max(actualSolveTime, 0.001);
     const actualRatio = actualHashrate / tierConfig.maxHashrate;
     if (actualRatio > 1.5) {
       const reason = `Actual hashrate ${actualHashrate.toExponential(2)} H/s is ${actualRatio.toFixed(1)}x over ${tier} max (${tierConfig.maxHashrate.toExponential(2)} H/s). Device mismatch.`;
@@ -504,7 +504,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     const ratio = actualSolveTime / expectedSolveTime;
 
     // If solved 20x faster than hashrate implies → suspicious
-    if (ratio < 0.05 && actualSolveTime > 0.1) {
+    if (ratio < 0.05) {
       const reason = `Solved in ${actualSolveTime.toFixed(1)}s but reported hashrate ${hashrateReported} H/s implies ${expectedSolveTime.toFixed(1)}s (ratio ${ratio.toFixed(3)})`;
       db.addWorkerWarning(userName, reason);
       console.warn(`⚠️ Suspicious solve: ${diffKey} - ${reason}`);
