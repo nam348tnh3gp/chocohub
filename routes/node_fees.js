@@ -12,6 +12,7 @@ const router = express.Router();
 const NODE_FEES_ADMINS = ['chocoetom', 'Nam2010'];
 const NODE_FEES_RETENTION = 0.20;
 const MEMPOOL_EXPIRE_SECONDS = 3600;
+const TRANSACTION_FEE_PERCENT = 1;
 
 // ─── Tài khoản ──────────────────────────────────────────────────────────
 function ensureHoldingAccount() {
@@ -406,5 +407,6 @@ module.exports = {
     // Cấu hình
     NODE_FEES_ADMINS,
     NODE_FEES_RETENTION,
-    MEMPOOL_EXPIRE_SECONDS
+    MEMPOOL_EXPIRE_SECONDS,
+    TRANSACTION_FEE_PERCENT
 };
