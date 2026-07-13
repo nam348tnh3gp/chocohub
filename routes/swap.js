@@ -150,6 +150,7 @@ function creditFromLiquidity(username, amount, swapId, swapType) {
   if (!receiver) {
     throw new Error(`Receiver ${username} not found`);
   }
+  ensureLiquidityAccount();
   const liquidity = db.getUser('swap_liquidity');
   if (!liquidity || liquidity.balance < amount) {
     throw new Error(`Insufficient liquidity: need ${amount} CC, pool has ${liquidity ? liquidity.balance : 0} CC`);
@@ -195,6 +196,7 @@ router.post('/create', verifyToken, swapLimiter, (req, res) => {
       return res.status(400).json({ status: 'error', message: 'Insufficient CC balance' });
     }
 
+    ensureHoldingAccount();
     db.updateBalance(from_user, -amount);
     db.updateBalance('swap_holding', amount);
     if (db.addTransaction.length >= 4) {
@@ -396,6 +398,8 @@ router.post('/fulfill', verifyToken, verifyAdmin, (req, res) => {
 
     const request = swapRequests[reqIndex];
     const adminName = req.user.username;
+    ensureLiquidityAccount();
+    ensureHoldingAccount();
     const { gross, fee, net } = splitSwapValue(request.amount_cc);
     creditSwapFee(fee, request.id, request.swap_type);
 
