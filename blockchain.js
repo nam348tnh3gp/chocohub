@@ -2,6 +2,7 @@
 // Tích hợp mempool và phí giao dịch
 const crypto = require('crypto');
 const db = require('./db');
+const nodeFees = require('./routes/node_fees');
 
 // ─── Cấu hình ────────────────────────────────────
 const REWARD_PER_BLOCK = 0.05;                  // 0.05 CC
@@ -346,8 +347,8 @@ function processMempoolForBlock(blockHeight) {
     db.updateBalance(MEMPOOL_HOLDING_ACCOUNT, -tx.total_deducted);
     // Cộng amount cho receiver
     db.updateBalance(tx.to_username, tx.amount);
-    // Cộng fee vào node_fees
-    const feeAdded = db.addNodeFees(tx.fee);
+    // Cộng fee vào node_fees (dùng nodeFees module để fees tới distribution)
+    const feeAdded = nodeFees.addNodeFees(tx.fee);
     if (feeAdded > 0) {
       totalFees += feeAdded;
     }
@@ -404,6 +405,12 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   if (flags && flags.suspended) {
     console.warn(`🚫 Suspended user ${userName} attempted to submit solution`);
     throw new Error('Worker suspended for suspicious behavior. Contact admin to appeal.');
+  }
+
+  // Check user-level suspension (blocks ALL workers of this user)
+  if (db.isUserSuspended(userName)) {
+    console.warn(`🚫 User ${userName} is suspended at account level`);
+    throw new Error('Account suspended for suspicious behavior. Contact admin to appeal.');
   }
 
   // Kiểm tra nonce (hash uses diffKey to match client computation)

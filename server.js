@@ -2179,7 +2179,7 @@ app.get('/api/nodes/discover', async (req, res) => {
   }
 });
 
-// Miner info endpoint — returns workers, difficulty, last share, uptime, last 10min rewards
+// Miner info endpoint — returns active workers with full details: tier, flags, boost, difficulty, rewards
 app.get('/api/miner-info', (req, res) => {
   try {
     const username = (req.query.username || '').trim();
@@ -2190,28 +2190,55 @@ app.get('/api/miner-info', (req, res) => {
     if (!user) {
       return res.status(404).json({ status: 'error', message: 'User not found' });
     }
-    const workers = db.getWorkersByUsername(username);
+
+    const ACTIVE_THRESHOLD = 86400;
     const now = Math.floor(Date.now() / 1000);
-    const result = workers.map(w => {
-      const uptime = w.updated_at ? now - Math.floor(new Date(w.updated_at).getTime() / 1000) : 0;
-      return {
-        name: w.worker_name,
-        diff: w.difficulty,
-        last_share: w.last_solve_time || 0,
-        uptime_seconds: uptime,
-        reward_10m: 0
-      };
-    });
-    // Calculate per-worker and total 10m rewards from blocks_mined
-    const totalRow = db.getWorkerRewardsLast10Min(username);
+
+    const workers = db.getWorkersByUsername(username);
+    const result = workers
+      .filter(w => {
+        if (w.last_solve_time && w.last_solve_time > 0) {
+          return (now - w.last_solve_time) < ACTIVE_THRESHOLD;
+        }
+        const updatedAt = w.updated_at ? Math.floor(new Date(w.updated_at).getTime() / 1000) : 0;
+        return updatedAt > 0 && (now - updatedAt) < ACTIVE_THRESHOLD;
+      })
+      .map(w => {
+        const flags = db.getWorkerFlags(w.worker_name);
+        const boost = db.getMiningBoostMultiplier(w.worker_name);
+        const lastShare = w.last_solve_time || 0;
+        const uptime = w.updated_at ? now - Math.floor(new Date(w.updated_at).getTime() / 1000) : 0;
+        const perWorkerReward = db.prepare(`
+          SELECT COALESCE(SUM(reward), 0) as total FROM blocks
+          WHERE miner = ? AND timestamp >= ?
+        `).get(w.worker_name, now - 600);
+
+        return {
+          name: w.worker_name,
+          difficulty: w.difficulty,
+          tier: w.tier || 'cpu',
+          tier_changes: w.tier_changes || 0,
+          last_share: lastShare,
+          last_share_ago: lastShare > 0 ? now - lastShare : null,
+          uptime_seconds: uptime,
+          boost_multiplier: boost,
+          suspended: flags.suspended,
+          warning_count: flags.warning_count,
+          reward_10m: perWorkerReward ? perWorkerReward.total : 0
+        };
+      });
+
+    const totalRow = db.prepare(`
+      SELECT COALESCE(SUM(reward), 0) as total FROM blocks
+      WHERE miner = ? AND timestamp >= ?
+    `).get(username, now - 600);
     const totalReward = totalRow ? totalRow.total : 0;
-    if (result.length > 0) {
-      const perWorkerShare = totalReward / result.length;
-      result.forEach(w => { w.reward_10m = perWorkerShare; });
-    }
+
     res.json({
       status: 'success',
       username,
+      balance: user.balance,
+      active_workers: result.length,
       workers: result,
       total_reward_10m: totalReward
     });
