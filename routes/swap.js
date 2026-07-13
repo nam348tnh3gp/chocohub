@@ -12,7 +12,7 @@ const router = express.Router();
 const XNO_CONFIG = {
   CC_TO_XNO_RATE: 0.000002,
   XNO_TO_CC_RATE: 500000,
-  XNO_RECEIVE_ADDRESS: 'nano_3k41y61xxgmre13exyk3q69k78bxxwhmrmncezt49jg1sok18xo64jeff5hk',
+  XNO_RECEIVE_ADDRESS: 'nano_3ax7ayzdruyc1z14ezpkp9q7ry5out75uopxtugyxewi75ypmianr3cse8uy',
 };
 
 const SWAP_FEE_RATE = 0.02;
