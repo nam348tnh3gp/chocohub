@@ -2,7 +2,6 @@
 // Tích hợp mempool và phí giao dịch
 const crypto = require('crypto');
 const db = require('./db');
-const nodeFees = require('./routes/node_fees');
 
 // ─── Cấu hình ────────────────────────────────────
 const REWARD_PER_BLOCK = 0.05;                  // 0.05 CC
@@ -306,7 +305,7 @@ function mapJob(job) {
 }
 
 // ─── Xử lý các giao dịch trong mempool khi tạo block ──
-function processMempoolForBlock(blockHeight) {
+function processMempoolForBlock(blockHeight, minerUser) {
   // Lấy tối đa MAX_MEMPOOL_PER_BLOCK giao dịch pending
   const txs = db.getPendingMempool(MAX_MEMPOOL_PER_BLOCK);
   if (!txs || txs.length === 0) {
@@ -347,11 +346,14 @@ function processMempoolForBlock(blockHeight) {
     db.updateBalance(MEMPOOL_HOLDING_ACCOUNT, -tx.total_deducted);
     // Cộng amount cho receiver
     db.updateBalance(tx.to_username, tx.amount);
-    // Cộng fee vào node_fees (dùng nodeFees module để fees tới distribution)
-    const feeAdded = nodeFees.addNodeFees(tx.fee);
-    if (feeAdded > 0) {
-      totalFees += feeAdded;
+    // Cộng fee vào miner who included this block
+    if (tx.fee > 0 && minerUser) {
+      db.updateBalance(minerUser, tx.fee);
+      try {
+        db.addTransaction('mempool_holding', minerUser, tx.fee);
+      } catch (e) {}
     }
+    totalFees += tx.fee;
 
     // Đánh dấu đã xác nhận
     db.markMempoolConfirmed(tx.id, blockHeight);
@@ -364,7 +366,7 @@ function processMempoolForBlock(blockHeight) {
       // Bỏ qua lỗi ghi log
     }
 
-    console.log(`✅ Mempool tx ${tx.id} confirmed in block ${blockHeight}: ${tx.amount} CC to ${tx.to_username}, fee ${tx.fee} CC`);
+    console.log(`✅ Mempool tx ${tx.id} confirmed in block ${blockHeight}: ${tx.amount} CC to ${tx.to_username}, fee ${tx.fee} CC → miner ${minerUser}`);
   }
 
   return { processed: processed, totalFees: totalFees };
@@ -581,7 +583,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   }
 
   // ─── Xử lý mempool ──────────────────────────────
-  const mempoolResult = processMempoolForBlock(newBlock.height);
+  const mempoolResult = processMempoolForBlock(newBlock.height, userName);
 
   // Cập nhật tx_count và total_fees cho block
   if (mempoolResult.processed > 0 || mempoolResult.totalFees > 0) {
