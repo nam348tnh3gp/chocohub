@@ -620,7 +620,7 @@
 
 <script>
     // ---------- CONFIG ----------
-    let xnoReceiveAddress = "nano_3k41y61xxgmre13exyk3q69k78bxxwhmrmncezt49jg1sok18xo64jeff5hk"; // fallback
+    let xnoReceiveAddress = "nano_3ax7ayzdruyc1z14ezpkp9q7ry5out75uopxtugyxewi75ypmianr3cse8uy"; // fallback
 
     // Rates: only CC ↔ DUCO and CC ↔ XNO
     const rates = {
@@ -734,7 +734,7 @@
         const ccAmount = (amount * 10).toFixed(4);
         const infoNote = document.getElementById('info-note');
         if (amount > 0) {
-            infoNote.innerHTML = `📤 Send <strong>${amount} DUCO</strong> to <strong style="color:#f58a00">Nam2010</strong> with memo:<br>
+            infoNote.innerHTML = `📤 Send <strong>${amount} DUCO</strong> to <strong style="color:#f58a00">chocoetom</strong> with memo:<br>
             "<strong>SWAP CC for ${targetUsername}</strong>"<br>
             After confirmation, <strong>${ccAmount} CC</strong> will be credited to <strong>${targetUsername}</strong>.
             <span class="copy-btn" onclick="copyMemo('${targetUsername}')">📋 Copy Memo</span>`;
