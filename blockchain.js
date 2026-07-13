@@ -458,6 +458,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   if (tierConfig.maxHashrate && tierConfig.maxHashrate <= 1000) {
     // Low-hashrate tier: check if solve time is realistic for the tier
     const minRealisticTime = job.difficulty / (tierConfig.maxHashrate * 1.5);
+    console.log(`🔍 Anti-cheat: tier=${tier} maxHR=${tierConfig.maxHashrate} diff=${job.difficulty} solveTime=${actualSolveTime.toFixed(4)}s minRealistic=${minRealisticTime.toFixed(4)}s`);
     if (actualSolveTime < minRealisticTime && actualSolveTime > 0) {
       const actualHashrate = job.difficulty / Math.max(actualSolveTime, 0.001);
       const actualRatio = actualHashrate / tierConfig.maxHashrate;
