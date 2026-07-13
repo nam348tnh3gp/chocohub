@@ -446,10 +446,57 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     }
   }
 
-  // 🆕 Hashrate validation (cross-check reported hashrate vs actual solve time)
+  // Hashrate validation (cross-check reported hashrate vs actual solve time)
+  const jobCreatedTimestamp = parseFlexibleDate(job.created_at);
+  const actualSolveTime = timestamp - jobCreatedTimestamp;
+
+  // Cross-check actual hashrate vs device capability
+  // For high-capability tiers (cpu/gpu), allow fast solves on low diff
+  // For low-capability tiers (avr/esp), flag impossibly fast solves
+  if (tierConfig.maxHashrate && tierConfig.maxHashrate <= 1000) {
+    // Low-hashrate tier: check if solve time is realistic for the tier
+    const minRealisticTime = job.difficulty / (tierConfig.maxHashrate * 1.5);
+    if (actualSolveTime < minRealisticTime && actualSolveTime > 0) {
+      const actualHashrate = job.difficulty / Math.max(actualSolveTime, 0.001);
+      const actualRatio = actualHashrate / tierConfig.maxHashrate;
+      // Extra detail if hashrate was also missing/zero
+      const hrNote = (!hashrateReported || hashrateReported <= 0)
+        ? ` (also: hashrate_reported missing/zero — possible bypass attempt)`
+        : ` (reported: ${hashrateReported} H/s)`;
+      const reason = `Actual hashrate ${actualHashrate.toExponential(2)} H/s is ${actualRatio.toFixed(1)}x over ${tier} max (${tierConfig.maxHashrate.toExponential(2)} H/s). Solve time ${actualSolveTime.toFixed(4)}s is impossibly fast for ${tier}.${hrNote}`;
+      db.addWorkerWarning(userName, reason);
+      console.warn(`⚠️ Device fraud (fast tier): ${diffKey} - ${reason}`);
+      const updatedFlags = db.getWorkerFlags(userName);
+      if (updatedFlags.suspended) {
+        console.warn(`🚫 User ${userName} auto-suspended for device type fraud`);
+        return {
+          status: 'error',
+          reason: 'Worker suspended for device type fraud. Submit from correct device.',
+          warnings: updatedFlags.warning_count
+        };
+      }
+    }
+  } else if (actualSolveTime > 0.1 && tierConfig.maxHashrate) {
+    // High-capability tier: standard check
+    const actualHashrate = job.difficulty / actualSolveTime;
+    const actualRatio = actualHashrate / tierConfig.maxHashrate;
+    if (actualRatio > 1.5) {
+      const reason = `Actual hashrate ${actualHashrate.toExponential(2)} H/s is ${actualRatio.toFixed(1)}x over ${tier} max (${tierConfig.maxHashrate.toExponential(2)} H/s). Device mismatch.`;
+      db.addWorkerWarning(userName, reason);
+      console.warn(`⚠️ Device fraud: ${diffKey} - ${reason}`);
+      const updatedFlags = db.getWorkerFlags(userName);
+      if (updatedFlags.suspended) {
+        console.warn(`🚫 User ${userName} auto-suspended for device type fraud`);
+        return {
+          status: 'error',
+          reason: 'Worker suspended for device type fraud. Submit from correct device.',
+          warnings: updatedFlags.warning_count
+        };
+      }
+    }
+  }
+
   if (hashrateReported && hashrateReported > 0) {
-    const jobCreatedTimestamp = parseFlexibleDate(job.created_at);
-    const actualSolveTime = timestamp - jobCreatedTimestamp;
     const expectedSolveTime = job.difficulty / hashrateReported;
     const ratio = actualSolveTime / expectedSolveTime;
 
@@ -459,7 +506,6 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
       db.addWorkerWarning(userName, reason);
       console.warn(`⚠️ Suspicious solve: ${diffKey} - ${reason}`);
 
-      // Check if this warning caused suspension
       const updatedFlags = db.getWorkerFlags(userName);
       if (updatedFlags.suspended) {
         console.warn(`🚫 User ${userName} auto-suspended after hashrate validation failure`);
@@ -468,27 +514,6 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
           reason: 'Worker suspended due to suspicious behavior (3 warnings in 24h). Solution rejected.',
           warnings: updatedFlags.warning_count
         };
-      }
-    }
-
-    // Cross-check actual hashrate vs device capability
-    // (catches low reported hashrate + fast actual solve)
-    if (actualSolveTime > 0.1 && tierConfig.maxHashrate) {
-      const actualHashrate = job.difficulty / actualSolveTime;
-      const actualRatio = actualHashrate / tierConfig.maxHashrate;
-      if (actualRatio > 1.5) {
-        const reason = `Actual hashrate ${actualHashrate.toExponential(2)} H/s is ${actualRatio.toFixed(1)}x over ${tier} max (${tierConfig.maxHashrate.toExponential(2)} H/s). Device mismatch.`;
-        db.addWorkerWarning(userName, reason);
-        console.warn(`⚠️ Device fraud: ${diffKey} - ${reason}`);
-        const updatedFlags = db.getWorkerFlags(userName);
-        if (updatedFlags.suspended) {
-          console.warn(`🚫 User ${userName} auto-suspended for device type fraud`);
-          return {
-            status: 'error',
-            reason: 'Worker suspended for device type fraud. Submit from correct device.',
-            warnings: updatedFlags.warning_count
-          };
-        }
       }
     }
   }
