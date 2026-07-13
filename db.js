@@ -7,6 +7,7 @@
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const path = require('path');
 
 const db = new Database(path.join(__dirname, 'chocohub.db'));
@@ -82,6 +83,7 @@ db.exec(`
     from_username TEXT NOT NULL,
     to_username TEXT NOT NULL,
     amount REAL NOT NULL,
+    description TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now'))
   );
 
@@ -205,13 +207,14 @@ function updateBalance(username, amount) {
 }
 
 // ─── Transactions ────────────────────────────────
-function addTransaction(from_username, to_username, amount) {
-  return db.prepare('INSERT INTO transactions (from_username, to_username, amount) VALUES (?, ?, ?)').run(from_username.trim(), to_username.trim(), amount);
+function addTransaction(from_username, to_username, amount, description) {
+  const desc = description || '';
+  return db.prepare('INSERT INTO transactions (from_username, to_username, amount, description) VALUES (?, ?, ?, ?)').run(from_username.trim(), to_username.trim(), amount, desc);
 }
 
 function getTransactions(username, limit = 20) {
   const rows = db.prepare(`
-    SELECT from_username, to_username, amount, created_at 
+    SELECT from_username, to_username, amount, description, created_at 
     FROM transactions 
     WHERE from_username = ? OR to_username = ?
     ORDER BY id DESC
@@ -253,7 +256,7 @@ function stake(username, amount) {
   if (!user) throw new Error('User not found');
   if (user.balance < amount) throw new Error('Insufficient balance');
   updateBalance(username, -amount);
-  db.prepare('UPDATE stakes SET amount = amount + ?, pending_reward = pending_reward WHERE username = ?').run(amount, username);
+  db.prepare('UPDATE stakes SET amount = amount + ? WHERE username = ?').run(amount, username);
   return getStake(username);
 }
 
@@ -952,6 +955,10 @@ function addWorkerWarning(workerName, reason) {
   if (shouldSuspend && !existing.suspended) {
     console.warn(`🚫 Worker ${workerName} suspended after 3 warnings`);
   }
+
+  // Also propagate to user-level flags
+  const parentUser = workerName.includes(':') ? workerName.split(':')[0] : workerName;
+  addUserWarning(parentUser, reason);
   
   return { warning_count: newCount, suspended: shouldSuspend };
 }
@@ -967,6 +974,10 @@ function suspendWorker(workerName, reason) {
       suspension_reason = excluded.suspension_reason
   `).run(workerName, now, reason);
   console.log(`🚫 Worker ${workerName} manually suspended: ${reason}`);
+
+  // Also suspend at user level
+  const parentUser = workerName.includes(':') ? workerName.split(':')[0] : workerName;
+  suspendUser(parentUser, reason);
 }
 
 function clearWorkerSuspension(workerName, adminUsername) {
@@ -981,6 +992,10 @@ function clearWorkerSuspension(workerName, adminUsername) {
     WHERE worker_name = ?
   `).run(adminUsername, now, workerName);
   console.log(`✅ Worker ${workerName} suspension cleared by ${adminUsername}`);
+
+  // Also clear at user level
+  const parentUser = workerName.includes(':') ? workerName.split(':')[0] : workerName;
+  clearUserSuspension(parentUser, adminUsername);
 }
 
 function getFlaggedWorkers() {
@@ -999,6 +1014,78 @@ function getFlaggedWorkers() {
     delete row.warnings_json;
     return row;
   });
+}
+
+// ═══════════════════════════════════════════════════
+// 🆕 USER-LEVEL FLAGS (blocks ALL workers of a user)
+// ═══════════════════════════════════════════════════
+
+function getUserFlags(username) {
+  const row = db.prepare('SELECT * FROM user_flags WHERE username = ?').get(username);
+  if (!row) return { warning_count: 0, suspended: false };
+  try {
+    row.warnings = JSON.parse(row.warnings_json || '[]');
+  } catch (e) {
+    row.warnings = [];
+  }
+  row.suspended = Boolean(row.suspended);
+  return row;
+}
+
+function addUserWarning(username, reason) {
+  const now = Math.floor(Date.now() / 1000);
+  const WINDOW = 24 * 3600;
+  const existing = getUserFlags(username);
+  let warnings = existing.warnings || [];
+  warnings = warnings.filter(w => (now - w.timestamp) < WINDOW);
+  warnings.push({ timestamp: now, reason });
+  const newCount = warnings.length;
+  const shouldSuspend = newCount >= 3;
+
+  db.prepare(`
+    INSERT INTO user_flags (username, warning_count, last_warning_at, warnings_json, suspended, suspended_at, suspension_reason)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(username) DO UPDATE SET
+      warning_count = excluded.warning_count,
+      last_warning_at = excluded.last_warning_at,
+      warnings_json = excluded.warnings_json,
+      suspended = excluded.suspended,
+      suspended_at = excluded.suspended_at,
+      suspension_reason = excluded.suspension_reason
+  `).run(username, newCount, now, JSON.stringify(warnings), shouldSuspend ? 1 : 0, shouldSuspend ? now : (existing.suspended_at || 0), shouldSuspend ? '3 warnings in 24h' : (existing.suspension_reason || null));
+
+  if (shouldSuspend && !existing.suspended) {
+    console.warn(`🚫 User ${username} auto-suspended after 3 warnings`);
+  }
+  return { warning_count: newCount, suspended: shouldSuspend };
+}
+
+function suspendUser(username, reason) {
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(`
+    INSERT INTO user_flags (username, suspended, suspended_at, suspension_reason)
+    VALUES (?, 1, ?, ?)
+    ON CONFLICT(username) DO UPDATE SET
+      suspended = 1,
+      suspended_at = excluded.suspended_at,
+      suspension_reason = excluded.suspension_reason
+  `).run(username, now, reason);
+  console.log(`🚫 User ${username} suspended: ${reason}`);
+}
+
+function clearUserSuspension(username, adminUsername) {
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(`
+    UPDATE user_flags
+    SET suspended = 0, warning_count = 0, warnings_json = '[]', cleared_by = ?, cleared_at = ?
+    WHERE username = ?
+  `).run(adminUsername, now, username);
+  console.log(`✅ User ${username} suspension cleared by ${adminUsername}`);
+}
+
+function isUserSuspended(username) {
+  const row = db.prepare('SELECT suspended FROM user_flags WHERE username = ?').get(username);
+  return row ? Boolean(row.suspended) : false;
 }
 
 // Gọi ensureBannedColumn e ensureBlockDeviceTypeColumn quando module load
@@ -1033,6 +1120,20 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_worker_flags_suspended ON worker_flags(suspended);
 
+  -- 🆕 USER-LEVEL flags (blocks ALL workers of a user)
+  CREATE TABLE IF NOT EXISTS user_flags (
+    username TEXT PRIMARY KEY,
+    warning_count INTEGER DEFAULT 0,
+    last_warning_at INTEGER DEFAULT 0,
+    warnings_json TEXT DEFAULT '[]',
+    suspended INTEGER DEFAULT 0,
+    suspended_at INTEGER DEFAULT 0,
+    suspension_reason TEXT,
+    cleared_by TEXT,
+    cleared_at INTEGER DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_flags_suspended ON user_flags(suspended);
+
   -- 🆕 Mining Nodes table
   CREATE TABLE IF NOT EXISTS mining_nodes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1055,6 +1156,7 @@ db.exec(`
 `);
 
 ensureColumn('mining_nodes', 'last_block_height', 'INTEGER DEFAULT 0');
+ensureColumn('transactions', 'description', "TEXT DEFAULT ''");
 
 // ═══════════════════════════════════════════════════
 // 🆕 MINING NODE FUNCTIONS
@@ -1284,6 +1386,12 @@ module.exports = {
   suspendWorker,
   clearWorkerSuspension,
   getFlaggedWorkers,
+  // 🆕 User-level flags
+  getUserFlags,
+  addUserWarning,
+  suspendUser,
+  clearUserSuspension,
+  isUserSuspended,
   // 🆕 Mining Nodes
   registerMiningNode,
   getMiningNodeByToken,

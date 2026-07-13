@@ -91,6 +91,16 @@ function ensureHoldingAccount() {
 }
 ensureHoldingAccount();
 
+function ensureLiquidityAccount() {
+  const liquidity = db.getUser('swap_liquidity');
+  if (!liquidity) {
+    const randomPin = crypto.randomBytes(16).toString('hex');
+    db.authenticate('swap_liquidity', randomPin);
+    console.log('🏊 Created swap_liquidity account (liquidity pool)');
+  }
+}
+ensureLiquidityAccount();
+
 function roundAmount(value) {
   return Number((Number(value) || 0).toFixed(8));
 }
@@ -135,14 +145,23 @@ function refundUser(request) {
   console.log(`💰 Refunded ${amount} CC to ${request.from_user} from holding (swap ${request.id})`);
 }
 
-function mintCCForUser(username, amount, swapId, swapType) {
+function creditFromLiquidity(username, amount, swapId, swapType) {
+  const receiver = db.getUser(username);
+  if (!receiver) {
+    throw new Error(`Receiver ${username} not found`);
+  }
+  const liquidity = db.getUser('swap_liquidity');
+  if (!liquidity || liquidity.balance < amount) {
+    throw new Error(`Insufficient liquidity: need ${amount} CC, pool has ${liquidity ? liquidity.balance : 0} CC`);
+  }
+  db.updateBalance('swap_liquidity', -amount);
   db.updateBalance(username, amount);
   if (db.addTransaction.length >= 4) {
-    db.addTransaction('swap_system', username, amount, `${swapType.toUpperCase()} → CC swap (${swapId})`);
+    db.addTransaction('swap_liquidity', username, amount, `${swapType.toUpperCase()} → CC swap (${swapId})`);
   } else {
-    db.addTransaction('swap_system', username, amount);
+    db.addTransaction('swap_liquidity', username, amount);
   }
-  console.log(`✨ Minted ${amount} CC to ${username} from ${swapType} swap (${swapId})`);
+  console.log(`🏊 Credited ${amount} CC to ${username} from liquidity pool (${swapType} swap ${swapId})`);
   return true;
 }
 
@@ -382,12 +401,13 @@ router.post('/fulfill', verifyToken, verifyAdmin, (req, res) => {
 
     if (request.swap_type === 'duco' || request.swap_type === 'ccpoc' || request.swap_type === 'cc_to_xno') {
       db.updateBalance('swap_holding', -gross);
+      db.updateBalance('swap_liquidity', net);
       if (db.addTransaction.length >= 4) {
-        db.addTransaction('swap_holding', 'swap_system', gross, `Swap burned for ${request.from_user} (${request.id})`);
+        db.addTransaction('swap_holding', 'swap_liquidity', net, `Swap → liquidity (${request.from_user}, ${request.id})`);
       } else {
-        db.addTransaction('swap_holding', 'swap_system', gross);
+        db.addTransaction('swap_holding', 'swap_liquidity', net);
       }
-      console.log(`✅ Swap completed and burned: ${gross} CC from ${request.from_user} (fee collected: ${fee} CC) [${request.swap_type}]`);
+      console.log(`🏊 Swap → liquidity: ${net} CC from ${request.from_user} added to pool (fee: ${fee} CC to pos_reward_pool) [${request.swap_type}]`);
 
       if (request.swap_type === 'cc_to_xno') {
         if (xno_txid) {
@@ -397,11 +417,11 @@ router.post('/fulfill', verifyToken, verifyAdmin, (req, res) => {
         }
       }
     } else if (request.swap_type === 'duco_to_cc') {
-      mintCCForUser(request.receiver, net, request.id, 'DUCO');
-      console.log(`✅ Minted ${net} CC to ${request.receiver} from DUCO→CC swap (fee ${fee} CC)`);
+      creditFromLiquidity(request.receiver, net, request.id, 'DUCO');
+      console.log(`🏊 ${net} CC credited to ${request.receiver} from liquidity pool (DUCO→CC, fee ${fee} CC)`);
     } else if (request.swap_type === 'xno_to_cc') {
-      mintCCForUser(request.receiver, net, request.id, 'XNO');
-      console.log(`✅ Minted ${net} CC to ${request.receiver} from XNO→CC swap (fee ${fee} CC)`);
+      creditFromLiquidity(request.receiver, net, request.id, 'XNO');
+      console.log(`🏊 ${net} CC credited to ${request.receiver} from liquidity pool (XNO→CC, fee ${fee} CC)`);
     } else {
       return res.status(400).json({ status: 'error', message: 'Unknown swap type' });
     }
@@ -437,6 +457,8 @@ router.get('/admin/pending_xno', verifyToken, verifyAdmin, (req, res) => {
 });
 
 router.get('/rates', (req, res) => {
+  const liquidity = db.getUser('swap_liquidity');
+  const holding = db.getUser('swap_holding');
   res.json({
     status: 'success',
     rates: {
@@ -445,6 +467,8 @@ router.get('/rates', (req, res) => {
       xno_to_cc: XNO_CONFIG.XNO_TO_CC_RATE,
       cc_to_xno: XNO_CONFIG.CC_TO_XNO_RATE,
       fee_rate: SWAP_FEE_RATE,
+      liquidity_cc: liquidity ? liquidity.balance : 0,
+      holding_cc: holding ? holding.balance : 0,
       note: {
         duco: '1 DUCO = 10 CC before fee',
         ccpoc: '1 CC PoC = 0.75 CC before fee',
@@ -453,6 +477,29 @@ router.get('/rates', (req, res) => {
       }
     }
   });
+});
+
+router.get('/liquidity', (req, res) => {
+  try {
+    const liquidity = db.getUser('swap_liquidity');
+    const holding = db.getUser('swap_holding');
+    const pendingBuys = swapRequests.filter(r => r.status === 'pending' && (r.swap_type === 'duco_to_cc' || r.swap_type === 'xno_to_cc'));
+    const pendingBuyTotal = pendingBuys.reduce((sum, r) => {
+      const { net } = splitSwapValue(r.amount_cc);
+      return sum + net;
+    }, 0);
+    res.json({
+      status: 'success',
+      liquidity: {
+        available: liquidity ? liquidity.balance : 0,
+        escrowed: holding ? holding.balance : 0,
+        pending_buy_liability: roundAmount(pendingBuyTotal),
+        net_liquidity: roundAmount((liquidity ? liquidity.balance : 0) - pendingBuyTotal)
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
 });
 
 router.get('/history', verifyToken, (req, res) => {

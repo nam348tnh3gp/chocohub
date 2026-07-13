@@ -1,0 +1,29 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Databases (local)
+*.db
+*.db-journal
+*.db-wal
+
+# Config with secrets
+swap_config.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dev tools
+.vscode/
+.idea/
