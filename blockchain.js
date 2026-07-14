@@ -400,10 +400,10 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     db.prepare('UPDATE mining_jobs SET assigned_to = ? WHERE id = ?').run(diffKey, jobId);
   }
 
-  // Suspension check uses the user account (shared across instances)
-  const flags = db.getWorkerFlags(userName);
+  // Suspension check: per-instance flag first (targeted), then account-level (broad/manual)
+  const flags = db.getWorkerFlags(diffKey);
   if (flags && flags.suspended) {
-    console.warn(`🚫 Suspended user ${userName} attempted to submit solution`);
+    console.warn(`🚫 Worker ${diffKey} attempted to submit solution`);
     throw new Error('Worker suspended for suspicious behavior. Contact admin to appeal.');
   }
 
@@ -429,23 +429,33 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
 
   // Auto-tier: upgrade if sustained hashrate exceeds tier max (multi-device rigs)
   // Only adjusts between mobile → cpu → gpu (embedded tiers stay fixed)
+  // Hysteresis: skip if this diffKey changed tier in the last 60s, to avoid
+  // thread-race flapping (e.g. two CPU threads under one instance reporting
+  // inconsistent per-solve hashrates and bouncing the tier back and forth).
   if (hashrateReported && hashrateReported > 0 && tierConfig.maxHashrate) {
     const reportedRatio = hashrateReported / tierConfig.maxHashrate;
     if (reportedRatio > 2.0) {
-      const adjustableTiers = ['mobile', 'cpu', 'gpu'];
-      for (const t of adjustableTiers) {
-        if (TIER_CONFIG[t].maxHashrate >= hashrateReported) {
-          if (t !== tier && adjustableTiers.includes(tier)) {
-            console.log(`🔄 Auto-tier: ${userName} upgraded from ${tier} → ${t} (reported ${hashrateReported.toExponential(2)} H/s)`);
-            try {
-              db.setWorkerTier(userName, t);
-            } catch (e) {
-              console.warn(`⚠️ Auto-tier: could not persist tier change for ${userName} (${e.message}) — applying for this block only`);
+      const lastTierChange = db.getWorkerDifficulty(diffKey + '_tierchange') || 0;
+      const sinceChange = Date.now() - lastTierChange;
+      if (sinceChange < 60000) {
+        console.log(`⏸️ Auto-tier: skipping flip for ${diffKey} (last change ${(sinceChange/1000).toFixed(1)}s ago, cooldown 60s)`);
+      } else {
+        const adjustableTiers = ['mobile', 'cpu', 'gpu'];
+        for (const t of adjustableTiers) {
+          if (TIER_CONFIG[t].maxHashrate >= hashrateReported) {
+            if (t !== tier && adjustableTiers.includes(tier)) {
+              console.log(`🔄 Auto-tier: ${userName} upgraded from ${tier} → ${t} (reported ${hashrateReported.toExponential(2)} H/s)`);
+              try {
+                db.setWorkerTier(userName, t);
+                db.setWorkerDifficulty(diffKey + '_tierchange', Date.now(), Date.now());
+              } catch (e) {
+                console.warn(`⚠️ Auto-tier: could not persist tier change for ${userName} (${e.message}) — applying for this block only`);
+              }
+              tier = t;
+              tierConfig = TIER_CONFIG[t];
             }
-            tier = t;
-            tierConfig = TIER_CONFIG[t];
+            break;
           }
-          break;
         }
       }
     }
@@ -499,11 +509,11 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
         ? ` (also: hashrate_reported missing/zero — possible bypass attempt)`
         : ` (reported: ${hashrateReported} H/s)`;
       const reason = `Actual hashrate ${actualHashrate.toExponential(2)} H/s is ${actualRatio.toFixed(1)}x over ${tier} max (${tierConfig.maxHashrate.toExponential(2)} H/s). Solve time ${actualSolveTime.toFixed(4)}s is impossibly fast for ${tier}.${hrNote}`;
-      db.addWorkerWarning(userName, reason);
+      db.addWorkerWarning(diffKey, reason);
       console.warn(`⚠️ Device fraud (fast tier): ${diffKey} - ${reason}`);
-      const updatedFlags = db.getWorkerFlags(userName);
+      const updatedFlags = db.getWorkerFlags(diffKey);
       if (updatedFlags.suspended) {
-        console.warn(`🚫 User ${userName} auto-suspended for device type fraud`);
+        console.warn(`🚫 Worker ${diffKey} auto-suspended for device type fraud`);
         return {
           status: 'error',
           reason: 'Worker suspended for device type fraud. Submit from correct device.',
@@ -521,11 +531,11 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     const actualRatio = actualHashrate / tierConfig.maxHashrate;
     if (actualRatio > VARIANCE_TOLERANCE) {
       const reason = `Actual hashrate ${actualHashrate.toExponential(2)} H/s is ${actualRatio.toFixed(1)}x over ${tier} max (${tierConfig.maxHashrate.toExponential(2)} H/s). Device mismatch.`;
-      db.addWorkerWarning(userName, reason);
+      db.addWorkerWarning(diffKey, reason);
       console.warn(`⚠️ Device fraud: ${diffKey} - ${reason}`);
-      const updatedFlags = db.getWorkerFlags(userName);
+      const updatedFlags = db.getWorkerFlags(diffKey);
       if (updatedFlags.suspended) {
-        console.warn(`🚫 User ${userName} auto-suspended for device type fraud`);
+        console.warn(`🚫 Worker ${diffKey} auto-suspended for device type fraud`);
         return {
           status: 'error',
           reason: 'Worker suspended for device type fraud. Submit from correct device.',
@@ -545,12 +555,12 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     // on ordinary variance).
     if (ratio < (1 / (VARIANCE_TOLERANCE * 6))) {
       const reason = `Solved in ${actualSolveTime.toFixed(1)}s but reported hashrate ${hashrateReported} H/s implies ${expectedSolveTime.toFixed(1)}s (ratio ${ratio.toFixed(3)})`;
-      db.addWorkerWarning(userName, reason);
+      db.addWorkerWarning(diffKey, reason);
       console.warn(`⚠️ Suspicious solve: ${diffKey} - ${reason}`);
 
-      const updatedFlags = db.getWorkerFlags(userName);
+      const updatedFlags = db.getWorkerFlags(diffKey);
       if (updatedFlags.suspended) {
-        console.warn(`🚫 User ${userName} auto-suspended after hashrate validation failure`);
+        console.warn(`🚫 Worker ${diffKey} auto-suspended after hashrate validation failure`);
         return {
           status: 'error',
           reason: 'Worker suspended due to suspicious behavior (3 warnings in 24h). Solution rejected.',
