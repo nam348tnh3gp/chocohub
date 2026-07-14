@@ -563,8 +563,15 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   }
 
   if (hashrateReported && hashrateReported > 0) {
+    // Use a solve-time floor here too — actualSolveTime is measured with
+    // second-precision timestamps, so any solve completing within the same
+    // second as job creation reads as exactly 0, making ratio = 0/expected
+    // always trip the check regardless of whether the hashrate was honest.
+    // Floor both sides so the ratio reflects real variance, not timestamp
+    // quantization.
+    const solveTimeForRatio = Math.max(actualSolveTime, MIN_SOLVE_TIME_FLOOR);
     const expectedSolveTime = job.difficulty / hashrateReported;
-    const ratio = actualSolveTime / expectedSolveTime;
+    const ratio = solveTimeForRatio / expectedSolveTime;
 
     // Solve time is exponentially distributed around the expected value, so
     // a legit worker will regularly solve well under the "expected" time —
