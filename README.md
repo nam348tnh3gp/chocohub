@@ -12,16 +12,16 @@ CCpow can be mined by Phones, Cpus, Gpus, Arduinos, ESPs and other devices that 
 Is Mining fair? Is it profitable?
 This is a good question, we use device based multipliers to miners
 
-embedded_avr Multiplier: 3.5
-embedded_arm Multiplier: 3.0x
-embedded_esp Multiplier: 2.5x
-embedded_esp32 Multiplier: 2.0x
-mobile Multiplier: 1.8x
-cpu Multiplier: 1.0x
-gpu Multiplier: 1.0x
+`embedded_avr` Multiplier: 3.5
+`embedded_arm` Multiplier: 3.0x
+`embedded_esp` Multiplier: 2.5x
+`embedded_esp32` Multiplier: 2.0x
+`mobile` Multiplier: 1.8x
+`cpu` Multiplier: 1.0x
+`gpu` Multiplier: 1.0x
 (upcoming ASIC, 0.5x)
 
-In case of microcontrollers mining, mostly devices are more profitable than electricity bills (depends highly on device, compared to other coins, ours is more profitable ON MICROCONTROLLERS)
+`In case of microcontrollers mining, mostly devices are more profitable than electricity bills (depends highly on device, compared to other coins, ours is more profitable ON MICROCONTROLLERS)`
 
 Is your project open source?
 Yes, its fully open source, and can be viewed by anyone at any time on our official repo.
