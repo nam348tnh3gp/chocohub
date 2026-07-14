@@ -516,15 +516,27 @@ function setWorkerDifficulty(workerName, difficulty, lastSolveTime) {
 // ═══════════════════════════════════════════════════
 
 function getLastBlock() {
-  return db.prepare('SELECT * FROM blocks ORDER BY height DESC LIMIT 1').get();
+  const block = db.prepare('SELECT * FROM blocks ORDER BY height DESC LIMIT 1').get();
+  return withTotalReward(block);
 }
 
 function getBlockByHeight(height) {
-  return db.prepare('SELECT * FROM blocks WHERE height = ?').get(height);
+  const block = db.prepare('SELECT * FROM blocks WHERE height = ?').get(height);
+  return withTotalReward(block);
 }
 
 function getBlockByHash(hash) {
-  return db.prepare('SELECT * FROM blocks WHERE hash = ?').get(hash);
+  const block = db.prepare('SELECT * FROM blocks WHERE hash = ?').get(hash);
+  return withTotalReward(block);
+}
+
+// Adds a computed total_reward field (reward + total_fees) without changing
+// the stored reward column, so the explorer can show what the miner actually
+// received while accounting/auditing still sees pure PoW reward separately.
+function withTotalReward(block) {
+  if (!block) return block;
+  block.total_reward = Number(((block.reward || 0) + (block.total_fees || 0)).toFixed(8));
+  return block;
 }
 
 function insertBlock(block) {
@@ -596,14 +608,18 @@ function getBlockCount() {
 }
 
 function getBlocks(limit = 10, offset = 0) {
-  return db.prepare('SELECT * FROM blocks ORDER BY height DESC LIMIT ? OFFSET ?').all(limit, offset);
+  const blocks = db.prepare('SELECT * FROM blocks ORDER BY height DESC LIMIT ? OFFSET ?').all(limit, offset);
+  return blocks.map(withTotalReward);
 }
 
 function getBlocksByMiner(minerName, sinceTimestamp) {
+  let blocks;
   if (sinceTimestamp != null) {
-    return db.prepare('SELECT * FROM blocks WHERE miner = ? AND timestamp >= ? ORDER BY height DESC').all(minerName, sinceTimestamp);
+    blocks = db.prepare('SELECT * FROM blocks WHERE miner = ? AND timestamp >= ? ORDER BY height DESC').all(minerName, sinceTimestamp);
+  } else {
+    blocks = db.prepare('SELECT * FROM blocks WHERE miner = ? ORDER BY height DESC').all(minerName);
   }
-  return db.prepare('SELECT * FROM blocks WHERE miner = ? ORDER BY height DESC').all(minerName);
+  return blocks.map(withTotalReward);
 }
 
 // ═══════════════════════════════════════════════════
