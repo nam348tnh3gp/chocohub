@@ -6,7 +6,7 @@ CCpow is a PoW (Proof-of-work) Based coin with PoS (Proof of Stake) Rewards for 
 ---
 
 ## How does mining work, and which devices it supports?
-CCpow uses SHA256 proofs as mining algo, which can be mined by almost any device, from microcontrollers to GPUS
+CCpow uses SHA256 (Pure Sha256) proofs as mining algo, which can be mined by almost any device, from microcontrollers to GPUS
 
 CCpow can be mined by:
 * Phones
@@ -59,6 +59,36 @@ No minimums, No limits.
 
 ---
 
+## Is there any anti cheat?
+
+Yes, we have a strict anti-cheat that uses diff and solve time to validate, the anti-cheat is tolerant to lucky, but not to obvious hacking, you have 3 warnings, when you get the final flag, you cant mine anymore until an admin check your account
+
+## Is alt account legal?
+
+Kinda. We dont recommend (as it doesnt helps your profit), but if you want, we dont have problems with it.
+
+## Is the project fully public?
+
+Yes, it is.
+Only the payments server doesnt, as hackers would target our project if they know how it works, so we run it on a private repo with firewall.
+
+## How is the swap pool funded?
+
+The liquidity pool is funded by investors (new users that want to try the project by buying some CC),
+The stratum mining (Mine xmr, btc or other coins, receive on CC, with only 2% fee for funding microcontroller pool)
+The AI inference nodes (People that run or buy AI usage with CC, giving the coin utility)
+the Donators (Anyone that believes in our project and donates some crypto for funding)
+The People who sell CC (The CC is moved to the swap_liquidity user, you can manually send CC to this account for funding!)
+
+---
+
+## How is the account security made?
+
+For now, we only use username + PIN, and only admins can actually access it.
+Every single backup node uses `Diffie–Hellman` for safing our network, no one can access data without dealing with it.
+We plan to on future use a more strong way to make username + PIN safer
+
+---
 ## What are you planning?
 CCpow and the entire chocohub ecosystem will be completely different on next versions:
 * Real liquidity
