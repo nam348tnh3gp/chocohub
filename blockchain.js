@@ -426,8 +426,28 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   const timestamp = Math.floor(Date.now() / 1000);
 
   // Read tier from job record
-  const tier = job.tier || 'cpu';
-  const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cpu;
+  let tier = job.tier || 'cpu';
+  let tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cpu;
+
+  // Auto-tier: upgrade if sustained hashrate exceeds tier max (multi-device rigs)
+  // Only adjusts between mobile → cpu → gpu (embedded tiers stay fixed)
+  if (hashrateReported && hashrateReported > 0 && tierConfig.maxHashrate) {
+    const reportedRatio = hashrateReported / tierConfig.maxHashrate;
+    if (reportedRatio > 2.0) {
+      const adjustableTiers = ['mobile', 'cpu', 'gpu'];
+      for (const t of adjustableTiers) {
+        if (TIER_CONFIG[t].maxHashrate >= hashrateReported) {
+          if (t !== tier && adjustableTiers.includes(tier)) {
+            console.log(`🔄 Auto-tier: ${userName} upgraded from ${tier} → ${t} (reported ${hashrateReported.toExponential(2)} H/s)`);
+            db.setWorkerTier(userName, t);
+            tier = t;
+            tierConfig = TIER_CONFIG[t];
+          }
+          break;
+        }
+      }
+    }
+  }
 
   // Cross-check reported hashrate vs device capability
   if (hashrateReported && hashrateReported > 0 && tierConfig.maxHashrate) {
