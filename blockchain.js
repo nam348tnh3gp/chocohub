@@ -466,12 +466,12 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     const reportedRatio = hashrateReported / tierConfig.maxHashrate;
     if (reportedRatio > 2.5) {
       const reason = `Reported ${hashrateReported.toExponential(2)} H/s for ${tier} (max ${tierConfig.maxHashrate.toExponential(2)} H/s, ${reportedRatio.toFixed(1)}x over). Device type mismatch.`;
-      db.addWorkerWarning(userName, reason);
+      db.addWorkerWarning(diffKey, reason);
       console.warn(`🤔 This worker have a total of ${hashrateReported.toExponential(2)} H/s, when the normal is ${tierConfig.maxHashrate.toExponential(2)} H/s`)
       console.warn(`🤨 Impossible hashrate for device type: ${diffKey} - ${reason}`);
-      const updatedFlags = db.getWorkerFlags(userName);
+      const updatedFlags = db.getWorkerFlags(diffKey);
       if (updatedFlags.suspended) {
-        console.warn(`🚫 User ${userName} auto-suspended for device type fraud`);
+        console.warn(`🚫 Worker ${diffKey} auto-suspended for device type fraud`);
         return {
           status: 'error',
           reason: 'Worker suspended for device type fraud. Submit from correct device.',
