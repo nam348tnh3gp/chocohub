@@ -1794,10 +1794,13 @@ app.get('/block/:height', (req, res) => {
 app.post('/get_job', (req, res) => {
   try {
     const { worker_name, instance_id, device_type } = req.body;
-    if (!worker_name) {
+    if (!worker_name || typeof worker_name !== 'string') {
       return res.status(400).json({ status: 'error', message: 'Missing worker_name' });
     }
-    const job = blockchain.getJobForWorker(worker_name, instance_id, device_type);
+    const cleanWorker = worker_name.trim().substring(0, 100);
+    const cleanInstance = instance_id ? String(instance_id).trim().substring(0, 50) : instance_id;
+    const cleanDevice = device_type ? String(device_type).trim().substring(0, 50) : device_type;
+    const job = blockchain.getJobForWorker(cleanWorker, cleanInstance, cleanDevice);
     if (!job) {
       return res.status(404).json({ status: 'error', message: 'No job available' });
     }
@@ -1858,12 +1861,19 @@ app.post('/submit_solution', (req, res) => {
     } else {
       // Unauthenticated fallback: use worker_name from body (webminer)
       worker_name = req.query.worker_name || req.body.worker_name;
-      if (!worker_name) {
+      if (!worker_name || typeof worker_name !== 'string') {
         return res.status(400).json({ status: 'error', message: 'Missing worker_name. Authenticate with JWT or provide worker_name in body.' });
       }
     }
 
-    const result = blockchain.submitSolution(bounty_id, nonce, worker_name, device_type, hashrate_reported, instance_id);
+    // Sanitize/cap length of client-controlled fields, matching the hardened
+    // node-relayed route (previously unbounded here, allowing oversized or
+    // malformed instance_id/device_type/worker_name to reach the DB/hash input)
+    const cleanWorkerName = String(worker_name).trim().substring(0, 100);
+    const cleanInstanceId = instance_id ? String(instance_id).trim().substring(0, 50) : instance_id;
+    const cleanDeviceType = String(device_type).trim().substring(0, 50);
+
+    const result = blockchain.submitSolution(bounty_id, nonce, cleanWorkerName, cleanDeviceType, hashrate_reported, cleanInstanceId);
     res.json(result);
   } catch (e) {
     res.status(400).json({ status: 'error', message: e.message });

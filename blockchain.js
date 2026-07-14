@@ -26,27 +26,34 @@ const TARGET_SOLVE_TIME = 10;                   // giây mong muốn (cho per‑
 // Embedded devices get higher multipliers (fair reward for lower power)
 // GPU multiplier changed from 0.5x to 1.0x (difficulty adjustment already handles speed)
 const TIER_CONFIG = {
+  // maxDifficulty is derived so that solving at the tier's max hashrate takes
+  // at most ~500s (50x TARGET_SOLVE_TIME) in the worst case. Day-to-day
+  // difficulty is auto-adjusted toward TARGET_SOLVE_TIME by adjustWorkerDifficulty;
+  // this cap is only a safety ceiling, not the normal operating point.
+  // Previously these caps were inconsistent (e.g. embedded_esp32's cap implied
+  // ~9 hours to solve at max hashrate, mobile's cap implied ~50s, and cpu's cap
+  // implied under 1 second) — fixed so caps scale consistently with hashrate.
   embedded_avr: {
     multiplier: 3.5,
-    maxDifficulty: 5000,
+    maxDifficulty: 25,
     maxHashrate: 50,
     description: 'Arduino, AVR microcontrollers (~30 H/s SHA-256)'
   },
   embedded_arm: {
     multiplier: 3.0,
-    maxDifficulty: 50000,
+    maxDifficulty: 500,
     maxHashrate: 1000,
     description: 'Raspberry Pi Pico, RP2040 (~500 H/s SHA-256)'
   },
   embedded_esp: {
     multiplier: 2.5,
-    maxDifficulty: 100000,
+    maxDifficulty: 5000,
     maxHashrate: 10000,
     description: 'ESP8266, NodeMCU (~5 kH/s SHA-256)'
   },
   embedded_esp32: {
     multiplier: 2.0,
-    maxDifficulty: 500000,
+    maxDifficulty: 7500,
     maxHashrate: 15000,
     description: 'ESP32, ESP32-S2, ESP32-C3 (~7 kH/s SHA-256)'
   },
@@ -58,13 +65,13 @@ const TIER_CONFIG = {
   },
   cpu: {
     multiplier: 1.0,
-    maxDifficulty: 10000,
+    maxDifficulty: 5000000,
     maxHashrate: 10000000,
     description: 'Desktop CPU, web miner (~500 kH/s-5 MH/s SHA-256)'
   },
   gpu: {
     multiplier: 1.0,
-    maxDifficulty: 100000,
+    maxDifficulty: 100000000,
     maxHashrate: 200000000,
     description: 'GPU mining (~5-100 MH/s SHA-256)'
   }
@@ -438,8 +445,18 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
       for (const t of adjustableTiers) {
         if (TIER_CONFIG[t].maxHashrate >= hashrateReported) {
           if (t !== tier && adjustableTiers.includes(tier)) {
+            // Best-effort bookkeeping only — setWorkerTier enforces a 24h
+            // cooldown and throws if the tier was changed too recently
+            // (including by this same auto-upgrade on a prior block). A
+            // throw here must never reject an already-verified valid
+            // solution, so we apply the tier change locally regardless
+            // and only best-effort persist it to the DB.
             console.log(`🔄 Auto-tier: ${userName} upgraded from ${tier} → ${t} (reported ${hashrateReported.toExponential(2)} H/s)`);
-            db.setWorkerTier(userName, t);
+            try {
+              db.setWorkerTier(userName, t);
+            } catch (e) {
+              console.warn(`⚠️ Auto-tier: could not persist tier change for ${userName} (${e.message}) — applying for this block only`);
+            }
             tier = t;
             tierConfig = TIER_CONFIG[t];
           }
@@ -452,7 +469,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   // Cross-check reported hashrate vs device capability
   if (hashrateReported && hashrateReported > 0 && tierConfig.maxHashrate) {
     const reportedRatio = hashrateReported / tierConfig.maxHashrate;
-    if (reportedRatio > 1.3) {
+    if (reportedRatio > 2.5) {
       const reason = `Reported ${hashrateReported.toExponential(2)} H/s for ${tier} (max ${tierConfig.maxHashrate.toExponential(2)} H/s, ${reportedRatio.toFixed(1)}x over). Device type mismatch.`;
       db.addWorkerWarning(userName, reason);
       console.warn(`⚠️ Impossible hashrate for device type: ${diffKey} - ${reason}`);
@@ -472,15 +489,24 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   const jobCreatedTimestamp = parseFlexibleDate(job.created_at);
   const actualSolveTime = timestamp - jobCreatedTimestamp;
 
+  // PoW solve times are exponentially (memoryless) distributed, not fixed —
+  // a single solve landing far below the *average* implied time is normal
+  // random variance, not evidence of cheating. VARIANCE_TOLERANCE widens the
+  // window before flagging, and MIN_SOLVE_TIME_FLOOR prevents division blowups
+  // on very fast (lucky, low-difficulty) solves.
+  const VARIANCE_TOLERANCE = 8;
+  const MIN_SOLVE_TIME_FLOOR = 0.25; // seconds
+
   // Cross-check actual hashrate vs device capability
   // For high-capability tiers (cpu/gpu), allow fast solves on low diff
   // For low-capability tiers (avr/esp), flag impossibly fast solves
   if (tierConfig.maxHashrate && tierConfig.maxHashrate <= 1000) {
     // Low-hashrate tier: check if solve time is realistic for the tier
-    const minRealisticTime = job.difficulty / (tierConfig.maxHashrate * 1.5);
+    const minRealisticTime = job.difficulty / (tierConfig.maxHashrate * VARIANCE_TOLERANCE);
     console.log(`🔍 Anti-cheat: tier=${tier} maxHR=${tierConfig.maxHashrate} diff=${job.difficulty} solveTime=${actualSolveTime.toFixed(4)}s minRealistic=${minRealisticTime.toFixed(4)}s`);
     if (actualSolveTime <= minRealisticTime) {
-      const actualHashrate = job.difficulty / Math.max(actualSolveTime, 0.001);
+      const solveTimeFloor = Math.max(actualSolveTime, MIN_SOLVE_TIME_FLOOR);
+      const actualHashrate = job.difficulty / solveTimeFloor;
       const actualRatio = actualHashrate / tierConfig.maxHashrate;
       // Extra detail if hashrate was also missing/zero
       const hrNote = (!hashrateReported || hashrateReported <= 0)
@@ -500,10 +526,14 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
       }
     }
   } else if (tierConfig.maxHashrate) {
-    // High-capability tier: check if actual hashrate exceeds max
-    const actualHashrate = job.difficulty / Math.max(actualSolveTime, 0.001);
+    // High-capability tier: check if actual hashrate exceeds max.
+    // Use the same variance-tolerant floor as the low-hashrate branch above —
+    // a single fast/lucky solve at low difficulty is expected PoW randomness,
+    // not proof of a faster device.
+    const solveTimeFloor = Math.max(actualSolveTime, MIN_SOLVE_TIME_FLOOR);
+    const actualHashrate = job.difficulty / solveTimeFloor;
     const actualRatio = actualHashrate / tierConfig.maxHashrate;
-    if (actualRatio > 1.5) {
+    if (actualRatio > VARIANCE_TOLERANCE) {
       const reason = `Actual hashrate ${actualHashrate.toExponential(2)} H/s is ${actualRatio.toFixed(1)}x over ${tier} max (${tierConfig.maxHashrate.toExponential(2)} H/s). Device mismatch.`;
       db.addWorkerWarning(userName, reason);
       console.warn(`⚠️ Device fraud: ${diffKey} - ${reason}`);
@@ -523,8 +553,11 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     const expectedSolveTime = job.difficulty / hashrateReported;
     const ratio = actualSolveTime / expectedSolveTime;
 
-    // If solved 20x faster than hashrate implies → suspicious
-    if (ratio < 0.05) {
+    // Solve time is exponentially distributed around the expected value, so
+    // a legit worker will regularly solve well under the "expected" time —
+    // only flag truly extreme outliers (previously 20x, which fired constantly
+    // on ordinary variance).
+    if (ratio < (1 / (VARIANCE_TOLERANCE * 6))) {
       const reason = `Solved in ${actualSolveTime.toFixed(1)}s but reported hashrate ${hashrateReported} H/s implies ${expectedSolveTime.toFixed(1)}s (ratio ${ratio.toFixed(3)})`;
       db.addWorkerWarning(userName, reason);
       console.warn(`⚠️ Suspicious solve: ${diffKey} - ${reason}`);
