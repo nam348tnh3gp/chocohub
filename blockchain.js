@@ -395,6 +395,18 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     throw new Error(`Block ${job.height} already mined. Submit at next height.`);
   }
 
+  // Atomically claim this job for solving: flip status active→solving in one
+  // UPDATE...WHERE. If a concurrent request already claimed it (or it was
+  // already solved), this affects 0 rows and we reject immediately — closes
+  // the race window where two polls/submits could both see status='active'
+  // for the same job_id and both proceed to submit a (still-valid) nonce.
+  const claimResult = db.prepare(
+    `UPDATE mining_jobs SET status = 'solving' WHERE id = ? AND status = 'active'`
+  ).run(jobId);
+  if (claimResult.changes === 0) {
+    throw new Error('Job not found or already solved');
+  }
+
   // Claim pool job for this worker
   if (job.assigned_to === '_pool') {
     db.prepare('UPDATE mining_jobs SET assigned_to = ? WHERE id = ?').run(diffKey, jobId);
@@ -418,6 +430,8 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   const hashHex = crypto.createHash('sha256').update(input).digest('hex');
 
   if (hashHex >= job.target_hex) {
+    // Invalid nonce: release the claim so the job can be retried/re-served
+    db.prepare(`UPDATE mining_jobs SET status = 'active' WHERE id = ?`).run(jobId);
     return { status: 'error', reason: `Invalid nonce: hash ${hashHex.substring(0,12)}... >= target` };
   }
 
@@ -472,6 +486,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
       const updatedFlags = db.getWorkerFlags(diffKey);
       if (updatedFlags.suspended) {
         console.warn(`🚫 Worker ${diffKey} auto-suspended for device type fraud`);
+        db.prepare(`UPDATE mining_jobs SET status = 'active' WHERE id = ?`).run(jobId);
         return {
           status: 'error',
           reason: 'Worker suspended for device type fraud. Submit from correct device.',
@@ -514,6 +529,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
       const updatedFlags = db.getWorkerFlags(diffKey);
       if (updatedFlags.suspended) {
         console.warn(`🚫 Worker ${diffKey} auto-suspended for device type fraud`);
+        db.prepare(`UPDATE mining_jobs SET status = 'active' WHERE id = ?`).run(jobId);
         return {
           status: 'error',
           reason: 'Worker suspended for device type fraud. Submit from correct device.',
@@ -536,6 +552,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
       const updatedFlags = db.getWorkerFlags(diffKey);
       if (updatedFlags.suspended) {
         console.warn(`🚫 Worker ${diffKey} auto-suspended for device type fraud`);
+        db.prepare(`UPDATE mining_jobs SET status = 'active' WHERE id = ?`).run(jobId);
         return {
           status: 'error',
           reason: 'Worker suspended for device type fraud. Submit from correct device.',
@@ -561,6 +578,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
       const updatedFlags = db.getWorkerFlags(diffKey);
       if (updatedFlags.suspended) {
         console.warn(`🚫 Worker ${diffKey} auto-suspended after hashrate validation failure`);
+        db.prepare(`UPDATE mining_jobs SET status = 'active' WHERE id = ?`).run(jobId);
         return {
           status: 'error',
           reason: 'Worker suspended due to suspicious behavior (3 warnings in 24h). Solution rejected.',
