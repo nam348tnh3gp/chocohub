@@ -53,6 +53,13 @@ You can go to our discord server, at #「💡」・say-your-ideas, we are really
 
 ---
 
+## When 1.0.6 launch, will be there any pre-mine?
+
+Yes, but not in the common way.
+The pre-mining will be made by our testers (normal people in our discord that agree with it)
+
+--
+
 ## Is there any swap minimum or limit?
 Not actually, you can ask a withdraw any time and will be handled by our automatic payment server.
 No minimums, No limits.
