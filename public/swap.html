@@ -528,7 +528,7 @@
                 <hr>
                 <div class="footnote">
                     ⚡ CC swaps are processed instantly.<br>
-                    🔄 DUCO → CC: Send DUCO to <strong>chocoetom</strong> with memo "SWAP CC for {username}".<br>
+                    🔄 DUCO → CC: Send DUCO to <strong>Nam2010</strong> with memo "SWAP CC for {username}".<br>
                     🟦 XNO → CC: Send XNO to the address below with memo "SWAP CC for {username}".<br>
                     📦 All swaps are recorded for safety.
                 </div>
@@ -734,7 +734,7 @@
         const ccAmount = (amount * 10).toFixed(4);
         const infoNote = document.getElementById('info-note');
         if (amount > 0) {
-            infoNote.innerHTML = `📤 Send <strong>${amount} DUCO</strong> to <strong style="color:#f58a00">chocoetom</strong> with memo:<br>
+            infoNote.innerHTML = `📤 Send <strong>${amount} DUCO</strong> to <strong style="color:#f58a00">Nam2010</strong> with memo:<br>
             "<strong>SWAP CC for ${targetUsername}</strong>"<br>
             After confirmation, <strong>${ccAmount} CC</strong> will be credited to <strong>${targetUsername}</strong>.
             <span class="copy-btn" onclick="copyMemo('${targetUsername}')">📋 Copy Memo</span>`;
@@ -853,30 +853,11 @@
                     body: JSON.stringify({
                         from_user: user,
                         amount_cc: amount,
-                        swap_type: toValue, // 'duco' or 'xno'? Actually backend expects 'duco' or 'cc_to_xno'? Wait: from earlier backend, cc_to_xno is separate swap_type.
+                        swap_type: toValue === 'xno' ? 'cc_to_xno' : toValue,
                         receiver: receiver
                     })
                 });
                 let data = await res.json();
-                // For CC→XNO, backend uses swap_type 'cc_to_xno', but our endpoint '/swap/create' only accepts 'duco', 'ccpoc', 'cc_to_xno'. So we need to adjust.
-                // Since we removed ccpoc, we must send 'cc_to_xno' for XNO.
-                if (toValue === 'xno') {
-                    // Try again with correct swap_type
-                    const res2 = await fetch('/swap/create', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': 'Bearer ' + token
-                        },
-                        body: JSON.stringify({
-                            from_user: user,
-                            amount_cc: amount,
-                            swap_type: 'cc_to_xno',
-                            receiver: receiver
-                        })
-                    });
-                    data = await res2.json();
-                }
                 if (data.status === 'success') {
                     showToast(`Swap request created! -${amount} CC`, false);
                     await fetchBalance();
