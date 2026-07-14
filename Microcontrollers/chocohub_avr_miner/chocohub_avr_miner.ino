@@ -72,33 +72,6 @@ static const uint32_t H0[8] PROGMEM = {
     0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19
 };
 
-// ── SHA-256 block transform ────────────────────────────────────────────────
-//
-// 80-word message schedule W[i] for i in 0..15 is big-endian from the input
-// block; for i in 16..79 it's:
-//   W[i] = SIG1(W[i-2]) + W[i-7] + SIG0(W[i-15]) + W[i-16]
-//
-// where:
-//   ROTR(x, n) = (x >> n) | (x << (32 - n))
-//   CH(x,y,z)  = (x & y) ^ (~x & z)
-//   MAJ(x,y,z) = (x & y) ^ (x & z) ^ (y & z)
-//   EP0(x)     = ROTR(x,2)  ^ ROTR(x,13) ^ ROTR(x,22)
-//   EP1(x)     = ROTR(x,6)  ^ ROTR(x,11) ^ ROTR(x,25)
-//   SIG0(x)    = ROTR(x,7)  ^ ROTR(x,18) ^ (x >> 3)
-//   SIG1(x)    = ROTR(x,17) ^ ROTR(x,19) ^ (x >> 10)
-//
-// All seven are implemented in inline asm below. Everything else (W[] load,
-// main compression loop body, final add) is straight C.
-
-// ── ROTR(x, n) — rotate right by variable n bits ────────────────────────────
-//
-// Strategy: copy x to two register pairs. Shift one RIGHT by n (MSB→LSB) and
-// shift the other LEFT by (32-n) (LSB→MSB). XOR (bitwise OR, since no bits
-// overlap) the two results together. Result in %A0:%C0.
-//
-// Cost: ~8*max(n, 32-n) cycles worst case, ~4*32 ≈ 128 cycles for n=16.
-// With n as a compile-time constant (all SHA-256 sigmas use literal n),
-// the loops unroll entirely.
 static inline uint32_t rotr(uint32_t x, uint32_t n) {
     uint32_t r;
     asm volatile(
