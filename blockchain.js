@@ -4,35 +4,26 @@ const crypto = require('crypto');
 const db = require('./db');
 
 // ─── Cấu hình ────────────────────────────────────
-const REWARD_PER_BLOCK = 0.05;                  // 0.05 CC
-const INITIAL_DIFFICULTY = 100;                  // mặc định cho worker mới (fallback)
+const REWARD_PER_BLOCK = 0.05;                  // 0.05 CC, maybe we change it, who knows...
+const INITIAL_DIFFICULTY = 5;                  // Initial diff (global)
 const TIER_INITIAL_DIFFICULTY = {
   embedded_avr: 2,
   embedded_arm: 5,
   embedded_esp: 50,
   embedded_esp32: 100,
-  mobile: 100,
-  cpu: 200,
-  gpu: 500
+  mobile: 300,
+  cpu: 500,
+  gpu: 1000,
+  asic: 10000
 };
-const JOB_EXPIRE_SECONDS = 60;                  // job hết hạn sau 60s
-const MIN_DIFFICULTY = 1;
-const MAX_DIFFICULTY = 1000000000;
-const DIFFICULTY_ADJUSTMENT_FACTOR = 0.5;       // hệ số điều chỉnh (0.5 = trung bình)
-const TARGET_SOLVE_TIME = 10;                   // giây mong muốn (cho per‑worker điều chỉnh)
+const JOB_EXPIRE_SECONDS = 15;                  // Time to job expire
+const MIN_DIFFICULTY = 1;                       // Minimum Possible diff
+const MAX_DIFFICULTY = 1000000000;              // Max Possible Diff
+const DIFFICULTY_ADJUSTMENT_FACTOR = 0.5;       // diff adjustment factor (max change)
+const TARGET_SOLVE_TIME = 10;                   // Expected solve time for each worker (timeout causes diff to get lower)
 
-// ─── 🆕 TIER CONFIGURATION (replaces DEVICE_REWARD_MULTIPLIERS) ──
-// Tier determines: reward multiplier + difficulty cap
-// Embedded devices get higher multipliers (fair reward for lower power)
-// GPU multiplier changed from 0.5x to 1.0x (difficulty adjustment already handles speed)
 const TIER_CONFIG = {
-  // maxDifficulty is derived so that solving at the tier's max hashrate takes
-  // at most ~500s (50x TARGET_SOLVE_TIME) in the worst case. Day-to-day
-  // difficulty is auto-adjusted toward TARGET_SOLVE_TIME by adjustWorkerDifficulty;
-  // this cap is only a safety ceiling, not the normal operating point.
-  // Previously these caps were inconsistent (e.g. embedded_esp32's cap implied
-  // ~9 hours to solve at max hashrate, mobile's cap implied ~50s, and cpu's cap
-  // implied under 1 second) — fixed so caps scale consistently with hashrate.
+  // Defining Tiers, Multiplier, Max diff and max Hashrate, balanced for most users :)
   embedded_avr: {
     multiplier: 3.5,
     maxDifficulty: 25,
@@ -70,7 +61,7 @@ const TIER_CONFIG = {
     description: 'Desktop CPU, web miner (~500 kH/s-5 MH/s SHA-256)'
   },
   gpu: {
-    multiplier: 1.0,
+    multiplier: 2.0,
     maxDifficulty: 100000000,
     maxHashrate: 200000000,
     description: 'GPU mining (~5-100 MH/s SHA-256)'
@@ -98,8 +89,8 @@ const DEVICE_REWARD_MULTIPLIERS = {
 };
 
 // ─── Cấu hình mempool ────────────────────────────
-const MAX_MEMPOOL_PER_BLOCK = 50;                // số giao dịch tối đa mỗi block
-const MEMPOOL_HOLDING_ACCOUNT = 'mempool_holding';
+const MAX_MEMPOOL_PER_BLOCK = 50;                // Max mempool per block, bruh
+const MEMPOOL_HOLDING_ACCOUNT = 'mempool_holding'; // The account that holds mempool transactions
 
 // ─── Helper: chuyển difficulty → target hex ──
 function difficultyToTarget(difficulty) {
@@ -127,7 +118,7 @@ function initBlockchain() {
       total_fees: 0
     };
     db.insertBlock(genesis);
-    console.log('🌱 Genesis block created');
+    console.log('🌱 Genesis block created Succesfuly :)');
   }
 
   // Seed pool job at next height
@@ -445,12 +436,6 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
       for (const t of adjustableTiers) {
         if (TIER_CONFIG[t].maxHashrate >= hashrateReported) {
           if (t !== tier && adjustableTiers.includes(tier)) {
-            // Best-effort bookkeeping only — setWorkerTier enforces a 24h
-            // cooldown and throws if the tier was changed too recently
-            // (including by this same auto-upgrade on a prior block). A
-            // throw here must never reject an already-verified valid
-            // solution, so we apply the tier change locally regardless
-            // and only best-effort persist it to the DB.
             console.log(`🔄 Auto-tier: ${userName} upgraded from ${tier} → ${t} (reported ${hashrateReported.toExponential(2)} H/s)`);
             try {
               db.setWorkerTier(userName, t);
@@ -472,7 +457,8 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     if (reportedRatio > 2.5) {
       const reason = `Reported ${hashrateReported.toExponential(2)} H/s for ${tier} (max ${tierConfig.maxHashrate.toExponential(2)} H/s, ${reportedRatio.toFixed(1)}x over). Device type mismatch.`;
       db.addWorkerWarning(userName, reason);
-      console.warn(`⚠️ Impossible hashrate for device type: ${diffKey} - ${reason}`);
+      console.warn(`🤔 This worker have a total of ${hashrateReported.toExponential(2)} H/s, when the normal is ${tierConfig.maxHashrate.toExponential(2)} H/s`)
+      console.warn(`🤨 Impossible hashrate for device type: ${diffKey} - ${reason}`);
       const updatedFlags = db.getWorkerFlags(userName);
       if (updatedFlags.suspended) {
         console.warn(`🚫 User ${userName} auto-suspended for device type fraud`);
@@ -528,7 +514,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   } else if (tierConfig.maxHashrate) {
     // High-capability tier: check if actual hashrate exceeds max.
     // Use the same variance-tolerant floor as the low-hashrate branch above —
-    // a single fast/lucky solve at low difficulty is expected PoW randomness,
+    // a single fast/lucky solve at low difficulty is expected PoW randomness, 
     // not proof of a faster device.
     const solveTimeFloor = Math.max(actualSolveTime, MIN_SOLVE_TIME_FLOOR);
     const actualHashrate = job.difficulty / solveTimeFloor;
