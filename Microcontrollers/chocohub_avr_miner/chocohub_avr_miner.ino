@@ -48,32 +48,6 @@ static void     send_line(const char *s);
 static void     send_status(void);
 static void     mine_loop(void);
 
-// ════════════════════════════════════════════════════════════════════════════
-//  SHA-256 — assembly hot path
-// ════════════════════════════════════════════════════════════════════════════
-//
-// The seven SHA-256 inner-loop helpers (ROTR + CH + MAJ + the four composite
-// sigma/ep functions) are all written in AVR assembly. They are called 64
-// times per 64-byte block, and the message schedule alone is 64 calls into
-// SIG0/SIG1 per block — that's 256 sig/sig0 calls per nonce, so every saved
-// cycle matters on a 16 MHz chip.
-//
-// On AVR, a 32-bit value is held in two registers (r_lo, r_hi) where the
-// "hi" pair holds bits 31..16 and "lo" holds bits 15..0. The SHA-256 spec
-// is big-endian, but we use the natural little-endian word layout here and
-// let the final comparison happen byte-by-byte against the binary target
-// (the host always verifies before submitting to the server, so any
-// endianness quirk in this code shows up as a "no solution found" event,
-// never as an invalid block).
-//
-// ROTR(x, n) = (x >> n) | (x << (32 - n))
-// We implement it as a 2-pass loop: shift x into r18:r19:r20:r21 left by n
-// (top bits fall off the end and re-enter via the carry from the upper
-// word — but for ROTR we want them to drop, so we shift into a clean
-// register first), then shift that result right by (32-n). The result
-// sits in r18:r19:r20:r21.
-
-// ── SHA-256 constants (K table) ────────────────────────────────────────────
 static const uint32_t K[64] PROGMEM = {
     0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,
     0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
