@@ -51,8 +51,8 @@ const TIER_CONFIG = {
   mobile: {
     multiplier: 1.8,
     maxDifficulty: 2500,
-    maxHashrate: 500000,
-    description: 'Android, iOS (~200 kH/s SHA-256)'
+    maxHashrate: 40000,
+    description: 'Android, iOS (~5-10 kH/s per thread SHA-256)'
   },
   cpu: {
     multiplier: 1.0,
@@ -227,10 +227,11 @@ function getJobForWorker(workerName, instanceId, deviceType) {
 
   if (poolJob) {
     const poolTargetHex = difficultyToTarget(diff);
+    const poolMultiplier = tierConfig.multiplier;
     db.prepare(
-      `UPDATE mining_jobs SET assigned_to = ?, difficulty = ?, target_hex = ?, created_at = datetime('now') WHERE id = ?`
-    ).run(diffKey, diff, poolTargetHex, poolJob.id);
-    return mapJob(Object.assign({}, poolJob, { difficulty: diff, target_hex: poolTargetHex }));
+      `UPDATE mining_jobs SET assigned_to = ?, difficulty = ?, target_hex = ?, tier = ?, reward_multiplier = ?, created_at = datetime('now') WHERE id = ?`
+    ).run(diffKey, diff, poolTargetHex, tier, poolMultiplier, poolJob.id);
+    return mapJob(Object.assign({}, poolJob, { difficulty: diff, target_hex: poolTargetHex, tier: tier, reward_multiplier: poolMultiplier }));
   }
 
   const targetHex = difficultyToTarget(diff);
