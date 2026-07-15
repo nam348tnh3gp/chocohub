@@ -546,10 +546,11 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     const solveTimeFloor = Math.max(actualSolveTime, MIN_SOLVE_TIME_FLOOR);
     const actualHashrate = job.difficulty / solveTimeFloor;
     const actualRatio = actualHashrate / tierConfig.maxHashrate;
+    console.log(`🔍 Anti-cheat [check3/high-tier]: tier=${tier} maxHR=${tierConfig.maxHashrate} diff=${job.difficulty} rawActualSolveTime=${actualSolveTime.toFixed(4)}s (floored=${solveTimeFloor.toFixed(4)}s) actualHashrate=${actualHashrate.toFixed(1)} actualRatio=${actualRatio.toFixed(3)} (flag if >${VARIANCE_TOLERANCE}) job.created_at=${job.created_at} now_ts=${timestamp}`);
     if (actualRatio > VARIANCE_TOLERANCE) {
       const reason = `Actual hashrate ${actualHashrate.toExponential(2)} H/s is ${actualRatio.toFixed(1)}x over ${tier} max (${tierConfig.maxHashrate.toExponential(2)} H/s). Device mismatch.`;
-      db.addWorkerWarning(diffKey, reason);
-      console.warn(`⚠️ Device fraud: ${diffKey} - ${reason}`);
+      const warnResult = db.addWorkerWarning(diffKey, reason);
+      console.warn(`⚠️ Device fraud: ${diffKey} - ${reason} [warning_count=${warnResult.warning_count}]`);
       const updatedFlags = db.getWorkerFlags(diffKey);
       if (updatedFlags.suspended) {
         console.warn(`🚫 Worker ${diffKey} auto-suspended for device type fraud`);
@@ -573,6 +574,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     const solveTimeForRatio = Math.max(actualSolveTime, MIN_SOLVE_TIME_FLOOR);
     const expectedSolveTime = job.difficulty / hashrateReported;
     const ratio = solveTimeForRatio / expectedSolveTime;
+    console.log(`🔍 Anti-cheat [check4/reported-vs-actual]: tier=${tier} diff=${job.difficulty} hashrateReported=${hashrateReported} rawActualSolveTime=${actualSolveTime.toFixed(4)}s (floored=${solveTimeForRatio.toFixed(4)}s) expectedSolveTime=${expectedSolveTime.toFixed(4)}s ratio=${ratio.toFixed(4)} (flag if <${(1/(VARIANCE_TOLERANCE*6)).toFixed(4)}) job.created_at=${job.created_at} now_ts=${timestamp}`);
 
     // Solve time is exponentially distributed around the expected value, so
     // a legit worker will regularly solve well under the "expected" time —
@@ -580,8 +582,8 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     // on ordinary variance).
     if (ratio < (1 / (VARIANCE_TOLERANCE * 6))) {
       const reason = `Solved in ${actualSolveTime.toFixed(1)}s but reported hashrate ${hashrateReported} H/s implies ${expectedSolveTime.toFixed(1)}s (ratio ${ratio.toFixed(3)})`;
-      db.addWorkerWarning(diffKey, reason);
-      console.warn(`⚠️ Suspicious solve: ${diffKey} - ${reason}`);
+      const warnResult = db.addWorkerWarning(diffKey, reason);
+      console.warn(`⚠️ Suspicious solve: ${diffKey} - ${reason} [warning_count=${warnResult.warning_count}]`);
 
       const updatedFlags = db.getWorkerFlags(diffKey);
       if (updatedFlags.suspended) {
