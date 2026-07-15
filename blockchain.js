@@ -45,14 +45,14 @@ const TIER_CONFIG = {
   embedded_esp32: {
     multiplier: 2.0,
     maxDifficulty: 7500,
-    maxHashrate: 15000,
-    description: 'ESP32, ESP32-S2, ESP32-C3 (~7 kH/s SHA-256)'
+    maxHashrate: 25000,
+    description: 'ESP32, ESP32-S2, ESP32-C3 (~15 kH/s SHA-256)'
   },
   mobile: {
     multiplier: 1.8,
-    maxDifficulty: 2500,
-    maxHashrate: 40000,
-    description: 'Android, iOS (~5-10 kH/s per thread SHA-256)'
+    maxDifficulty: 50000,
+    maxHashrate: 200000,
+    description: 'Android, iOS (~50-200 kH/s SHA-256)'
   },
   cpu: {
     multiplier: 1.0,
@@ -477,12 +477,26 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   }
 
   // Cross-check reported hashrate vs device capability
-  if (hashrateReported && hashrateReported > 0 && tierConfig.maxHashrate) {
-    const reportedRatio = hashrateReported / tierConfig.maxHashrate;
-    if (reportedRatio > 2.5) {
-      const reason = `Reported ${hashrateReported.toExponential(2)} H/s for ${tier} (max ${tierConfig.maxHashrate.toExponential(2)} H/s, ${reportedRatio.toFixed(1)}x over). Device type mismatch.`;
+  // Use worker's CURRENT tier from DB (not stale job.tier) to avoid false flags after auto-tier
+  let currentTier = tier;
+  let currentTierConfig = tierConfig;
+  try {
+    const workerInfo = db.getWorkerInfo(userName);
+    if (workerInfo && workerInfo.tier && TIER_CONFIG[workerInfo.tier]) {
+      currentTier = workerInfo.tier;
+      currentTierConfig = TIER_CONFIG[currentTier];
+    }
+  } catch (e) {
+    // Fall back to job tier if DB query fails
+  }
+
+  if (hashrateReported && hashrateReported > 0 && currentTierConfig.maxHashrate) {
+    const reportedRatio = hashrateReported / currentTierConfig.maxHashrate;
+    // Threshold raised from 2.5x to 3.5x to accommodate variance in mobile/embedded devices
+    if (reportedRatio > 3.5) {
+      const reason = `Reported ${hashrateReported.toExponential(2)} H/s for ${currentTier} (max ${currentTierConfig.maxHashrate.toExponential(2)} H/s, ${reportedRatio.toFixed(1)}x over). Device type mismatch.`;
       db.addWorkerWarning(diffKey, reason);
-      console.warn(`🤔 This worker have a total of ${hashrateReported.toExponential(2)} H/s, when the normal is ${tierConfig.maxHashrate.toExponential(2)} H/s`)
+      console.warn(`🤔 This worker has ${hashrateReported.toExponential(2)} H/s, expected ~${currentTierConfig.maxHashrate.toExponential(2)} H/s for ${currentTier}`)
       console.warn(`🤨 Impossible hashrate for device type: ${diffKey} - ${reason}`);
       const updatedFlags = db.getWorkerFlags(diffKey);
       if (updatedFlags.suspended) {
