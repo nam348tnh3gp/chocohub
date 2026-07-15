@@ -164,6 +164,20 @@ if (fs.existsSync(TLS_KEY_PATH) && fs.existsSync(TLS_CERT_PATH)) {
 const dhSessions = new Map();
 const serverDHKeys = DHExchange.generateStandardKeyPair('modp2048');
 
+// ─── Allowed backup hostnames (URL-only, no IP) ───────
+const ALLOWED_BACKUP_HOSTS = (process.env.BACKUP_SERVERS || '')
+  .split(',').map(s => {
+    try { return new URL(s.trim()).hostname; } catch { return ''; }
+  }).filter(Boolean);
+
+function isAllowedBackupHost(url) {
+  if (!ALLOWED_BACKUP_HOSTS.length) return false;
+  try {
+    return ALLOWED_BACKUP_HOSTS.includes(new URL(url).hostname);
+  } catch { return false; }
+}
+console.log(`🔒 Allowed backup hosts: ${ALLOWED_BACKUP_HOSTS.join(', ') || '(none — all blocked)'}`);
+
 function getDbHash() {
   try {
     const users = db.getAllUsers ? db.getAllUsers() : [];
@@ -1932,6 +1946,9 @@ app.get('/health', (req, res) => {
 app.post('/api/backup/register', (req, res) => {
   const { url, token, name, description, owner, platform, clientId, users, blocks, total_items } = req.body;
   if (!url || !token) return res.status(400).json({ status: 'error', message: 'Missing url or token' });
+  if (!isAllowedBackupHost(url)) {
+    return res.status(403).json({ status: 'error', message: 'URL not in allowed backup hosts' });
+  }
   const providedToken = req.body.token || '';
   const isTokenValid = providedToken === (process.env.BACKUP_TOKEN || 'chocohub-default-token');
   const session = clientId ? dhSessions.get(clientId) : null;
@@ -1964,11 +1981,9 @@ let bestSnapshotMetrics = { users: 0, blocks: 0, total_items: 0 };
 app.post('/api/backup/sync', (req, res) => {
   try {
     const data = req.body;
-    const token = data.token || '';
     const clientId = data.clientId || req.headers['x-client-id'] || '';
     const session = clientId ? dhSessions.get(clientId) : null;
-    const isTokenValid = token === (process.env.BACKUP_TOKEN || 'chocohub-default-token');
-    if (!isTokenValid && !session) return res.status(401).json({ status: 'error', message: 'Invalid token or no valid session' });
+    if (!session) return res.status(401).json({ status: 'error', message: 'DH session required (no token fallback)' });
     console.log(`📥 Received from backup: type=${data.type}, empty=${data.empty}`);
     if (data.type === 'FULL_SNAPSHOT' && data.state) {
       const incomingUsers = (data.state.users || []).length;
