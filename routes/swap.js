@@ -525,22 +525,10 @@ router.get('/admin/swaps', verifyToken, verifyAdmin, (req, res) => {
 
 router.delete('/admin/swaps/:id', verifyToken, verifyAdmin, (req, res) => {
   try {
-    const id = req.params.id;
-    const index = swapRequests.findIndex(r => r.id === id);
-    if (index === -1) {
-      return res.status(404).json({ status: 'error', message: 'Swap not found' });
+    const result = _deleteSwapById(req.params.id, true);
+    if (!result.ok) {
+      return res.status(result.code || 400).json({ status: 'error', message: result.message });
     }
-
-    const request = swapRequests[index];
-    if (request.status === 'pending' && (request.swap_type === 'duco' || request.swap_type === 'ccpoc' || request.swap_type === 'cc_to_xno')) {
-      refundUser(request);
-    } else if (request.status === 'pending' && (request.swap_type === 'duco_to_cc' || request.swap_type === 'xno_to_cc')) {
-      console.log(`🗑️ Deleted ${request.swap_type} request ${id} (no refund needed)`);
-    }
-
-    swapRequests.splice(index, 1);
-    saveSwapRequests();
-
     res.json({ status: 'success', message: 'Swap deleted' });
   } catch (e) {
     console.error('Swap delete error:', e);
@@ -559,4 +547,20 @@ router.get('/xno/config', (req, res) => {
   });
 });
 
+function _deleteSwapById(id, refund = true) {
+  const index = swapRequests.findIndex(r => r.id === id);
+  if (index === -1) return { ok: false, code: 404, message: 'Swap not found' };
+  const request = swapRequests[index];
+  if (refund && request.status === 'pending' && (request.swap_type === 'duco' || request.swap_type === 'ccpoc' || request.swap_type === 'cc_to_xno')) {
+    refundUser(request);
+  } else if (refund && request.status === 'pending' && (request.swap_type === 'duco_to_cc' || request.swap_type === 'xno_to_cc')) {
+    console.log(`🗑️ Deleted ${request.swap_type} request ${id} (no refund needed)`);
+  }
+  swapRequests.splice(index, 1);
+  saveSwapRequests();
+  return { ok: true };
+}
+
 module.exports = router;
+module.exports.getAllSwapRequests = () => swapRequests;
+module.exports.deleteSwapById = _deleteSwapById;
