@@ -395,17 +395,27 @@ app.post('/admin/api/users/:username/ban', requireAdminSession, async (req, res)
   }
 });
 
+// User detail (drawer: balance + stake + recent transactions)
+app.get('/admin/api/users/:username/detail', requireAdminSession, async (req, res) => {
+  try {
+    const username = req.params.username;
+    const user = db.getUser(username);
+    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+    const stake = db.getStake(username) || { staked: 0, pending_reward: 0 };
+    const transactions = db.getTransactions(username, 20) || [];
+    res.json({ status: 'success', user, stake, transactions });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
 // ─── Các API admin cũ ────────────────────────────────
 
 // API proxy cho admin (giữ nguyên)
 app.get('/admin/api/all-swaps', requireAdminSession, async (req, res) => {
   try {
-    const token = req.session.adminToken;
-    const response = await fetch(`http://localhost:${PORT}/swap/admin/swaps`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const data = await response.json();
-    res.json(data);
+    const swaps = SwapRouter.getAllSwapRequests();
+    res.json({ status: 'success', swaps, total: swaps.length });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }
@@ -429,6 +439,11 @@ app.post('/admin/api/update-balance', requireAdminSession, async (req, res) => {
     
     if (action === 'add') {
       db.updateBalance(username, amount);
+    } else if (action === 'remove') {
+      if (user.balance < amount) {
+        return res.status(400).json({ status: 'error', message: 'Insufficient balance' });
+      }
+      db.updateBalance(username, -amount);
     } else if (action === 'set') {
       const currentBalance = user.balance;
       const diff = amount - currentBalance;
@@ -472,13 +487,11 @@ app.post('/admin/api/fulfill', requireAdminSession, async (req, res) => {
 app.delete('/admin/api/delete/:id', requireAdminSession, async (req, res) => {
   try {
     const id = req.params.id;
-    const token = req.session.adminToken;
-    const response = await fetch(`http://localhost:${PORT}/swap/admin/swaps/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const data = await response.json();
-    res.json(data);
+    const result = SwapRouter.deleteSwapById(id, true);
+    if (!result.ok) {
+      return res.status(result.code || 400).json({ status: 'error', message: result.message });
+    }
+    res.json({ status: 'success', message: 'Swap deleted' });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }
