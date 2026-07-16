@@ -27,8 +27,8 @@ const NodeFeesRouter = require('./routes/node_fees');
 
 // admin users
 const ADMIN_USERS = ['chocoetom', 'Nam2010'];
-const NODE_MASTER_TOKEN = process.env.NODE_MASTER_TOKEN || 'chocohub-node-master';
-if (!process.env.NODE_MASTER_TOKEN || NODE_MASTER_TOKEN === 'chocohub-node-master') {
+const NODE_MASTER_TOKEN = process.env.NODE_MASTER_TOKEN || 'null';
+if (!process.env.NODE_MASTER_TOKEN || NODE_MASTER_TOKEN === 'null') {
   console.warn('⚠️ WARNING: NODE_MASTER_TOKEN is default/weak. Set a real token in Render dashboard!');
 }
 
@@ -529,233 +529,392 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
     <html>
     <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Admin Dashboard - ChocoHub</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
         <style>
+            :root {
+                --bg: #0b0a10;
+                --bg-elev: #14121c;
+                --card: #1a1826;
+                --card-hover: #201d2e;
+                --border: rgba(255,255,255,0.07);
+                --border-strong: rgba(255,255,255,0.14);
+                --gold: #f5a623;
+                --gold-bright: #ffc857;
+                --gold-dim: rgba(245,166,35,0.14);
+                --choco: #6b3f1d;
+                --cream: #f3e9d8;
+                --text: #ece5f2;
+                --text-dim: #9691a8;
+                --text-faint: #635f74;
+                --green: #4ade80;
+                --red: #ff6b6b;
+                --blue: #5b9dff;
+                --radius: 20px;
+                --radius-sm: 12px;
+                --shadow: 0 12px 40px rgba(0,0,0,0.45);
+            }
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { background: #0a0a12; color: #eee4d8; font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif; padding: 2rem; }
-            .container { max-width: 1400px; margin: 0 auto; }
-            .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }
-            h1 { background: linear-gradient(135deg, #f58a00, #ffbf00); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: 2rem; }
-            .logout-btn { background: #2a2a36; border: 1px solid #ff4444; color: #ff4444; padding: 0.5rem 1.2rem; border-radius: 40px; text-decoration: none; transition: 0.2s; }
-            .logout-btn:hover { background: #ff4444; color: white; }
-            .tabs { display: flex; gap: 1rem; margin-bottom: 2rem; border-bottom: 1px solid #2a2a36; flex-wrap: wrap; }
-            .tab-btn { background: none; border: none; color: #8b8296; padding: 0.75rem 1.5rem; font-size: 1rem; cursor: pointer; transition: 0.2s; }
-            .tab-btn:hover { color: #f58a00; }
-            .tab-btn.active { color: #f58a00; border-bottom: 2px solid #f58a00; }
-            .tab-content { display: none; }
+            body {
+                background:
+                    radial-gradient(1100px 500px at 15% -10%, rgba(245,166,35,0.10), transparent 60%),
+                    radial-gradient(900px 500px at 90% 0%, rgba(107,63,29,0.20), transparent 55%),
+                    var(--bg);
+                color: var(--text);
+                font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                padding: 2.5rem;
+                min-height: 100vh;
+            }
+            ::selection { background: var(--gold-dim); color: var(--gold-bright); }
+            ::-webkit-scrollbar { width: 8px; height: 8px; }
+            ::-webkit-scrollbar-thumb { background: #2a2736; border-radius: 8px; }
+            .container { max-width: 1440px; margin: 0 auto; }
+
+            .header {
+                display: flex; justify-content: space-between; align-items: center;
+                margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;
+                padding-bottom: 1.5rem; border-bottom: 1px solid var(--border);
+            }
+            .brand { display: flex; align-items: center; gap: 0.9rem; }
+            .brand-icon {
+                width: 46px; height: 46px; border-radius: 14px; display: flex; align-items: center; justify-content: center;
+                font-size: 1.4rem; background: linear-gradient(145deg, var(--gold), #c9791a);
+                box-shadow: 0 6px 18px rgba(245,166,35,0.35);
+            }
+            .brand-text h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.3px; color: var(--cream); }
+            .brand-text span { font-size: 0.78rem; color: var(--text-dim); font-weight: 500; }
+            .header-right { display: flex; align-items: center; gap: 0.9rem; }
+            .session-pill {
+                font-size: 0.78rem; color: var(--text-dim); background: var(--card);
+                border: 1px solid var(--border); padding: 0.45rem 0.9rem; border-radius: 40px;
+                display: flex; align-items: center; gap: 0.4rem;
+            }
+            .session-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+            .logout-btn {
+                background: transparent; border: 1px solid var(--red); color: var(--red);
+                padding: 0.55rem 1.3rem; border-radius: 40px; text-decoration: none; font-size: 0.85rem; font-weight: 600;
+                transition: 0.2s;
+            }
+            .logout-btn:hover { background: var(--red); color: #0a0a12; }
+
+            .tabs { display: flex; gap: 0.4rem; margin-bottom: 1.8rem; flex-wrap: wrap; background: var(--bg-elev); padding: 0.4rem; border-radius: 40px; width: fit-content; border: 1px solid var(--border); }
+            .tab-btn {
+                background: none; border: none; color: var(--text-dim); padding: 0.6rem 1.3rem; font-size: 0.9rem;
+                font-weight: 600; cursor: pointer; border-radius: 40px; transition: 0.2s; font-family: inherit;
+                display: flex; align-items: center; gap: 0.4rem;
+            }
+            .tab-btn:hover { color: var(--cream); }
+            .tab-btn.active { color: #0a0a12; background: linear-gradient(135deg, var(--gold-bright), var(--gold)); box-shadow: 0 4px 14px rgba(245,166,35,0.3); }
+            .tab-content { display: none; animation: fadeIn 0.25s ease; }
             .tab-content.active { display: block; }
-            .card { background: #1e1e2a; border-radius: 24px; padding: 1.5rem; margin-bottom: 2rem; box-shadow: 0 8px 20px rgba(0,0,0,0.3); }
-            .card h2 { margin-bottom: 1rem; color: #f58a00; font-weight: 500; }
+            @keyframes fadeIn { from { opacity: 0; transform: translateY(6px);} to { opacity:1; transform: translateY(0);} }
+
+            .card {
+                background: linear-gradient(180deg, var(--card), var(--bg-elev));
+                border: 1px solid var(--border); border-radius: var(--radius); padding: 1.6rem; margin-bottom: 1.6rem;
+                box-shadow: var(--shadow);
+            }
+            .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.2rem; flex-wrap: wrap; gap: 0.6rem; }
+            .card-head h2 { font-size: 1.05rem; font-weight: 700; color: var(--cream); display: flex; align-items: center; gap: 0.5rem; }
+            .refresh-btn {
+                font-size: 0.78rem; color: var(--text-dim); cursor: pointer; background: rgba(255,255,255,0.04);
+                border: 1px solid var(--border); padding: 0.4rem 0.9rem; border-radius: 40px; transition: 0.2s;
+                display: flex; align-items: center; gap: 0.35rem;
+            }
+            .refresh-btn:hover { color: var(--gold); border-color: var(--gold); }
+            .refresh-btn.spin svg { animation: spin 0.6s linear; }
+            @keyframes spin { to { transform: rotate(360deg); } }
+
             table { width: 100%; border-collapse: collapse; }
-            th, td { padding: 12px 10px; text-align: left; border-bottom: 1px solid #2a2a36; font-size: 0.85rem; }
-            th { background: #2a2a36; font-weight: 600; color: #ffbf00; }
-            .status-pending { background: #ffaa4433; color: #ffaa44; padding: 4px 10px; border-radius: 40px; font-size: 0.75rem; font-weight: bold; display: inline-block; }
-            .status-completed { background: #44ff4433; color: #44ff44; padding: 4px 10px; border-radius: 40px; font-size: 0.75rem; font-weight: bold; display: inline-block; }
-            .badge-xno { background: #2a6eff33; color: #2a6eff; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; }
-            .badge-duco { background: #ffaa4433; color: #ffaa44; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; }
-            .badge-cc { background: #f58a0033; color: #f58a00; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; }
-            .btn-complete { background: #f58a00; color: #0a0a12; border: none; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; margin-right: 8px; transition: 0.2s; }
-            .btn-complete:hover { background: #ff9e20; transform: scale(1.02); }
-            .btn-delete { background: #ff4444; color: white; border: none; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
-            .btn-delete:hover { background: #ff6666; transform: scale(1.02); }
-            .btn-edit { background: #2a2a36; color: #f58a00; border: 1px solid #f58a00; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
-            .btn-edit:hover { background: #f58a00; color: #0a0a12; }
-            .btn-ban { background: #ff4444; color: white; border: none; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
-            .btn-ban:hover { background: #ff6666; }
-            .btn-unban { background: #40c057; color: white; border: none; padding: 6px 12px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
-            .btn-unban:hover { background: #5ce06e; }
-            .btn-add-user { background: #f58a00; color: #0a0a12; border: none; padding: 8px 16px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: 0.2s; }
-            .btn-add-user:hover { background: #ff9e20; transform: scale(1.02); }
+            th, td { padding: 13px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.84rem; }
+            th { color: var(--text-faint); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.6px; }
+            tbody tr { transition: background 0.15s; }
+            tbody tr:hover { background: rgba(255,255,255,0.02); }
+            .mono { font-family: 'JetBrains Mono', monospace; }
+
+            .status-pending { background: rgba(245,166,35,0.16); color: var(--gold-bright); padding: 4px 11px; border-radius: 40px; font-size: 0.72rem; font-weight: 700; display: inline-block; }
+            .status-completed { background: rgba(74,222,128,0.14); color: var(--green); padding: 4px 11px; border-radius: 40px; font-size: 0.72rem; font-weight: 700; display: inline-block; }
+            .badge-xno { background: rgba(91,157,255,0.16); color: var(--blue); padding: 3px 9px; border-radius: 12px; font-size: 0.68rem; font-weight: 600; }
+            .badge-duco { background: rgba(245,166,35,0.16); color: var(--gold-bright); padding: 3px 9px; border-radius: 12px; font-size: 0.68rem; font-weight: 600; }
+            .badge-cc { background: rgba(107,63,29,0.35); color: var(--cream); padding: 3px 9px; border-radius: 12px; font-size: 0.68rem; font-weight: 600; }
+
+            button { font-family: inherit; }
+            .btn { border: none; padding: 7px 14px; border-radius: 30px; cursor: pointer; font-weight: 600; font-size: 0.78rem; transition: 0.2s; }
+            .btn:active { transform: scale(0.96); }
+            .btn-complete { background: linear-gradient(135deg, var(--gold-bright), var(--gold)); color: #0a0a12; margin-right: 6px; }
+            .btn-complete:hover { filter: brightness(1.08); }
+            .btn-delete { background: rgba(255,107,107,0.15); color: var(--red); border: 1px solid rgba(255,107,107,0.3); }
+            .btn-delete:hover { background: var(--red); color: #0a0a12; }
+            .btn-ghost { background: rgba(255,255,255,0.05); color: var(--text); border: 1px solid var(--border); }
+            .btn-ghost:hover { border-color: var(--gold); color: var(--gold-bright); }
+            .btn-primary { background: linear-gradient(135deg, var(--gold-bright), var(--gold)); color: #0a0a12; }
+            .btn-primary:hover { filter: brightness(1.08); }
+            .btn-success { background: rgba(74,222,128,0.15); color: var(--green); border: 1px solid rgba(74,222,128,0.3); }
+            .btn-success:hover { background: var(--green); color: #0a0a12; }
+
+            .avatar {
+                width: 34px; height: 34px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center;
+                background: linear-gradient(145deg, var(--choco), #3a2210); color: var(--gold-bright); font-weight: 700;
+                font-size: 0.9rem; margin-right: 10px; vertical-align: middle;
+            }
+            .user-cell { display: flex; align-items: center; }
+
             .gear-icon {
-                font-size: 1.2rem;
-                cursor: pointer;
-                padding: 4px 8px;
-                border-radius: 6px;
-                transition: background 0.2s, transform 0.2s;
-                display: inline-block;
-                user-select: none;
+                font-size: 1.1rem; cursor: pointer; padding: 6px 10px; border-radius: 8px; transition: 0.2s;
+                display: inline-block; user-select: none; border: 1px solid transparent;
             }
-            .gear-icon:hover {
-                background: rgba(255,255,255,0.08);
-                transform: scale(1.05);
-            }
-            .empty-row td { text-align: center; color: #888; padding: 2rem; }
-            .refresh { float: right; font-size: 0.8rem; color: #888; margin-top: 0.5rem; cursor: pointer; }
-            .refresh:hover { color: #f58a00; }
-            .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; }
-            .modal-content { background: #1e1e2a; border-radius: 24px; padding: 2rem; width: 450px; max-width: 90%; }
-            .modal-content h3 { margin-bottom: 1rem; color: #f58a00; }
-            .modal-content input { width: 100%; padding: 12px; margin: 10px 0; background: #2a2a36; border: 1px solid #3a3a46; border-radius: 12px; color: white; }
-            .modal-buttons { display: flex; gap: 1rem; margin-top: 1rem; }
-            .modal-buttons button { flex: 1; padding: 10px; border-radius: 30px; cursor: pointer; }
-            .btn-save { background: #f58a00; color: #0a0a12; border: none; }
-            .btn-cancel { background: #2a2a36; color: #eee4d8; border: 1px solid #ff4444; }
-            .search-box { margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
-            .search-box input { flex: 1; padding: 10px; background: #2a2a36; border: 1px solid #3a3a46; border-radius: 12px; color: white; }
-            .search-box button { background: #f58a00; color: #0a0a12; border: none; padding: 10px 20px; border-radius: 30px; cursor: pointer; }
-            .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
-            .stat-card { background: #2a2a36; padding: 1rem; border-radius: 16px; text-align: center; }
-            .stat-card strong { display: block; font-size: 1.5rem; color: #f58a00; margin-top: 0.5rem; }
-            .dropdown {
-                position: relative;
-                display: inline-block;
-            }
+            .gear-icon:hover { background: rgba(255,255,255,0.06); border-color: var(--border); }
+            .empty-row td { text-align: center; color: var(--text-faint); padding: 2.5rem; }
+
+            .dropdown { position: relative; display: inline-block; }
             .dropdown-content {
-                display: none;
-                position: absolute;
-                right: 0;
-                background: #1e1e2a;
-                min-width: 180px;
-                box-shadow: 0 8px 24px rgba(0,0,0,0.6);
-                z-index: 1000;
-                border-radius: 12px;
-                border: 1px solid rgba(255,255,255,0.08);
-                padding: 4px 0;
-                backdrop-filter: blur(8px);
+                display: none; position: absolute; right: 0; top: calc(100% + 6px); background: #211f2e;
+                min-width: 190px; box-shadow: 0 12px 30px rgba(0,0,0,0.6); z-index: 1000; border-radius: 14px;
+                border: 1px solid var(--border-strong); padding: 6px; backdrop-filter: blur(10px);
             }
             .dropdown-content a {
-                color: #eee4d8;
-                padding: 10px 16px;
-                text-decoration: none;
-                display: block;
-                font-size: 0.85rem;
-                cursor: pointer;
-                transition: background 0.15s;
-                border-radius: 6px;
-                margin: 2px 4px;
+                color: var(--text); padding: 9px 12px; text-decoration: none; display: flex; align-items: center; gap: 8px;
+                font-size: 0.82rem; cursor: pointer; transition: background 0.15s; border-radius: 8px; font-weight: 500;
             }
-            .dropdown-content a:hover {
-                background: rgba(255,255,255,0.06);
+            .dropdown-content a:hover { background: rgba(255,255,255,0.06); }
+            .dropdown-content .danger { color: var(--red); }
+            .dropdown-content .danger:hover { background: rgba(255,107,107,0.12); }
+            .dropdown-content .success { color: var(--green); }
+            .dropdown-content .success:hover { background: rgba(74,222,128,0.12); }
+            .dropdown-content .divider { height: 1px; background: var(--border); margin: 4px 6px; }
+            .dropdown.show .dropdown-content { display: block; }
+
+            .search-box { display: flex; gap: 0.6rem; flex-wrap: wrap; flex: 1; }
+            .search-box input {
+                flex: 1; min-width: 180px; padding: 10px 14px; background: rgba(255,255,255,0.03);
+                border: 1px solid var(--border); border-radius: var(--radius-sm); color: white; font-size: 0.85rem; outline: none; transition: 0.2s;
             }
-            .dropdown-content .danger {
-                color: #ff6b6b;
+            .search-box input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-dim); }
+
+            .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem; }
+            .stat-card {
+                background: linear-gradient(160deg, rgba(255,255,255,0.03), rgba(255,255,255,0));
+                border: 1px solid var(--border); padding: 1.3rem; border-radius: 16px; transition: 0.2s;
             }
-            .dropdown-content .danger:hover {
-                background: rgba(255,70,70,0.12);
+            .stat-card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+            .stat-label { font-size: 0.78rem; color: var(--text-dim); display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.5rem; }
+            .stat-card strong { display: block; font-size: 1.7rem; color: var(--gold-bright); font-weight: 800; letter-spacing: -0.5px; }
+
+            /* Modal */
+            .modal { display: none; position: fixed; inset: 0; background: rgba(6,5,10,0.72); backdrop-filter: blur(4px); z-index: 2000; justify-content: center; align-items: center; }
+            .modal-content {
+                background: linear-gradient(180deg, #201d2c, #17141f); border: 1px solid var(--border-strong); border-radius: 24px;
+                padding: 1.8rem; width: 420px; max-width: 90%; box-shadow: 0 30px 70px rgba(0,0,0,0.6); animation: pop 0.18s ease;
             }
-            .dropdown-content .success {
-                color: #40c057;
+            @keyframes pop { from { transform: scale(0.94); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+            .modal-content h3 { margin-bottom: 1rem; color: var(--cream); font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; }
+            .modal-content label { font-size: 0.78rem; color: var(--text-dim); display: block; margin: 0.8rem 0 0.3rem; font-weight: 600; }
+            .modal-content input {
+                width: 100%; padding: 11px 14px; background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+                border-radius: var(--radius-sm); color: white; font-size: 0.9rem; outline: none; transition: 0.2s;
             }
-            .dropdown-content .success:hover {
-                background: rgba(64,192,87,0.12);
+            .modal-content input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-dim); }
+            .modal-buttons { display: flex; gap: 0.6rem; margin-top: 1.4rem; }
+            .modal-buttons button { flex: 1; padding: 11px; border-radius: 30px; }
+            .balance-actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
+            .balance-actions button { flex: 1; padding: 10px; border-radius: 14px; font-size: 0.8rem; }
+            .btn-add-bal { background: rgba(74,222,128,0.14); color: var(--green); border: 1px solid rgba(74,222,128,0.3); }
+            .btn-add-bal:hover { background: var(--green); color: #0a0a12; }
+            .btn-remove-bal { background: rgba(255,107,107,0.14); color: var(--red); border: 1px solid rgba(255,107,107,0.3); }
+            .btn-remove-bal:hover { background: var(--red); color: #0a0a12; }
+            .btn-set-bal { background: rgba(91,157,255,0.14); color: var(--blue); border: 1px solid rgba(91,157,255,0.3); }
+            .btn-set-bal:hover { background: var(--blue); color: #0a0a12; }
+            .current-balance-tag { font-size: 0.85rem; color: var(--text-dim); background: rgba(255,255,255,0.04); padding: 0.6rem 0.9rem; border-radius: 12px; margin-top: 0.4rem; }
+            .current-balance-tag b { color: var(--gold-bright); }
+
+            /* User detail drawer */
+            .drawer-overlay { display: none; position: fixed; inset: 0; background: rgba(6,5,10,0.6); z-index: 1900; }
+            .drawer {
+                position: fixed; top: 0; right: -420px; width: 400px; max-width: 90%; height: 100%; background: #17141f;
+                border-left: 1px solid var(--border-strong); z-index: 1950; transition: right 0.25s ease; padding: 1.8rem; overflow-y: auto;
             }
-            .dropdown.show .dropdown-content {
-                display: block;
+            .drawer.open { right: 0; }
+            .drawer-overlay.open { display: block; }
+            .drawer-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.4rem; }
+            .drawer-close { cursor: pointer; color: var(--text-dim); font-size: 1.3rem; background:none; border:none; }
+            .drawer-close:hover { color: var(--red); }
+            .drawer-section { margin-bottom: 1.4rem; }
+            .drawer-section h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-faint); margin-bottom: 0.6rem; }
+            .tx-item { display: flex; justify-content: space-between; font-size: 0.8rem; padding: 8px 0; border-bottom: 1px solid var(--border); }
+            .tx-item:last-child { border-bottom: none; }
+
+            /* Toasts */
+            #toastWrap { position: fixed; bottom: 24px; right: 24px; z-index: 3000; display: flex; flex-direction: column; gap: 10px; }
+            .toast {
+                background: #201d2c; border: 1px solid var(--border-strong); border-left: 4px solid var(--gold);
+                padding: 13px 18px; border-radius: 12px; font-size: 0.85rem; box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+                min-width: 260px; animation: slideIn 0.25s ease; display: flex; align-items: center; gap: 8px;
             }
+            .toast.success { border-left-color: var(--green); }
+            .toast.error { border-left-color: var(--red); }
+            @keyframes slideIn { from { transform: translateX(30px); opacity:0; } to { transform: translateX(0); opacity:1; } }
+
+            .pagination { display: flex; justify-content: flex-end; gap: 0.4rem; margin-top: 1rem; }
+            .pagination button {
+                background: rgba(255,255,255,0.04); border: 1px solid var(--border); color: var(--text-dim);
+                padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 0.78rem;
+            }
+            .pagination button.active { background: var(--gold); color: #0a0a12; border-color: var(--gold); font-weight: 700; }
+            .pagination button:hover:not(.active) { border-color: var(--gold); color: var(--gold-bright); }
+
             @media (max-width: 768px) {
                 body { padding: 1rem; }
-                th, td { font-size: 0.7rem; padding: 8px 6px; }
-                .tab-btn { padding: 0.5rem 1rem; font-size: 0.8rem; }
+                th, td { font-size: 0.7rem; padding: 9px 7px; }
+                .tab-btn { padding: 0.5rem 0.9rem; font-size: 0.8rem; }
+                .drawer { width: 100%; }
             }
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
-                <h1>🍫 ChocoHub Admin Panel</h1>
-                <a href="/admin/logout" class="logout-btn">🚪 Logout</a>
+                <div class="brand">
+                    <div class="brand-icon">🍫</div>
+                    <div class="brand-text">
+                        <h1>ChocoHub Admin</h1>
+                        <span>Control center</span>
+                    </div>
+                </div>
+                <div class="header-right">
+                    <div class="session-pill"><span class="dot"></span> ${req.session.adminUsername}</div>
+                    <a href="/admin/logout" class="logout-btn">Logout</a>
+                </div>
             </div>
-            
+
             <div class="tabs">
                 <button class="tab-btn active" data-tab="swaps">🔄 Swaps</button>
                 <button class="tab-btn" data-tab="users">👥 Users</button>
                 <button class="tab-btn" data-tab="miners">⛏️ Miners</button>
+                <button class="tab-btn" data-tab="nodes">🌐 Nodes</button>
                 <button class="tab-btn" data-tab="stats">📊 Statistics</button>
             </div>
-            
+
             <div id="swaps-tab" class="tab-content active">
                 <div class="card">
-                    <h2>⏳ Pending Swaps <span class="refresh" onclick="loadAllSwaps()">🔄 Refresh</span></h2>
+                    <div class="card-head">
+                        <h2>⏳ Pending Swaps</h2>
+                        <span class="refresh-btn" onclick="loadAllSwaps(this)">🔄 Refresh</span>
+                    </div>
                     <div style="overflow-x: auto;">
                         <table id="pendingTable">
-                            <thead>
-                                <tr><th>ID</th><th>From</th><th>Amount (CC)</th><th>Type</th><th>Receiver</th><th>Details</th><th>Status</th><th>Actions</th></tr></thead>
-                            <tbody id="pendingBody"><tr class="empty-row"><td colspan="8">Loading...</td></tr></tbody>
+                            <thead><tr><th>ID</th><th>From</th><th>Amount</th><th>Type</th><th>Receiver</th><th>Details</th><th>Status</th><th>Actions</th></tr></thead>
+                            <tbody id="pendingBody"><tr class="empty-row"><td colspan="8">Loading…</td></tr></tbody>
                         </table>
                     </div>
                 </div>
                 <div class="card">
-                    <h2>✅ Completed Swaps</h2>
+                    <div class="card-head"><h2>✅ Completed Swaps</h2></div>
                     <div style="overflow-x: auto;">
                         <table id="completedTable">
-                            <thead>
-                                <tr><th>ID</th><th>From</th><th>Amount (CC)</th><th>Type</th><th>Receiver</th><th>XNO TxID</th><th>Status</th><th>Completed At</th></tr>
-                            </thead>
-                            <tbody id="completedBody"><tr class="empty-row"><td colspan="8">Loading...</td></tr></tbody>
+                            <thead><tr><th>ID</th><th>From</th><th>Amount</th><th>Type</th><th>Receiver</th><th>XNO TxID</th><th>Status</th><th>Completed At</th></tr></thead>
+                            <tbody id="completedBody"><tr class="empty-row"><td colspan="8">Loading…</td></tr></tbody>
                         </table>
                     </div>
+                    <div class="pagination" id="completedPagination"></div>
                 </div>
             </div>
-            
+
             <div id="users-tab" class="tab-content">
                 <div class="card">
-                    <h2>👥 User Management</h2>
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
-                        <div class="search-box">
-                            <input type="text" id="userSearch" placeholder="Search username...">
-                            <button onclick="searchUsers()">🔍 Search</button>
+                    <div class="card-head">
+                        <h2>👥 User Management</h2>
+                        <div style="display:flex;gap:0.6rem;">
+                            <button class="btn btn-ghost" onclick="exportUsers()">⬇️ Export CSV</button>
+                            <button class="btn btn-primary" onclick="openAddUserModal()">➕ Add User</button>
                         </div>
-                        <button class="btn-add-user" onclick="openAddUserModal()">➕ Add User</button>
+                    </div>
+                    <div class="search-box" style="margin-bottom:1rem;">
+                        <input type="text" id="userSearch" placeholder="Search by username…" oninput="searchUsers()">
                     </div>
                     <div style="overflow-x: auto;">
                         <table id="usersTable">
-                            <thead><tr><th>Username</th><th>Balance (CC)</th><th>Banned</th><th>Actions</th></tr></thead>
-                            <tbody id="usersBody"><tr class="empty-row"><td colspan="4">Loading...</td></tr></tbody>
+                            <thead><tr><th>User</th><th>Balance</th><th>Status</th><th>Actions</th></tr></thead>
+                            <tbody id="usersBody"><tr class="empty-row"><td colspan="4">Loading…</td></tr></tbody>
                         </table>
                     </div>
+                    <div class="pagination" id="usersPagination"></div>
                 </div>
             </div>
-            
+
             <div id="stats-tab" class="tab-content">
                 <div class="card">
-                    <h2>📊 System Statistics</h2>
-                    <div id="statsContent">Loading...</div>
+                    <div class="card-head"><h2>📊 System Statistics</h2></div>
+                    <div id="statsContent">Loading…</div>
                 </div>
             </div>
-            
+
             <div id="miners-tab" class="tab-content">
                 <div class="card">
-                    <h2>🚩 Flagged & Suspended Workers <span class="refresh" onclick="loadFlaggedWorkers()">🔄 Refresh</span></h2>
+                    <div class="card-head">
+                        <h2>🚩 Flagged & Suspended Workers</h2>
+                        <span class="refresh-btn" onclick="loadFlaggedWorkers(this)">🔄 Refresh</span>
+                    </div>
                     <div style="overflow-x: auto;">
                         <table id="flaggedTable">
                             <thead><tr><th>Worker</th><th>Tier</th><th>Warnings (24h)</th><th>Status</th><th>Suspended At</th><th>Reason</th><th>Actions</th></tr></thead>
-                            <tbody id="flaggedBody"><tr class="empty-row"><td colspan="7">Loading...</td></tr></tbody>
+                            <tbody id="flaggedBody"><tr class="empty-row"><td colspan="7">Loading…</td></tr></tbody>
                         </table>
                     </div>
                 </div>
                 <div class="card">
-                    <h2>🔧 Manual Worker Control</h2>
+                    <div class="card-head"><h2>🔧 Manual Worker Control</h2></div>
                     <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end;">
                         <div>
-                            <label style="display:block;margin-bottom:4px;font-size:0.8rem;color:#aaa;">Worker name</label>
-                            <input type="text" id="manualWorkerName" placeholder="worker_name" style="padding:10px;background:#2a2a36;border:1px solid #3a3a46;border-radius:12px;color:white;width:200px;">
+                            <label style="display:block;margin-bottom:4px;font-size:0.78rem;color:var(--text-dim);">Worker name</label>
+                            <input type="text" id="manualWorkerName" placeholder="worker_name" style="padding:10px 14px;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:12px;color:white;width:200px;">
                         </div>
                         <div>
-                            <label style="display:block;margin-bottom:4px;font-size:0.8rem;color:#aaa;">Reason</label>
-                            <input type="text" id="manualReason" placeholder="Reason for suspension" style="padding:10px;background:#2a2a36;border:1px solid #3a3a46;border-radius:12px;color:white;width:250px;">
+                            <label style="display:block;margin-bottom:4px;font-size:0.78rem;color:var(--text-dim);">Reason</label>
+                            <input type="text" id="manualReason" placeholder="Reason for suspension" style="padding:10px 14px;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:12px;color:white;width:250px;">
                         </div>
-                        <button onclick="manualSuspend()" style="background:#ff4444;color:white;border:none;padding:10px 20px;border-radius:30px;cursor:pointer;font-weight:bold;">🚫 Suspend</button>
-                        <button onclick="manualClear()" style="background:#40c057;color:white;border:none;padding:10px 20px;border-radius:30px;cursor:pointer;font-weight:bold;">✅ Clear</button>
+                        <button onclick="manualSuspend()" class="btn btn-delete" style="padding:10px 20px;">🚫 Suspend</button>
+                        <button onclick="manualClear()" class="btn btn-success" style="padding:10px 20px;">✅ Clear</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="nodes-tab" class="tab-content">
+                <div class="card">
+                    <div class="card-head">
+                        <h2>🌐 Mining Nodes</h2>
+                        <span class="refresh-btn" onclick="loadNodes(this)">🔄 Refresh</span>
+                    </div>
+                    <div style="overflow-x: auto;">
+                        <table id="nodesTable">
+                            <thead><tr><th>Name</th><th>URL</th><th>Miners</th><th>CPU</th><th>Ping</th><th>Blocks Relayed</th><th>Actions</th></tr></thead>
+                            <tbody id="nodesBody"><tr class="empty-row"><td colspan="7">Loading…</td></tr></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
         </div>
-        
+
         <!-- Edit Balance Modal -->
         <div id="editModal" class="modal">
             <div class="modal-content">
-                <h3>✏️ Edit User Balance</h3>
-                <p>Username: <strong id="editUsername"></strong></p>
-                <label>Current Balance: <span id="currentBalance"></span> CC</label>
-                <input type="number" id="editAmount" placeholder="Amount">
+                <h3>✏️ Edit Balance</h3>
+                <p style="font-size:0.85rem;color:var(--text-dim);">User: <strong id="editUsername" style="color:var(--cream);"></strong></p>
+                <div class="current-balance-tag">Current balance: <b id="currentBalance"></b> CC</div>
+                <label>Amount</label>
+                <input type="number" id="editAmount" placeholder="0.0000" step="any">
+                <div class="balance-actions">
+                    <button class="btn-add-bal" onclick="saveBalance('add')">➕ Add</button>
+                    <button class="btn-remove-bal" onclick="saveBalance('remove')">➖ Remove</button>
+                    <button class="btn-set-bal" onclick="saveBalance('set')">📝 Set</button>
+                </div>
                 <div class="modal-buttons">
-                    <button class="btn-save" onclick="saveBalance('add')">➕ Add</button>
-                    <button class="btn-save" onclick="saveBalance('set')">📝 Set</button>
-                    <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+                    <button class="btn btn-ghost" onclick="closeModal()" style="flex:1;">Cancel</button>
                 </div>
             </div>
         </div>
-        
+
         <!-- Add User Modal -->
         <div id="addUserModal" class="modal">
             <div class="modal-content">
@@ -765,34 +924,95 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                 <label>PIN (4-8 digits)</label>
                 <input type="password" id="newPin" placeholder="PIN" maxlength="8">
                 <div class="modal-buttons">
-                    <button class="btn-save" onclick="addUser()">➕ Create</button>
-                    <button class="btn-cancel" onclick="closeAddUserModal()">Cancel</button>
+                    <button class="btn btn-primary" onclick="addUser()">Create</button>
+                    <button class="btn btn-ghost" onclick="closeAddUserModal()">Cancel</button>
                 </div>
             </div>
         </div>
-        
+
         <!-- Fulfill XNO Modal -->
         <div id="fulfillXnoModal" class="modal">
             <div class="modal-content">
                 <h3>🟦 Complete XNO Swap</h3>
-                <p>Swap ID: <strong id="fulfillSwapId"></strong></p>
-                <p>Receiver: <strong id="fulfillReceiver"></strong></p>
-                <p>Amount XNO: <strong id="fulfillAmount"></strong></p>
-                <label>XNO Transaction Hash (optional):</label>
-                <input type="text" id="xnoTxid" placeholder="nano_tx_hash...">
+                <p style="font-size:0.85rem;color:var(--text-dim);">Swap ID: <strong id="fulfillSwapId" style="color:var(--cream);"></strong></p>
+                <p style="font-size:0.85rem;color:var(--text-dim);">Receiver: <strong id="fulfillReceiver" style="color:var(--cream);"></strong></p>
+                <p style="font-size:0.85rem;color:var(--text-dim);">Amount XNO: <strong id="fulfillAmount"></strong></p>
+                <label>XNO Transaction Hash (optional)</label>
+                <input type="text" id="xnoTxid" placeholder="nano_tx_hash…">
                 <div class="modal-buttons">
-                    <button class="btn-save" onclick="confirmCompleteWithXno()">✅ Complete</button>
-                    <button class="btn-cancel" onclick="closeXnoModal()">Cancel</button>
+                    <button class="btn btn-primary" onclick="confirmCompleteWithXno()">✅ Complete</button>
+                    <button class="btn btn-ghost" onclick="closeXnoModal()">Cancel</button>
                 </div>
             </div>
         </div>
+
+        <!-- Generic Confirm Modal -->
+        <div id="confirmModal" class="modal">
+            <div class="modal-content">
+                <h3 id="confirmTitle">⚠️ Are you sure?</h3>
+                <p id="confirmMessage" style="font-size:0.88rem;color:var(--text-dim);line-height:1.5;"></p>
+                <div class="modal-buttons">
+                    <button class="btn btn-delete" id="confirmYesBtn" style="flex:1;">Confirm</button>
+                    <button class="btn btn-ghost" onclick="closeConfirm()" style="flex:1;">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- User Detail Drawer -->
+        <div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+        <div class="drawer" id="userDrawer">
+            <div class="drawer-header">
+                <h3 id="drawerUsername" style="color:var(--cream);"></h3>
+                <button class="drawer-close" onclick="closeDrawer()">✕</button>
+            </div>
+            <div class="drawer-section">
+                <h4>Balance</h4>
+                <div class="current-balance-tag" id="drawerBalance">-</div>
+            </div>
+            <div class="drawer-section">
+                <h4>Staking</h4>
+                <div class="current-balance-tag" id="drawerStake">-</div>
+            </div>
+            <div class="drawer-section">
+                <h4>Recent Transactions</h4>
+                <div id="drawerTx">Loading…</div>
+            </div>
+        </div>
+
+        <div id="toastWrap"></div>
 
         <script>
             let allSwaps = [];
             let allUsers = [];
             let currentEditUser = null;
             let currentPendingSwap = null;
-            
+            let usersPage = 1, completedPage = 1;
+            const PAGE_SIZE = 12;
+
+            // ─── Toast + Confirm (replaces alert/confirm) ─────────────
+            function toast(message, type = 'info') {
+                const wrap = document.getElementById('toastWrap');
+                const el = document.createElement('div');
+                el.className = 'toast ' + type;
+                const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
+                el.innerHTML = '<span>' + icon + '</span><span>' + message + '</span>';
+                wrap.appendChild(el);
+                setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; setTimeout(() => el.remove(), 300); }, 3800);
+            }
+
+            function askConfirm(message, onYes, title) {
+                document.getElementById('confirmTitle').innerText = title || '⚠️ Are you sure?';
+                document.getElementById('confirmMessage').innerText = message;
+                const modal = document.getElementById('confirmModal');
+                modal.style.display = 'flex';
+                const yesBtn = document.getElementById('confirmYesBtn');
+                const newYes = yesBtn.cloneNode(true);
+                yesBtn.parentNode.replaceChild(newYes, yesBtn);
+                newYes.addEventListener('click', () => { modal.style.display = 'none'; onYes(); });
+            }
+            function closeConfirm() { document.getElementById('confirmModal').style.display = 'none'; }
+
+            // ─── Tabs ──────────────────────────────────────────────────
             document.querySelectorAll('.tab-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -802,9 +1022,16 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     if (btn.dataset.tab === 'users') loadUsers();
                     if (btn.dataset.tab === 'stats') loadStats();
                     if (btn.dataset.tab === 'miners') loadFlaggedWorkers();
+                    if (btn.dataset.tab === 'nodes') loadNodes();
                 });
             });
-            
+
+            function spinBtn(btn) {
+                if (!btn) return;
+                btn.classList.add('spin');
+                setTimeout(() => btn.classList.remove('spin'), 600);
+            }
+
             function getSwapTypeBadge(type) {
                 const badges = {
                     'duco': '<span class="badge-duco">💰 DUCO</span>',
@@ -815,47 +1042,35 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                 };
                 return badges[type] || '<span class="badge-cc">🍫 CC</span>';
             }
-            
+
             function formatSwapDetails(swap) {
-                if (swap.swap_type === 'xno_to_cc') {
-                    return 'XNO: ' + (swap.amount_xno?.toFixed(8) || '?') + ' XNO → ' + swap.amount_cc + ' CC';
-                }
-                if (swap.swap_type === 'cc_to_xno') {
-                    return swap.amount_cc + ' CC → ' + (swap.amount_cc * 0.000002).toFixed(8) + ' XNO';
-                }
-                if (swap.swap_type === 'duco') {
-                    return swap.amount_cc + ' CC → ' + (swap.amount_cc/10) + ' DUCO';
-                }
-                if (swap.swap_type === 'duco_to_cc') {
-                    return (swap.amount_duco || swap.amount_cc/10) + ' DUCO → ' + swap.amount_cc + ' CC';
-                }
+                if (swap.swap_type === 'xno_to_cc') return 'XNO: ' + (swap.amount_xno?.toFixed(8) || '?') + ' XNO → ' + swap.amount_cc + ' CC';
+                if (swap.swap_type === 'cc_to_xno') return swap.amount_cc + ' CC → ' + (swap.amount_cc * 0.000002).toFixed(8) + ' XNO';
+                if (swap.swap_type === 'duco') return swap.amount_cc + ' CC → ' + (swap.amount_cc/10) + ' DUCO';
+                if (swap.swap_type === 'duco_to_cc') return (swap.amount_duco || swap.amount_cc/10) + ' DUCO → ' + swap.amount_cc + ' CC';
                 return swap.amount_cc + ' CC';
             }
-            
-            async function loadAllSwaps() {
+
+            async function loadAllSwaps(btn) {
+                spinBtn(btn);
                 try {
                     const resp = await fetch('/admin/api/all-swaps');
                     const data = await resp.json();
                     if (data.status === 'success' && Array.isArray(data.swaps)) {
                         allSwaps = data.swaps;
-                        const pending = allSwaps.filter(s => s.status === 'pending');
-                        const completed = allSwaps.filter(s => s.status === 'completed');
-                        renderPending(pending);
-                        renderCompleted(completed);
+                        renderPending(allSwaps.filter(s => s.status === 'pending'));
+                        renderCompleted(allSwaps.filter(s => s.status === 'completed'));
                     }
                 } catch(e) { console.error(e); }
             }
-            
+
             function renderPending(swaps) {
                 const tbody = document.getElementById('pendingBody');
-                if (swaps.length === 0) {
-                    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">✨ No pending swaps</td></tr>';
-                    return;
-                }
+                if (swaps.length === 0) { tbody.innerHTML = '<tr class="empty-row"><td colspan="8">✨ No pending swaps</td></tr>'; return; }
                 tbody.innerHTML = '';
                 for (const swap of swaps) {
                     const row = tbody.insertRow();
-                    row.insertCell(0).innerText = swap.id;
+                    row.insertCell(0).innerHTML = '<span class="mono">' + swap.id + '</span>';
                     row.insertCell(1).innerText = swap.from_user;
                     row.insertCell(2).innerText = swap.amount_cc;
                     row.insertCell(3).innerHTML = getSwapTypeBadge(swap.swap_type);
@@ -863,240 +1078,223 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     row.insertCell(5).innerHTML = '<small>' + formatSwapDetails(swap) + '</small>';
                     row.insertCell(6).innerHTML = '<span class="status-pending">pending</span>';
                     const actions = row.insertCell(7);
-                    
                     const completeBtn = document.createElement('button');
-                    completeBtn.innerText = '✅ Complete';
-                    completeBtn.className = 'btn-complete';
-                    completeBtn.onclick = () => {
-                        if (swap.swap_type === 'cc_to_xno') {
-                            openXnoModal(swap);
-                        } else {
-                            completeSwap(swap.id);
-                        }
-                    };
-                    
+                    completeBtn.innerText = '✅ Complete'; completeBtn.className = 'btn btn-complete';
+                    completeBtn.onclick = () => swap.swap_type === 'cc_to_xno' ? openXnoModal(swap) : completeSwap(swap.id);
                     const deleteBtn = document.createElement('button');
-                    deleteBtn.innerText = '🗑️ Delete';
-                    deleteBtn.className = 'btn-delete';
+                    deleteBtn.innerText = '🗑️'; deleteBtn.className = 'btn btn-delete';
                     deleteBtn.onclick = () => deleteSwap(swap.id);
-                    
-                    actions.appendChild(completeBtn);
-                    actions.appendChild(deleteBtn);
+                    actions.appendChild(completeBtn); actions.appendChild(deleteBtn);
                 }
             }
-            
+
             function renderCompleted(swaps) {
                 const tbody = document.getElementById('completedBody');
-                if (swaps.length === 0) {
-                    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">📭 No completed swaps yet</td></tr>';
-                    return;
-                }
+                const totalPages = Math.max(1, Math.ceil(swaps.length / PAGE_SIZE));
+                if (completedPage > totalPages) completedPage = totalPages;
+                if (swaps.length === 0) { tbody.innerHTML = '<tr class="empty-row"><td colspan="8">📭 No completed swaps yet</td></tr>'; document.getElementById('completedPagination').innerHTML = ''; return; }
+                const pageSwaps = swaps.slice((completedPage-1)*PAGE_SIZE, completedPage*PAGE_SIZE);
                 tbody.innerHTML = '';
-                for (const swap of swaps) {
+                for (const swap of pageSwaps) {
                     const row = tbody.insertRow();
-                    row.insertCell(0).innerText = swap.id;
+                    row.insertCell(0).innerHTML = '<span class="mono">' + swap.id + '</span>';
                     row.insertCell(1).innerText = swap.from_user;
                     row.insertCell(2).innerText = swap.amount_cc;
                     row.insertCell(3).innerHTML = getSwapTypeBadge(swap.swap_type);
                     row.insertCell(4).innerText = swap.receiver;
-                    let xnoDisplay = '-';
-                    if (swap.xno_txid) {
-                        xnoDisplay = '<span style="color:#2a6eff;font-size:0.7rem;">' + swap.xno_txid.substring(0, 20) + '...</span>';
-                    }
-                    row.insertCell(5).innerHTML = xnoDisplay;
+                    row.insertCell(5).innerHTML = swap.xno_txid ? '<span style="color:#5b9dff;font-size:0.7rem;" class="mono">' + swap.xno_txid.substring(0, 18) + '…</span>' : '-';
                     row.insertCell(6).innerHTML = '<span class="status-completed">completed</span>';
                     row.insertCell(7).innerText = swap.completed_at ? new Date(swap.completed_at).toLocaleString() : '-';
                 }
+                renderPagination('completedPagination', totalPages, completedPage, (p) => { completedPage = p; renderCompleted(swaps); });
             }
-            
+
+            function renderPagination(containerId, totalPages, current, onClick) {
+                const el = document.getElementById(containerId);
+                if (totalPages <= 1) { el.innerHTML = ''; return; }
+                el.innerHTML = '';
+                for (let i = 1; i <= totalPages; i++) {
+                    const b = document.createElement('button');
+                    b.innerText = i;
+                    if (i === current) b.classList.add('active');
+                    b.onclick = () => onClick(i);
+                    el.appendChild(b);
+                }
+            }
+
             function openXnoModal(swap) {
                 currentPendingSwap = swap;
                 document.getElementById('fulfillSwapId').innerText = swap.id;
                 document.getElementById('fulfillReceiver').innerText = swap.receiver;
-                const xnoAmount = (swap.amount_cc * 0.000002).toFixed(8);
-                document.getElementById('fulfillAmount').innerHTML = '<span style="color:#2a6eff">' + xnoAmount + ' XNO</span>';
+                document.getElementById('fulfillAmount').innerHTML = '<span style="color:#5b9dff">' + (swap.amount_cc * 0.000002).toFixed(8) + ' XNO</span>';
                 document.getElementById('xnoTxid').value = '';
                 document.getElementById('fulfillXnoModal').style.display = 'flex';
             }
-            
-            function closeXnoModal() {
-                document.getElementById('fulfillXnoModal').style.display = 'none';
-                currentPendingSwap = null;
-            }
-            
+            function closeXnoModal() { document.getElementById('fulfillXnoModal').style.display = 'none'; currentPendingSwap = null; }
             async function confirmCompleteWithXno() {
                 if (!currentPendingSwap) return;
-                const xnoTxid = document.getElementById('xnoTxid').value.trim();
-                await completeSwap(currentPendingSwap.id, xnoTxid);
+                await completeSwap(currentPendingSwap.id, document.getElementById('xnoTxid').value.trim());
                 closeXnoModal();
             }
-            
-            // ─── Users Management ─────────────────────────────────────
+
+            // ─── Users ─────────────────────────────────────────────────
             async function loadUsers() {
                 try {
                     const resp = await fetch('/admin/api/all-users');
                     const data = await resp.json();
-                    if (data.status === 'success') {
-                        allUsers = data.users;
-                        renderUsers(allUsers);
-                    }
+                    if (data.status === 'success') { allUsers = data.users; renderUsers(allUsers); }
                 } catch(e) { console.error(e); }
             }
-            
+
+            function initials(name) { return name.substring(0, 2).toUpperCase(); }
+
             function renderUsers(users) {
                 const tbody = document.getElementById('usersBody');
-                if (users.length === 0) {
-                    tbody.innerHTML = '<tr class="empty-row"><td colspan="4">👻 No users found</td></tr>';
-                    return;
-                }
+                const totalPages = Math.max(1, Math.ceil(users.length / PAGE_SIZE));
+                if (usersPage > totalPages) usersPage = totalPages;
+                if (users.length === 0) { tbody.innerHTML = '<tr class="empty-row"><td colspan="4">👻 No users found</td></tr>'; document.getElementById('usersPagination').innerHTML=''; return; }
+                const pageUsers = users.slice((usersPage-1)*PAGE_SIZE, usersPage*PAGE_SIZE);
                 tbody.innerHTML = '';
-                for (const user of users) {
+                for (const user of pageUsers) {
                     const row = tbody.insertRow();
-                    row.insertCell(0).innerText = user.username;
-                    row.insertCell(1).innerHTML = '<span style="color:#f58a00">' + user.balance.toFixed(4) + ' CC</span>';
-                    row.insertCell(2).innerHTML = user.banned ? '<span style="color:#ff4444;">🚫 Banned</span>' : '<span style="color:#40c057;">✅ Active</span>';
+                    const userCell = row.insertCell(0);
+                    userCell.innerHTML = '<div class="user-cell"><span class="avatar">' + initials(user.username) + '</span>' + user.username + (window.isAdmin(user.username) ? ' <small style="color:var(--gold-bright);margin-left:6px;">★ admin</small>' : '') + '</div>';
+                    userCell.style.cursor = 'pointer';
+                    userCell.onclick = () => openDrawer(user.username);
+                    row.insertCell(1).innerHTML = '<span style="color:var(--gold-bright)" class="mono">' + user.balance.toFixed(4) + ' CC</span>';
+                    row.insertCell(2).innerHTML = user.banned ? '<span style="color:var(--red);">🚫 Banned</span>' : '<span style="color:var(--green);">✅ Active</span>';
                     const actions = row.insertCell(3);
-                    
-                    // Gear icon with dropdown
-                    const dropdownDiv = document.createElement('div');
-                    dropdownDiv.className = 'dropdown';
-                    const gearSpan = document.createElement('span');
-                    gearSpan.className = 'gear-icon';
-                    gearSpan.innerHTML = '⚙️';
-                    gearSpan.onclick = function(e) {
-                        e.stopPropagation();
-                        const parent = this.parentElement;
-                        parent.classList.toggle('show');
-                    };
+
+                    const dropdownDiv = document.createElement('div'); dropdownDiv.className = 'dropdown';
+                    const gearSpan = document.createElement('span'); gearSpan.className = 'gear-icon'; gearSpan.innerHTML = '⚙️';
+                    gearSpan.onclick = function(e) { e.stopPropagation(); this.parentElement.classList.toggle('show'); };
                     dropdownDiv.appendChild(gearSpan);
-                    
-                    const dropdownContent = document.createElement('div');
-                    dropdownContent.className = 'dropdown-content';
-                    
-                    // Edit Balance
+
+                    const dropdownContent = document.createElement('div'); dropdownContent.className = 'dropdown-content';
+
+                    const viewLink = document.createElement('a');
+                    viewLink.innerHTML = '👁️ View Details';
+                    viewLink.onclick = (e) => { e.stopPropagation(); openDrawer(user.username); this_close(e); };
+                    dropdownContent.appendChild(viewLink);
+
                     const editLink = document.createElement('a');
-                    editLink.textContent = '✏️ Edit Balance';
-                    editLink.onclick = function(e) {
-                        e.stopPropagation();
-                        openEditModal(user.username, user.balance);
-                        this.closest('.dropdown').classList.remove('show');
-                    };
+                    editLink.innerHTML = '✏️ Edit Balance';
+                    editLink.onclick = (e) => { e.stopPropagation(); openEditModal(user.username, user.balance); this_close(e); };
                     dropdownContent.appendChild(editLink);
-                    
-                    // Only show ban/unban and delete for non-admin users
-                    const isAdminUser = window.isAdmin ? window.isAdmin(user.username) : false;
+
+                    const isAdminUser = window.isAdmin(user.username);
                     if (!isAdminUser) {
+                        const divider = document.createElement('div'); divider.className = 'divider';
+                        dropdownContent.appendChild(divider);
+
                         const banLink = document.createElement('a');
                         const isBanned = user.banned;
-                        banLink.textContent = isBanned ? '🔓 Unban' : '🚫 Ban';
+                        banLink.innerHTML = isBanned ? '🔓 Unban' : '🚫 Ban';
                         banLink.className = isBanned ? 'success' : 'danger';
-                        banLink.onclick = function(e) {
-                            e.stopPropagation();
-                            toggleBan(user.username, !isBanned);
-                            this.closest('.dropdown').classList.remove('show');
-                        };
+                        banLink.onclick = (e) => { e.stopPropagation(); toggleBan(user.username, !isBanned); this_close(e); };
                         dropdownContent.appendChild(banLink);
-                        
+
                         const deleteLink = document.createElement('a');
-                        deleteLink.textContent = '🗑️ Delete';
+                        deleteLink.innerHTML = '🗑️ Delete';
                         deleteLink.className = 'danger';
-                        deleteLink.onclick = function(e) {
-                            e.stopPropagation();
-                            deleteUser(user.username);
-                            this.closest('.dropdown').classList.remove('show');
-                        };
+                        deleteLink.onclick = (e) => { e.stopPropagation(); deleteUser(user.username); this_close(e); };
                         dropdownContent.appendChild(deleteLink);
                     }
-                    
+
+                    function this_close(e) { e.target.closest('.dropdown').classList.remove('show'); }
+
                     dropdownDiv.appendChild(dropdownContent);
                     actions.appendChild(dropdownDiv);
                 }
-                
-                // Close dropdown when clicking outside
+                renderPagination('usersPagination', totalPages, usersPage, (p) => { usersPage = p; renderUsers(users); });
+
                 document.addEventListener('click', function() {
                     document.querySelectorAll('.dropdown.show').forEach(d => d.classList.remove('show'));
-                });
+                }, { once: true });
             }
-            
-            // Helper to check admin (from server)
+
             window.isAdmin = function(username) {
                 const adminUsers = ['chocoetom', 'Nam2010'];
                 return adminUsers.includes(username);
             };
-            
+
             function searchUsers() {
-                const searchTerm = document.getElementById('userSearch').value.toLowerCase();
-                const filtered = allUsers.filter(u => u.username.toLowerCase().includes(searchTerm));
-                renderUsers(filtered);
+                const term = document.getElementById('userSearch').value.toLowerCase();
+                usersPage = 1;
+                renderUsers(allUsers.filter(u => u.username.toLowerCase().includes(term)));
             }
-            
-            // ─── Add User ─────────────────────────────────────────────
+
+            function exportUsers() { window.open('/admin/api/users/export/csv', '_blank'); }
+
+            // ─── User detail drawer ───────────────────────────────────
+            async function openDrawer(username) {
+                document.getElementById('drawerUsername').innerText = username;
+                document.getElementById('drawerBalance').innerHTML = 'Loading…';
+                document.getElementById('drawerStake').innerHTML = 'Loading…';
+                document.getElementById('drawerTx').innerHTML = 'Loading…';
+                document.getElementById('userDrawer').classList.add('open');
+                document.getElementById('drawerOverlay').classList.add('open');
+                try {
+                    const resp = await fetch('/admin/api/users/' + encodeURIComponent(username) + '/detail');
+                    const data = await resp.json();
+                    if (data.status !== 'success') { toast(data.message || 'Failed to load user', 'error'); return; }
+                    document.getElementById('drawerBalance').innerHTML = '<b>' + data.user.balance.toFixed(4) + '</b> CC &nbsp; ' + (data.user.banned ? '<span style="color:var(--red);">🚫 Banned</span>' : '<span style="color:var(--green);">✅ Active</span>');
+                    document.getElementById('drawerStake').innerHTML = '<b>' + data.stake.staked.toFixed(4) + '</b> CC staked · <b>' + data.stake.pending_reward.toFixed(4) + '</b> CC pending reward';
+                    const txHtml = data.transactions && data.transactions.length
+                        ? data.transactions.map(t => '<div class="tx-item"><span>' + (t.type || t.description || 'tx') + '</span><span class="mono">' + (t.amount !== undefined ? t.amount : '') + '</span></div>').join('')
+                        : '<div style="color:var(--text-faint);font-size:0.85rem;">No transactions found</div>';
+                    document.getElementById('drawerTx').innerHTML = txHtml;
+                } catch(e) { toast(e.message, 'error'); }
+            }
+            function closeDrawer() {
+                document.getElementById('userDrawer').classList.remove('open');
+                document.getElementById('drawerOverlay').classList.remove('open');
+            }
+
+            // ─── Add / Delete / Ban ───────────────────────────────────
             function openAddUserModal() {
                 document.getElementById('newUsername').value = '';
                 document.getElementById('newPin').value = '';
                 document.getElementById('addUserModal').style.display = 'flex';
             }
-            
-            function closeAddUserModal() {
-                document.getElementById('addUserModal').style.display = 'none';
-            }
-            
+            function closeAddUserModal() { document.getElementById('addUserModal').style.display = 'none'; }
+
             async function addUser() {
                 const username = document.getElementById('newUsername').value.trim();
                 const pin = document.getElementById('newPin').value.trim();
-                if (username.length < 3) return alert('Username must be at least 3 characters');
-                if (pin.length < 4) return alert('PIN must be at least 4 characters');
+                if (username.length < 3) return toast('Username must be at least 3 characters', 'error');
+                if (pin.length < 4) return toast('PIN must be at least 4 characters', 'error');
                 try {
-                    const resp = await fetch('/admin/api/users', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ username, pin })
-                    });
+                    const resp = await fetch('/admin/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, pin }) });
                     const data = await resp.json();
-                    if (data.status === 'success') {
-                        alert('User created successfully');
-                        closeAddUserModal();
-                        loadUsers();
-                    } else {
-                        alert('Error: ' + data.message);
-                    }
-                } catch(e) { alert(e.message); }
+                    if (data.status === 'success') { toast('User created successfully', 'success'); closeAddUserModal(); loadUsers(); }
+                    else toast(data.message, 'error');
+                } catch(e) { toast(e.message, 'error'); }
             }
-            
-            // ─── Delete User ──────────────────────────────────────────
-            async function deleteUser(username) {
-                if (!confirm('Delete user ' + username + '? This cannot be undone!')) return;
-                try {
-                    const resp = await fetch('/admin/api/users/' + encodeURIComponent(username), { method: 'DELETE' });
-                    const data = await resp.json();
-                    if (data.status === 'success') {
-                        alert('User deleted');
-                        loadUsers();
-                    } else {
-                        alert('Error: ' + data.message);
-                    }
-                } catch(e) { alert(e.message); }
+
+            function deleteUser(username) {
+                askConfirm('Delete user "' + username + '"? This cannot be undone.', async () => {
+                    try {
+                        const resp = await fetch('/admin/api/users/' + encodeURIComponent(username), { method: 'DELETE' });
+                        const data = await resp.json();
+                        if (data.status === 'success') { toast('User deleted', 'success'); loadUsers(); }
+                        else toast(data.message, 'error');
+                    } catch(e) { toast(e.message, 'error'); }
+                }, '🗑️ Delete user?');
             }
-            
-            // ─── Toggle Ban ───────────────────────────────────────────
-            async function toggleBan(username, banned) {
-                try {
-                    const resp = await fetch('/admin/api/users/' + encodeURIComponent(username) + '/ban', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ banned })
-                    });
-                    const data = await resp.json();
-                    if (data.status === 'success') {
-                        alert(data.message);
-                        loadUsers();
-                    } else {
-                        alert('Error: ' + data.message);
-                    }
-                } catch(e) { alert(e.message); }
+
+            function toggleBan(username, banned) {
+                askConfirm((banned ? 'Ban' : 'Unban') + ' user "' + username + '"?', async () => {
+                    try {
+                        const resp = await fetch('/admin/api/users/' + encodeURIComponent(username) + '/ban', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ banned }) });
+                        const data = await resp.json();
+                        if (data.status === 'success') { toast(data.message, 'success'); loadUsers(); }
+                        else toast(data.message, 'error');
+                    } catch(e) { toast(e.message, 'error'); }
+                }, banned ? '🚫 Ban user?' : '🔓 Unban user?');
             }
-            
-            // ─── Edit Balance ─────────────────────────────────────────
+
+            // ─── Edit Balance (add / remove / set) ────────────────────
             function openEditModal(username, currentBalance) {
                 currentEditUser = username;
                 document.getElementById('editUsername').innerText = username;
@@ -1104,72 +1302,46 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                 document.getElementById('editAmount').value = '';
                 document.getElementById('editModal').style.display = 'flex';
             }
-            
-            function closeModal() {
-                document.getElementById('editModal').style.display = 'none';
-                currentEditUser = null;
-            }
-            
+            function closeModal() { document.getElementById('editModal').style.display = 'none'; currentEditUser = null; }
+
             async function saveBalance(action) {
                 const amount = parseFloat(document.getElementById('editAmount').value);
-                if (isNaN(amount) || amount < 0) {
-                    alert('Please enter a valid amount');
-                    return;
-                }
+                if (isNaN(amount) || amount < 0) return toast('Please enter a valid amount', 'error');
                 try {
-                    const resp = await fetch('/admin/api/update-balance', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ username: currentEditUser, amount, action })
-                    });
+                    const resp = await fetch('/admin/api/update-balance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: currentEditUser, amount, action }) });
                     const data = await resp.json();
                     if (data.status === 'success') {
-                        alert('Balance updated! New balance: ' + data.new_balance.toFixed(4) + ' CC');
-                        closeModal();
-                        loadUsers();
-                    } else {
-                        alert('Error: ' + data.message);
-                    }
-                } catch(e) { alert(e.message); }
+                        toast('Balance updated → ' + data.new_balance.toFixed(4) + ' CC', 'success');
+                        closeModal(); loadUsers();
+                    } else toast(data.message, 'error');
+                } catch(e) { toast(e.message, 'error'); }
             }
-            
-            // ─── Swap Actions ────────────────────────────────────────
-            async function completeSwap(id, xnoTxid = null) {
-                if (!confirm('Mark this swap as completed?')) return;
-                try {
-                    const body = xnoTxid ? { request_id: id, xno_txid: xnoTxid } : { request_id: id };
-                    const resp = await fetch('/admin/api/fulfill', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(body)
-                    });
-                    const data = await resp.json();
-                    if (data.status === 'success') {
-                        alert('✅ Swap completed!' + (xnoTxid ? ' XNO txid saved.' : ''));
-                        loadAllSwaps();
-                        loadStats();
-                    } else {
-                        alert('❌ Error: ' + (data.message || 'Unknown error'));
-                    }
-                } catch(e) { alert(e.message); }
+
+            // ─── Swap Actions ──────────────────────────────────────────
+            function completeSwap(id, xnoTxid = null) {
+                askConfirm('Mark swap #' + id + ' as completed?', async () => {
+                    try {
+                        const body = xnoTxid ? { request_id: id, xno_txid: xnoTxid } : { request_id: id };
+                        const resp = await fetch('/admin/api/fulfill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                        const data = await resp.json();
+                        if (data.status === 'success') { toast('Swap completed' + (xnoTxid ? ' — XNO txid saved' : ''), 'success'); loadAllSwaps(); loadStats(); }
+                        else toast(data.message || 'Unknown error', 'error');
+                    } catch(e) { toast(e.message, 'error'); }
+                }, '✅ Complete swap?');
             }
-            
-            async function deleteSwap(id) {
-                if (!confirm('⚠️ Delete this swap request?')) return;
-                try {
-                    const resp = await fetch('/admin/api/delete/' + id, { method: 'DELETE' });
-                    const data = await resp.json();
-                    if (data.status === 'success') {
-                        alert('🗑️ Swap deleted.');
-                        loadAllSwaps();
-                        loadStats();
-                    } else {
-                        alert('❌ Error: ' + (data.message || 'Unknown error'));
-                    }
-                } catch(e) { alert(e.message); }
+
+            function deleteSwap(id) {
+                askConfirm('Delete swap request #' + id + '?', async () => {
+                    try {
+                        const resp = await fetch('/admin/api/delete/' + id, { method: 'DELETE' });
+                        const data = await resp.json();
+                        if (data.status === 'success') { toast('Swap deleted', 'success'); loadAllSwaps(); loadStats(); }
+                        else toast(data.message || 'Unknown error', 'error');
+                    } catch(e) { toast(e.message, 'error'); }
+                }, '🗑️ Delete swap?');
             }
-            
-            // ─── Statistics ──────────────────────────────────────────
+
+            // ─── Statistics ────────────────────────────────────────────
             async function loadStats() {
                 try {
                     const resp = await fetch('/admin/api/all-swaps');
@@ -1182,58 +1354,54 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                         const completedSwaps = data.swaps.filter(s => s.status === 'completed').length;
                         const xnoSwaps = data.swaps.filter(s => s.swap_type === 'xno_to_cc' || s.swap_type === 'cc_to_xno').length;
                         const totalUsers = usersData.users.length;
+                        const bannedUsers = usersData.users.filter(u => u.banned).length;
                         const totalBalance = usersData.users.reduce((sum, u) => sum + u.balance, 0);
-                        
-                        document.getElementById('statsContent').innerHTML = 
+                        const avgBalance = totalUsers > 0 ? totalBalance / totalUsers : 0;
+                        const topHolder = usersData.users.slice().sort((a,b) => b.balance - a.balance)[0];
+
+                        document.getElementById('statsContent').innerHTML =
                             '<div class="stats-grid">' +
-                            '<div class="stat-card">📊 Total Swaps<br><strong>' + totalSwaps + '</strong></div>' +
-                            '<div class="stat-card">⏳ Pending Swaps<br><strong>' + pendingSwaps + '</strong></div>' +
-                            '<div class="stat-card">✅ Completed Swaps<br><strong>' + completedSwaps + '</strong></div>' +
-                            '<div class="stat-card">🟦 XNO Swaps<br><strong>' + xnoSwaps + '</strong></div>' +
-                            '<div class="stat-card">👥 Total Users<br><strong>' + totalUsers + '</strong></div>' +
-                            '<div class="stat-card">💰 Total CC Supply<br><strong>' + totalBalance.toFixed(4) + ' CC</strong></div>' +
+                            statCard('📊', 'Total Swaps', totalSwaps) +
+                            statCard('⏳', 'Pending Swaps', pendingSwaps) +
+                            statCard('✅', 'Completed Swaps', completedSwaps) +
+                            statCard('🟦', 'XNO Swaps', xnoSwaps) +
+                            statCard('👥', 'Total Users', totalUsers) +
+                            statCard('🚫', 'Banned Users', bannedUsers) +
+                            statCard('💰', 'Total CC Supply', totalBalance.toFixed(4) + ' CC') +
+                            statCard('📈', 'Average Balance', avgBalance.toFixed(4) + ' CC') +
+                            statCard('👑', 'Top Holder', topHolder ? topHolder.username + ' (' + topHolder.balance.toFixed(2) + ' CC)' : '-') +
                             '</div>';
                     }
                 } catch(e) { console.error(e); }
             }
-            
-            // ─── Flagged Workers ─────────────────────────────────────
-            async function loadFlaggedWorkers() {
+            function statCard(icon, label, value) {
+                return '<div class="stat-card"><div class="stat-label">' + icon + ' ' + label + '</div><strong>' + value + '</strong></div>';
+            }
+
+            // ─── Flagged Workers ───────────────────────────────────────
+            async function loadFlaggedWorkers(btn) {
+                spinBtn(btn);
                 try {
                     const resp = await fetch('/admin/api/flagged-workers');
                     const data = await resp.json();
                     const tbody = document.getElementById('flaggedBody');
-                    if (!data.workers || data.workers.length === 0) {
-                        tbody.innerHTML = '<tr class="empty-row"><td colspan="7">✅ No flagged workers</td></tr>';
-                        return;
-                    }
+                    if (!data.workers || data.workers.length === 0) { tbody.innerHTML = '<tr class="empty-row"><td colspan="7">✅ No flagged workers</td></tr>'; return; }
                     tbody.innerHTML = '';
                     for (const w of data.workers) {
                         const row = tbody.insertRow();
-                        row.insertCell(0).innerHTML = '<code style="color:#f58a00">' + w.worker_name + '</code>';
-                        row.insertCell(1).innerHTML = '<span style="color:#aaa;font-size:0.8rem">' + (w.tier || 'cpu') + '</span>';
+                        row.insertCell(0).innerHTML = '<code style="color:var(--gold-bright)">' + w.worker_name + '</code>';
+                        row.insertCell(1).innerHTML = '<span style="color:var(--text-dim);font-size:0.8rem">' + (w.tier || 'cpu') + '</span>';
                         const warnCount = w.warning_count || 0;
-                        row.insertCell(2).innerHTML = warnCount >= 3
-                            ? '<span style="color:#ff4444;font-weight:bold">' + warnCount + ' ⚠️</span>'
-                            : '<span style="color:#ffbf00">' + warnCount + '</span>';
-                        row.insertCell(3).innerHTML = w.suspended
-                            ? '<span class="status-pending">🚫 Suspended</span>'
-                            : '<span class="status-completed">⚠️ Warned</span>';
-                        row.insertCell(4).innerText = w.suspended_at
-                            ? new Date(w.suspended_at * 1000).toLocaleString()
-                            : '-';
-                        row.insertCell(5).innerHTML = '<small style="color:#aaa">' + (w.suspension_reason || '-') + '</small>';
+                        row.insertCell(2).innerHTML = warnCount >= 3 ? '<span style="color:var(--red);font-weight:bold">' + warnCount + ' ⚠️</span>' : '<span style="color:var(--gold-bright)">' + warnCount + '</span>';
+                        row.insertCell(3).innerHTML = w.suspended ? '<span class="status-pending">🚫 Suspended</span>' : '<span class="status-completed">⚠️ Warned</span>';
+                        row.insertCell(4).innerText = w.suspended_at ? new Date(w.suspended_at * 1000).toLocaleString() : '-';
+                        row.insertCell(5).innerHTML = '<small style="color:var(--text-dim)">' + (w.suspension_reason || '-') + '</small>';
                         const actions = row.insertCell(6);
-                        const clearBtn = document.createElement('button');
-                        clearBtn.className = 'btn-complete';
-                        clearBtn.textContent = '✅ Clear';
+                        const clearBtn = document.createElement('button'); clearBtn.className = 'btn btn-complete'; clearBtn.textContent = '✅ Clear';
                         clearBtn.onclick = () => clearWorkerSuspension(w.worker_name);
                         actions.appendChild(clearBtn);
                         if (!w.suspended) {
-                            const suspBtn = document.createElement('button');
-                            suspBtn.className = 'btn-delete';
-                            suspBtn.textContent = '🚫 Suspend';
-                            suspBtn.style.marginLeft = '6px';
+                            const suspBtn = document.createElement('button'); suspBtn.className = 'btn btn-delete'; suspBtn.textContent = '🚫 Suspend'; suspBtn.style.marginLeft = '6px';
                             suspBtn.onclick = () => { document.getElementById('manualWorkerName').value = w.worker_name; };
                             actions.appendChild(suspBtn);
                         }
@@ -1241,47 +1409,78 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                 } catch(e) { console.error(e); }
             }
 
-            async function clearWorkerSuspension(workerName) {
-                if (!confirm('Clear all warnings and suspension for ' + workerName + '?')) return;
-                try {
-                    const resp = await fetch('/admin/api/workers/' + encodeURIComponent(workerName) + '/clear', { method: 'POST' });
-                    const data = await resp.json();
-                    if (data.status === 'success') { alert('✅ ' + data.message); loadFlaggedWorkers(); }
-                    else alert('Error: ' + data.message);
-                } catch(e) { alert(e.message); }
+            function clearWorkerSuspension(workerName) {
+                askConfirm('Clear all warnings and suspension for "' + workerName + '"?', async () => {
+                    try {
+                        const resp = await fetch('/admin/api/workers/' + encodeURIComponent(workerName) + '/clear', { method: 'POST' });
+                        const data = await resp.json();
+                        if (data.status === 'success') { toast(data.message, 'success'); loadFlaggedWorkers(); }
+                        else toast(data.message, 'error');
+                    } catch(e) { toast(e.message, 'error'); }
+                }, '✅ Clear suspension?');
             }
 
-            async function manualSuspend() {
+            function manualSuspend() {
                 const workerName = document.getElementById('manualWorkerName').value.trim();
                 const reason = document.getElementById('manualReason').value.trim();
-                if (!workerName) return alert('Enter a worker name');
-                if (!confirm('Suspend worker ' + workerName + '?')) return;
-                try {
-                    const resp = await fetch('/admin/api/workers/' + encodeURIComponent(workerName) + '/suspend', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ reason: reason || 'Manual suspension by admin' })
-                    });
-                    const data = await resp.json();
-                    if (data.status === 'success') { alert('🚫 ' + data.message); loadFlaggedWorkers(); }
-                    else alert('Error: ' + data.message);
-                } catch(e) { alert(e.message); }
+                if (!workerName) return toast('Enter a worker name', 'error');
+                askConfirm('Suspend worker "' + workerName + '"?', async () => {
+                    try {
+                        const resp = await fetch('/admin/api/workers/' + encodeURIComponent(workerName) + '/suspend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: reason || 'Manual suspension by admin' }) });
+                        const data = await resp.json();
+                        if (data.status === 'success') { toast(data.message, 'success'); loadFlaggedWorkers(); }
+                        else toast(data.message, 'error');
+                    } catch(e) { toast(e.message, 'error'); }
+                }, '🚫 Suspend worker?');
             }
 
-            async function manualClear() {
+            function manualClear() {
                 const workerName = document.getElementById('manualWorkerName').value.trim();
-                if (!workerName) return alert('Enter a worker name');
+                if (!workerName) return toast('Enter a worker name', 'error');
                 clearWorkerSuspension(workerName);
             }
-            
+
+            // ─── Mining Nodes ──────────────────────────────────────────
+            async function loadNodes(btn) {
+                spinBtn(btn);
+                try {
+                    const resp = await fetch('/api/nodes');
+                    const data = await resp.json();
+                    const tbody = document.getElementById('nodesBody');
+                    if (!data.nodes || data.nodes.length === 0) { tbody.innerHTML = '<tr class="empty-row"><td colspan="7">🌐 No nodes registered</td></tr>'; return; }
+                    tbody.innerHTML = '';
+                    for (const n of data.nodes) {
+                        const row = tbody.insertRow();
+                        row.insertCell(0).innerText = n.name;
+                        row.insertCell(1).innerHTML = '<small class="mono" style="color:var(--text-dim)">' + n.url + '</small>';
+                        row.insertCell(2).innerText = n.connected_miners;
+                        row.insertCell(3).innerText = (n.cpu_load || 0).toFixed(1) + '%';
+                        row.insertCell(4).innerText = (n.ping_ms || 0) + 'ms';
+                        row.insertCell(5).innerText = n.total_blocks_relayed || 0;
+                        const actions = row.insertCell(6);
+                        const delBtn = document.createElement('button'); delBtn.className = 'btn btn-delete'; delBtn.textContent = '🗑️ Delete';
+                        delBtn.onclick = () => deleteNode(n.id);
+                        actions.appendChild(delBtn);
+                    }
+                } catch(e) { console.error(e); }
+            }
+
+            function deleteNode(id) {
+                askConfirm('Delete mining node #' + id + '?', async () => {
+                    try {
+                        const resp = await fetch('/api/nodes/' + id, { method: 'DELETE' });
+                        const data = await resp.json();
+                        if (data.status === 'success') { toast(data.message, 'success'); loadNodes(); }
+                        else toast(data.message, 'error');
+                    } catch(e) { toast(e.message, 'error'); }
+                }, '🗑️ Delete node?');
+            }
+
             // ─── Init ──────────────────────────────────────────────────
             loadAllSwaps();
             loadUsers();
             loadStats();
-            setInterval(() => {
-                loadAllSwaps();
-                loadStats();
-            }, 30000);
+            setInterval(() => { loadAllSwaps(); loadStats(); }, 30000);
         </script>
     </body>
     </html>
