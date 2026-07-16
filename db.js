@@ -199,7 +199,7 @@ function authenticate(username, pin) {
 }
 
 function getUser(username) {
-  return db.prepare('SELECT username, balance FROM users WHERE username = ?').get(username.trim());
+  return db.prepare('SELECT username, balance, banned FROM users WHERE username = ?').get(username.trim());
 }
 
 function updateBalance(username, amount) {
@@ -386,7 +386,7 @@ function incrementSeq() {
 
 // 🟢 Hỗ trợ hash nhanh cho health check
 function getAllUsers() {
-  return db.prepare('SELECT username, balance FROM users').all();
+  return db.prepare('SELECT username, balance, banned FROM users').all();
 }
 
 function getAllStakes() {

@@ -401,7 +401,7 @@ app.get('/admin/api/users/:username/detail', requireAdminSession, async (req, re
     const username = req.params.username;
     const user = db.getUser(username);
     if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
-    const stake = db.getStake(username) || { staked: 0, pending_reward: 0 };
+    const stake = db.getStake(username) || { amount: 0, pending_reward: 0 };
     const transactions = db.getTransactions(username, 20) || [];
     res.json({ status: 'success', user, stake, transactions });
   } catch (err) {
@@ -454,6 +454,40 @@ app.post('/admin/api/update-balance', requireAdminSession, async (req, res) => {
     
     const newUser = db.getUser(username);
     res.json({ status: 'success', message: `Balance updated`, new_balance: newUser.balance });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// Admin: edit a user's staked amount (add / remove / set)
+app.post('/admin/api/update-stake', requireAdminSession, async (req, res) => {
+  try {
+    const { username, amount, action } = req.body;
+    const num = Number(amount);
+    if (!username || isNaN(num) || num < 0) {
+      return res.status(400).json({ status: 'error', message: 'Invalid amount' });
+    }
+    const user = db.getUser(username);
+    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+
+    const current = db.getStake(username);
+    let newAmount;
+    if (action === 'add') {
+      newAmount = (Number(current.amount) || 0) + num;
+    } else if (action === 'remove') {
+      if ((Number(current.amount) || 0) < num) {
+        return res.status(400).json({ status: 'error', message: 'Insufficient staked amount' });
+      }
+      newAmount = (Number(current.amount) || 0) - num;
+    } else if (action === 'set') {
+      newAmount = num;
+    } else {
+      return res.status(400).json({ status: 'error', message: 'Invalid action' });
+    }
+
+    db.prepare('UPDATE stakes SET amount = ? WHERE username = ?').run(newAmount, username);
+    const fresh = db.getStake(username);
+    res.json({ status: 'success', message: 'Stake updated', new_stake: fresh.amount, pending_reward: fresh.pending_reward });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }
@@ -928,6 +962,25 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             </div>
         </div>
 
+        <!-- Edit Stake Modal -->
+        <div id="editStakeModal" class="modal">
+            <div class="modal-content">
+                <h3>🔧 Manage Stake</h3>
+                <p style="font-size:0.85rem;color:var(--text-dim);">User: <strong id="editStakeUsername" style="color:var(--cream);"></strong></p>
+                <div class="current-balance-tag">Current staked: <b id="currentStake">0.0000</b> CC · Pending reward: <b id="currentPendingReward">0.0000</b> CC</div>
+                <label>Amount</label>
+                <input type="number" id="editStakeAmount" placeholder="0.0000" step="any">
+                <div class="balance-actions">
+                    <button class="btn-add-bal" onclick="saveStake('add')">➕ Add</button>
+                    <button class="btn-remove-bal" onclick="saveStake('remove')">➖ Remove</button>
+                    <button class="btn-set-bal" onclick="saveStake('set')">📝 Set</button>
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn btn-ghost" onclick="closeEditStakeModal()" style="flex:1;">Cancel</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Add User Modal -->
         <div id="addUserModal" class="modal">
             <div class="modal-content">
@@ -985,6 +1038,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
             <div class="drawer-section">
                 <h4>Staking</h4>
                 <div class="current-balance-tag" id="drawerStake">-</div>
+                <button class="btn" style="margin-top:10px;width:100%;" onclick="openEditStakeModal()">🔧 Manage Stake</button>
             </div>
             <div class="drawer-section">
                 <h4>Recent Transactions</h4>
@@ -1251,13 +1305,19 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                     const resp = await fetch('/admin/api/users/' + encodeURIComponent(username) + '/detail');
                     const data = await resp.json();
                     if (data.status !== 'success') { toast(data.message || 'Failed to load user', 'error'); return; }
-                    document.getElementById('drawerBalance').innerHTML = '<b>' + data.user.balance.toFixed(4) + '</b> CC &nbsp; ' + (data.user.banned ? '<span style="color:var(--red);">🚫 Banned</span>' : '<span style="color:var(--green);">✅ Active</span>');
-                    document.getElementById('drawerStake').innerHTML = '<b>' + data.stake.staked.toFixed(4) + '</b> CC staked · <b>' + data.stake.pending_reward.toFixed(4) + '</b> CC pending reward';
+                    if (!data.user) { toast('User data missing in response', 'error'); return; }
+                    const balance = Number(data.user.balance) || 0;
+                    const banned = !!data.user.banned;
+                    const stakeAmount = Number((data.stake && data.stake.amount) || 0);
+                    const pendingReward = Number((data.stake && data.stake.pending_reward) || 0);
+                    document.getElementById('drawerBalance').innerHTML = '<b>' + balance.toFixed(4) + '</b> CC &nbsp; ' + (banned ? '<span style="color:var(--red);">🚫 Banned</span>' : '<span style="color:var(--green);">✅ Active</span>');
+                    currentStakeSnapshot = { amount: stakeAmount, pending_reward: pendingReward };
+                    document.getElementById('drawerStake').innerHTML = '<b>' + stakeAmount.toFixed(4) + '</b> CC staked · <b>' + pendingReward.toFixed(4) + '</b> CC pending reward';
                     const txHtml = data.transactions && data.transactions.length
-                        ? data.transactions.map(t => '<div class="tx-item"><span>' + (t.type || t.description || 'tx') + '</span><span class="mono">' + (t.amount !== undefined ? t.amount : '') + '</span></div>').join('')
+                        ? data.transactions.map(t => '<div class="tx-item"><span>' + (t.type || t.description || 'tx') + '</span><span class="mono">' + (t.amount !== undefined ? Number(t.amount).toFixed(4) : '') + '</span></div>').join('')
                         : '<div style="color:var(--text-faint);font-size:0.85rem;">No transactions found</div>';
                     document.getElementById('drawerTx').innerHTML = txHtml;
-                } catch(e) { toast(e.message, 'error'); }
+                } catch(e) { console.error('openDrawer failed:', e); toast(e.message || 'Failed to load user', 'error'); }
             }
             function closeDrawer() {
                 document.getElementById('userDrawer').classList.remove('open');
@@ -1327,6 +1387,49 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
                         toast('Balance updated → ' + data.new_balance.toFixed(4) + ' CC', 'success');
                         closeModal(); loadUsers();
                     } else toast(data.message, 'error');
+                } catch(e) { toast(e.message, 'error'); }
+            }
+
+            // ─── Edit Stake (admin) ────────────────────────────────────
+            let currentStakeUser = null;
+            let currentStakeSnapshot = { amount: 0, pending_reward: 0 };
+
+            function openEditStakeModal() {
+                const username = document.getElementById('drawerUsername').innerText;
+                if (!username) return;
+                currentStakeUser = username;
+                document.getElementById('editStakeUsername').innerText = username;
+                document.getElementById('currentStake').innerText = (Number(currentStakeSnapshot.amount) || 0).toFixed(4);
+                document.getElementById('currentPendingReward').innerText = (Number(currentStakeSnapshot.pending_reward) || 0).toFixed(4);
+                document.getElementById('editStakeAmount').value = '';
+                document.getElementById('editStakeModal').style.display = 'flex';
+            }
+            function closeEditStakeModal() {
+                document.getElementById('editStakeModal').style.display = 'none';
+                currentStakeUser = null;
+            }
+
+            async function saveStake(action) {
+                const amount = parseFloat(document.getElementById('editStakeAmount').value);
+                if (isNaN(amount) || amount < 0) return toast('Please enter a valid amount', 'error');
+                try {
+                    const resp = await fetch('/admin/api/update-stake', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username: currentStakeUser, amount, action })
+                    });
+                    const data = await resp.json();
+                    if (data.status === 'success') {
+                        toast('Stake updated → ' + data.new_stake.toFixed(4) + ' CC staked', 'success');
+                        currentStakeSnapshot = { amount: data.new_stake, pending_reward: data.pending_reward };
+                        document.getElementById('currentStake').innerText = data.new_stake.toFixed(4);
+                        document.getElementById('currentPendingReward').innerText = (Number(data.pending_reward) || 0).toFixed(4);
+                        document.getElementById('drawerStake').innerHTML = '<b>' + data.new_stake.toFixed(4) + '</b> CC staked · <b>' + (Number(data.pending_reward) || 0).toFixed(4) + '</b> CC pending reward';
+                        document.getElementById('editStakeAmount').value = '';
+                        closeEditStakeModal();
+                    } else {
+                        toast(data.message, 'error');
+                    }
                 } catch(e) { toast(e.message, 'error'); }
             }
 
