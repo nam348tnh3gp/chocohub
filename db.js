@@ -254,6 +254,7 @@ function stake(username, amount) {
   username = username.trim();
   const user = getUser(username);
   if (!user) throw new Error('User not found');
+  if (user.banned) throw new Error('Account is banned');
   if (user.balance < amount) throw new Error('Insufficient balance');
   updateBalance(username, -amount);
   db.prepare('UPDATE stakes SET amount = amount + ? WHERE username = ?').run(amount, username);
@@ -262,6 +263,9 @@ function stake(username, amount) {
 
 function unstake(username) {
   username = username.trim();
+  const user = getUser(username);
+  if (!user) throw new Error('User not found');
+  if (user.banned) throw new Error('Account is banned');
   const current = getStake(username);
   if (current.amount <= 0) throw new Error('No stake to withdraw');
   const total = current.amount + (current.pending_reward || 0);
@@ -890,6 +894,16 @@ function getWorkerTier(workerName) {
   return row ? row.tier : 'cpu'; // default to cpu if not found
 }
 
+const TIER_INITIAL_DIFFICULTY = {
+  embedded_avr: 1,
+  embedded_arm: 5,
+  embedded_esp: 50,
+  embedded_esp32: 100,
+  mobile: 300,
+  cpu: 500,
+  gpu: 1000
+};
+
 function setWorkerTier(workerName, tier) {
   const validTiers = ['embedded_avr', 'embedded_arm', 'embedded_esp', 'embedded_esp32', 'mobile', 'cpu', 'gpu'];
   if (!validTiers.includes(tier)) {
@@ -907,15 +921,16 @@ function setWorkerTier(workerName, tier) {
     }
   }
   
+  const initialDiff = TIER_INITIAL_DIFFICULTY[tier] || 1;
   db.prepare(`
     INSERT INTO worker_difficulty (worker_name, tier, tier_registered_at, tier_changes, difficulty, last_solve_time, updated_at)
-    VALUES (?, ?, ?, 1, 10, 0, datetime('now'))
+    VALUES (?, ?, ?, 1, ?, 0, datetime('now'))
     ON CONFLICT(worker_name) DO UPDATE SET
       tier = excluded.tier,
       tier_registered_at = excluded.tier_registered_at,
       tier_changes = tier_changes + 1,
       updated_at = datetime('now')
-  `).run(workerName, tier, now);
+  `).run(workerName, tier, now, initialDiff);
   
   console.log(`📋 Worker ${workerName} tier set to ${tier}`);
 }

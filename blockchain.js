@@ -7,7 +7,7 @@ const db = require('./db');
 const REWARD_PER_BLOCK = 0.05;                  // 0.05 CC, maybe we change it, who knows...
 const INITIAL_DIFFICULTY = 5;                  // Initial diff (global)
 const TIER_INITIAL_DIFFICULTY = {
-  embedded_avr: 2,
+  embedded_avr: 1,
   embedded_arm: 5,
   embedded_esp: 50,
   embedded_esp32: 100,

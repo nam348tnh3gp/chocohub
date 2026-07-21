@@ -226,6 +226,9 @@ function verifyToken(req, res, next) {
   const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+    const user = db.getUser(decoded.username);
+    if (!user) return res.status(401).json({ status: 'error', message: 'User not found' });
+    if (user.banned) return res.status(403).json({ status: 'error', message: 'Account is banned' });
     req.user = decoded;
     next();
   } catch (err) {
