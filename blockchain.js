@@ -1,7 +1,6 @@
 const crypto = require('crypto');
 const db = require('./db');
 
-// ─── Cấu hình ────────────────────────────────────
 const REWARD_PER_BLOCK = 0.05;                  // 0.05 CC, maybe we change it, who knows...
 const INITIAL_DIFFICULTY = 5;                  // Initial diff (global)
 const TIER_INITIAL_DIFFICULTY = {
@@ -66,7 +65,7 @@ const TIER_CONFIG = {
   }
 };
 
-// ─── Old device multipliers (deprecated, kept for backward compatibility) ──
+// old device multipliers
 const DEVICE_REWARD_MULTIPLIERS = {
   'esp32': 3.0,
   'esp8266': 3.0,
@@ -79,7 +78,7 @@ const DEVICE_REWARD_MULTIPLIERS = {
   'web_miner': 1.0,
   'cpu': 1.0,
   'cpu_miner': 1.0,
-  'gpu': 1.0, // Changed from 0.5 to 1.0
+  'gpu': 1.0,
   'gpu_miner': 1.0,
   'nvidia': 1.0,
   'amd': 1.0,
