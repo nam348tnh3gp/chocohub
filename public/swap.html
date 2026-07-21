@@ -529,7 +529,7 @@
                 <div class="footnote">
                     ⚡ CC swaps are processed instantly.<br>
                     🔄 DUCO → CC: Send DUCO to <strong>Nam2010</strong> with memo "SWAP CC for {username}".<br>
-                    🟦 XNO → CC: Send XNO to the address below with memo "SWAP CC for {username}".<br>
+                    🟦 XNO → CC: Send XNO to the address below. No memo needed.<br>
                     📦 All swaps are recorded for safety.
                 </div>
             </div>
@@ -752,9 +752,7 @@
         if (amount > 0) {
             infoNote.innerHTML = `🟦 Send <strong>${xnoAmount} XNO</strong> to:<br>
             <strong style="color:#f58a00; word-break:break-all;">${xnoReceiveAddress}</strong><br>
-            with memo: "<strong>SWAP CC for ${targetUsername}</strong>"<br>
             After confirmation, <strong>${ccAmount} CC</strong> will be credited to <strong>${targetUsername}</strong>.
-            <span class="copy-btn" onclick="copyMemoXNO('${targetUsername}')">📋 Copy Memo</span>
             <span class="copy-btn" onclick="copyAddress()">📋 Copy Address</span>`;
         } else {
             infoNote.innerHTML = `🟦 Enter amount (XNO) above to see instruction.`;
@@ -762,12 +760,6 @@
     }
 
     function copyMemo(username) {
-        const memo = `SWAP CC for ${username}`;
-        navigator.clipboard.writeText(memo);
-        showToast(`✓ Copied memo: ${memo}`, false);
-    }
-
-    function copyMemoXNO(username) {
         const memo = `SWAP CC for ${username}`;
         navigator.clipboard.writeText(memo);
         showToast(`✓ Copied memo: ${memo}`, false);
@@ -931,7 +923,7 @@
                 if (data.status === 'success') {
                     const memo = `SWAP CC for ${targetUsername}`;
                     navigator.clipboard.writeText(memo);
-                    showToast(`✓ XNO→CC request created! Send ${amount} XNO to ${xnoReceiveAddress} with memo "${memo}"`, false);
+                    showToast(`✓ XNO→CC request created! Send ${amount} XNO to ${xnoReceiveAddress}`, false);
                     document.getElementById('amount-input').value = '';
                     document.getElementById('receiver-input').value = '';
                     updateEstimate();
@@ -949,7 +941,6 @@
 
     // Expose copy functions globally
     window.copyMemo = copyMemo;
-    window.copyMemoXNO = copyMemoXNO;
     window.copyAddress = copyAddress;
 
     // Initialize selects
