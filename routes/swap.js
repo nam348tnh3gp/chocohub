@@ -298,7 +298,7 @@ router.post('/create_duco_to_cc', verifyToken, swapLimiter, (req, res) => {
 
     res.json({
       status: 'success',
-      message: `DUCO→CC request created. Send ${amount} DUCO to Nam2010 with memo: "SWAP CC for ${target_username}"`,
+      message: `DUCO→CC request created. Send ${amount} DUCO to chocoetom with memo: "SWAP CC for ${target_username}"`,
       request_id: newRequest.id,
       fee_rate: SWAP_FEE_RATE
     });
