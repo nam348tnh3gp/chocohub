@@ -1,10 +1,3 @@
-// server.js – Hybrid PoW + PoS + Diffie-Hellman + HTTP/2 + TLS 1.3 + Session Token (JWT) + Rate Limit + Trust Proxy + SWAP + Admin Web Interface (Full)
-// 🆕 Tích hợp mempool và phí giao dịch tự động (node_fees)
-// 🆕 Quản lý user (thêm, xoá, ban) trong admin dashboard
-// 🆕 Sửa lỗi lịch sử giao dịch (hiển thị cả confirmed và pending)
-// 🆕 Sử dụng các hàm admin từ db.js (deleteUser, setUserBanned)
-// 🆕 Cải thiện giao diện admin: icon bánh răng với dropdown, hiển thị Unban/Ban đúng trạng thái
-
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -25,14 +18,14 @@ const DHExchange = require('./dh');
 const SwapRouter = require('./routes/swap');
 const NodeFeesRouter = require('./routes/node_fees');
 
-// admin users
+// admin users & process token
 const ADMIN_USERS = ['chocoetom', 'Nam2010'];
 const NODE_MASTER_TOKEN = process.env.NODE_MASTER_TOKEN || 'null';
 if (!process.env.NODE_MASTER_TOKEN || NODE_MASTER_TOKEN === 'null') {
   console.warn('⚠️ WARNING: NODE_MASTER_TOKEN is default/weak. Set a real token in Render dashboard!');
 }
 
-// ─── Rate limiters for node endpoints ──────────
+// rate limiting at nodes endpoints (works for all mining nodes)
 const nodeRateLimit = rateLimit({ windowMs: 60 * 1000, max: 120, message: { status: 'error', message: 'Rate limit exceeded' } });
 const nodeSubmitLimit = rateLimit({ windowMs: 60 * 1000, max: 60, message: { status: 'error', message: 'Too many submissions' } });
 const nodeRegisterLimit = rateLimit({ windowMs: 5 * 60 * 1000, max: 10, message: { status: 'error', message: 'Too many registration attempts' } });
@@ -51,7 +44,6 @@ function verifyAdmin(req, res, next) {
     next();
 }
 
-// ─── Helper: canonical JSON ─────────────
 function canonicalStringify(obj) {
   if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
   if (Array.isArray(obj)) return '[' + obj.map(canonicalStringify).join(',') + ']';
@@ -105,11 +97,10 @@ const boostLimiter = rateLimit({
   message: { status: 'error', message: 'Too many boost activations, please slow down.' },
 });
 
-// ─── Cấu hình port ──────────────────────────────────
+// Ports
 const PORT = process.env.PORT || 3000;
 const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 
-// ─── Tạo / nạp cặp khóa RSA dài hạn của server ──────
 const SERVER_KEY_PATH = path.join(__dirname, 'server_private.pem');
 const SERVER_CERT_PATH = path.join(__dirname, 'server_public.pem');
 
@@ -132,7 +123,6 @@ try {
   SERVER_LONGTERM_KEY = { publicKey, privateKey };
 }
 
-// ─── Chứng chỉ TLS cho HTTP/2 – KHÔNG dùng execSync ──
 const TLS_KEY_PATH = path.join(__dirname, 'tls_key.pem');
 const TLS_CERT_PATH = path.join(__dirname, 'tls_cert.pem');
 let tlsKey, tlsCert;
@@ -160,11 +150,11 @@ if (fs.existsSync(TLS_KEY_PATH) && fs.existsSync(TLS_CERT_PATH)) {
   console.log('✅ TLS certificate generated without execSync.');
 }
 
-// ─── DH Session Store ─────────────────────────────────
+// DH Session Store
 const dhSessions = new Map();
 const serverDHKeys = DHExchange.generateStandardKeyPair('modp2048');
 
-// ─── Allowed backup hostnames (URL-only, no IP) ───────
+// Allowed backup hostnames
 const ALLOWED_BACKUP_HOSTS = (process.env.BACKUP_SERVERS || '')
   .split(',').map(s => {
     try { return new URL(s.trim()).hostname; } catch { return ''; }
@@ -196,7 +186,7 @@ const registeredBackupNodes = {};
 const app = express();
 app.set('trust proxy', 1);
 
-// Session middleware (httpOnly cookie, prevents console access)
+// Session middleware
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 app.use(session({
   secret: sessionSecret,
@@ -215,9 +205,7 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ════════════════════════════════════════════════════
-//  MIDDLEWARE: Verify JWT token (cho API client)
-// ════════════════════════════════════════════════════
+// Verify JWT token (API client)
 function verifyToken(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -236,9 +224,7 @@ function verifyToken(req, res, next) {
   }
 }
 
-// ════════════════════════════════════════════════════
-//  ADMIN WEB INTERFACE (SESSION-BASED)
-// ════════════════════════════════════════════════════
+//  ADMIN WEB INTERFACE
 app.get('/admin', (req, res) => {
   if (req.session.admin) {
     return res.redirect('/admin/dashboard');
@@ -340,9 +326,6 @@ function requireAdminSession(req, res, next) {
   res.status(401).json({ status: 'error', message: 'Admin session required' });
 }
 
-// ─── Các API admin quản lý user ──────────────────────
-
-// Lấy danh sách user (đã có)
 app.get('/admin/api/all-users', requireAdminSession, async (req, res) => {
   try {
     const users = db.getAllUsers();
@@ -352,7 +335,6 @@ app.get('/admin/api/all-users', requireAdminSession, async (req, res) => {
   }
 });
 
-// Thêm user mới (admin)
 app.post('/admin/api/users', requireAdminSession, async (req, res) => {
   try {
     const { username, pin } = req.body;
@@ -369,7 +351,6 @@ app.post('/admin/api/users', requireAdminSession, async (req, res) => {
   }
 });
 
-// Xoá user (admin) - chỉ cho phép xóa user thường, không xóa admin
 app.delete('/admin/api/users/:username', requireAdminSession, async (req, res) => {
   try {
     const username = req.params.username;
@@ -383,7 +364,7 @@ app.delete('/admin/api/users/:username', requireAdminSession, async (req, res) =
   }
 });
 
-// Ban/Unban user (admin)
+// Ban/Unban user
 app.post('/admin/api/users/:username/ban', requireAdminSession, async (req, res) => {
   try {
     const username = req.params.username;
@@ -398,7 +379,7 @@ app.post('/admin/api/users/:username/ban', requireAdminSession, async (req, res)
   }
 });
 
-// User detail (drawer: balance + stake + recent transactions)
+// User detail
 app.get('/admin/api/users/:username/detail', requireAdminSession, async (req, res) => {
   try {
     const username = req.params.username;
@@ -412,9 +393,6 @@ app.get('/admin/api/users/:username/detail', requireAdminSession, async (req, re
   }
 });
 
-// ─── Các API admin cũ ────────────────────────────────
-
-// API proxy cho admin (giữ nguyên)
 app.get('/admin/api/all-swaps', requireAdminSession, async (req, res) => {
   try {
     const swaps = SwapRouter.getAllSwapRequests();
@@ -462,7 +440,7 @@ app.post('/admin/api/update-balance', requireAdminSession, async (req, res) => {
   }
 });
 
-// Admin: edit a user's staked amount (add / remove / set)
+// edit a user's staked amount (use for refunds/fix after a bug)
 app.post('/admin/api/update-stake', requireAdminSession, async (req, res) => {
   try {
     const { username, amount, action } = req.body;
@@ -534,12 +512,11 @@ app.delete('/admin/api/delete/:id', requireAdminSession, async (req, res) => {
   }
 });
 
-// ─── Admin APIs: worker flags ──────────────────────────
+// worker flags
 
 app.get('/admin/api/flagged-workers', requireAdminSession, (req, res) => {
   try {
     const flagged = db.getFlaggedWorkers();
-    // Enrich with tier info
     const enriched = flagged.map(w => ({
       ...w,
       tier: db.getWorkerTier(w.worker_name)
@@ -572,7 +549,7 @@ app.post('/admin/api/workers/:worker/clear', requireAdminSession, (req, res) => 
   }
 });
 
-// ─── Admin Dashboard ───
+// Admin Dashboard
 app.get('/admin/dashboard', requireAdminSession, (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -1606,9 +1583,7 @@ app.get('/admin/dashboard', requireAdminSession, (req, res) => {
   `);
 });
 
-// ════════════════════════════════════════════════════
-//  PUBLIC ENDPOINTS
-// ════════════════════════════════════════════════════
+// public endpoints
 app.get('/api/server/public-key', (req, res) => {
   res.json({
     status: 'success',
@@ -1618,6 +1593,7 @@ app.get('/api/server/public-key', (req, res) => {
   });
 });
 
+// dh exchange
 app.post('/api/dh/exchange', (req, res) => {
   const { clientId, clientPublicKey, token } = req.body;
   if (!clientId || !clientPublicKey || !token) {
@@ -1681,15 +1657,14 @@ app.use(verifyDHSignature);
 // Swap Module
 app.use('/swap', SwapRouter);
 
-// 🆕 Node Fees Module (quản lý phí giao dịch)
+// node fees module
 app.use('/node_fees', NodeFeesRouter.router);
 
-// AUTH endpoint (kiểm tra banned)
+// auth endpoint
 app.post('/auth', authLimiter, (req, res) => {
   const { username, pin } = req.body;
   if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing fields' });
   try {
-    // Kiểm tra user có bị ban không
     const user = db.getUser(username);
     if (user && user.banned) {
       return res.status(403).json({ status: 'error', message: 'Account is banned' });
@@ -1705,7 +1680,6 @@ app.post('/auth', authLimiter, (req, res) => {
   }
 });
 
-// ─── Các route công khai ─────────────────────────────
 app.get('/get_user/:username', (req, res) => {
   try {
     const user = db.getUser(req.params.username);
@@ -1806,7 +1780,7 @@ app.get('/pos/info', (req, res) => {
   }
 });
 
-// ─── Các route yêu cầu token ─────────────────────────
+// send cc route, and verify token (cant use if banned ;/)
 app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
   const { to_username, amount } = req.body;
   const from_username = req.user.username;
@@ -1818,34 +1792,29 @@ app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
     if (isNaN(sendAmount) || sendAmount <= 0) {
       return res.status(400).json({ status: 'error', message: 'Invalid amount' });
     }
-    // Kiểm tra người gửi
     const sender = db.getUser(from_username);
     if (!sender) return res.status(404).json({ status: 'error', message: 'Sender not found' });
     if (sender.banned) {
       return res.status(403).json({ status: 'error', message: 'Account is banned' });
     }
-    // Kiểm tra người nhận
     const receiver = db.getUser(to_username);
     if (!receiver) return res.status(404).json({ status: 'error', message: 'Receiver not found' });
     if (receiver.banned) {
       return res.status(403).json({ status: 'error', message: 'Cannot send to banned account' });
     }
 
-    // Tính phí (lấy từ node_fees config – mặc định 1%)
+    // 1% node fee
     const feePercent = NodeFeesRouter.TRANSACTION_FEE_PERCENT || 1;
     const fee = parseFloat((sendAmount * feePercent / 100).toFixed(8));
     const totalDeducted = parseFloat((sendAmount + fee).toFixed(8));
-
-    // Kiểm tra số dư
+    
     if (sender.balance < totalDeducted) {
       return res.status(400).json({ status: 'error', message: `Insufficient balance. Need ${totalDeducted} CC (including ${fee} CC fee)` });
     }
 
-    // Trừ tiền người gửi (chuyển vào mempool_holding)
     db.updateBalance(from_username, -totalDeducted);
     db.updateBalance('mempool_holding', totalDeducted);
 
-    // Tạo giao dịch mempool
     const txId = 'tx_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
     const mempoolTx = {
       id: txId,
@@ -1944,14 +1913,11 @@ app.post('/pos/unstake', verifyToken, stakeLimiter, (req, res) => {
   }
 });
 
-// ════════════════════════════════════════════════════
-//  MINING BOOST (ad-click boost with view verification)
-// ════════════════════════════════════════════════════
 
-// In-memory challenges: { challenge_id: { username, issued_at, used } }
+// ad mining boost
 const boostChallenges = new Map();
-const BOOST_CHALLENGE_TTL = 120; // segundos
-const BOOST_MIN_VIEW_SECONDS = 10; // mínimo de segundos entre challenge e activate
+const BOOST_CHALLENGE_TTL = 120; // seconds
+const BOOST_MIN_VIEW_SECONDS = 10; // minimum time viewing
 
 setInterval(() => {
   const now = Math.floor(Date.now() / 1000);
@@ -1974,13 +1940,11 @@ app.post('/mining/boost/activate', boostLimiter, (req, res) => {
   if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
   if (!challenge_id) return res.status(400).json({ status: 'error', message: 'Missing challenge_id' });
   try {
-    // Valida challenge (autenticação implícita)
     const challenge = boostChallenges.get(challenge_id);
     if (!challenge) return res.status(400).json({ status: 'error', message: 'Invalid or expired challenge' });
     if (challenge.username !== username.trim()) return res.status(400).json({ status: 'error', message: 'Challenge belongs to another user' });
     if (challenge.used) return res.status(400).json({ status: 'error', message: 'Challenge already used' });
 
-    // Valida tempo mínimo de visualização
     const now = Math.floor(Date.now() / 1000);
     const elapsed = now - challenge.issued_at;
     if (elapsed < BOOST_MIN_VIEW_SECONDS) {
@@ -1994,7 +1958,6 @@ app.post('/mining/boost/activate', boostLimiter, (req, res) => {
     if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
     if (user && user.banned) return res.status(403).json({ status: 'error', message: 'Account is banned' });
 
-    // Marca challenge usado e ativa boost
     challenge.used = true;
     boostChallenges.set(challenge_id, challenge);
     const result = db.activateMiningBoost(username, 1.3);
@@ -2032,11 +1995,9 @@ app.get('/mining/boost/status', (req, res) => {
   }
 });
 
-// ════════════════════════════════════════════════════
-//  MINING ROUTES – SỬ DỤNG BLOCKCHAIN MỚI
-// ════════════════════════════════════════════════════
+// MINING ROUTES
 
-// 🆕 Register worker tier (once per 24h, requires JWT)
+// Register miner tier (need this or will fallback to cpu tier)
 app.post('/mining/register-tier', verifyToken, (req, res) => {
   try {
     const workerName = req.user.username;
@@ -2065,7 +2026,7 @@ app.post('/mining/register-tier', verifyToken, (req, res) => {
   }
 });
 
-// 🆕 Get current worker tier info
+// get current miner tier
 app.get('/mining/tier', verifyToken, (req, res) => {
   try {
     const workerName = req.user.username;
@@ -2095,7 +2056,6 @@ app.get('/mining/tier', verifyToken, (req, res) => {
   }
 });
 
-// Lấy danh sách blocks gần đây
 app.get('/blocks', (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 10;
@@ -2107,7 +2067,6 @@ app.get('/blocks', (req, res) => {
   }
 });
 
-// Lấy thông tin một block theo height
 app.get('/block/:height', (req, res) => {
   try {
     const height = parseInt(req.params.height);
@@ -2122,7 +2081,7 @@ app.get('/block/:height', (req, res) => {
   }
 });
 
-// Lấy job cho miner
+// get job for worker
 app.post('/get_job', (req, res) => {
   try {
     const { worker_name, instance_id, device_type } = req.body;
@@ -2143,7 +2102,7 @@ app.post('/get_job', (req, res) => {
   }
 });
 
-// Lấy job theo ID
+// get job by id
 app.get('/get_job/:id', (req, res) => {
   try {
     const job = db.getActiveJob(req.params.id);
@@ -2175,7 +2134,6 @@ app.post('/submit_solution', (req, res) => {
       return res.status(400).json({ status: 'error', message: 'Missing required parameters: bounty_id, nonce' });
     }
 
-    // Support both JWT-authenticated (MPG miner) and unauthenticated (webminer) flows
     let worker_name;
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -2185,22 +2143,17 @@ app.post('/submit_solution', (req, res) => {
       } catch (e) {
         return res.status(403).json({ status: 'error', message: 'Invalid or expired token' });
       }
-      // If token is present, submitted worker_name must match
       const submitted_worker = req.query.worker_name || req.body.worker_name;
       if (submitted_worker && submitted_worker !== worker_name) {
         return res.status(403).json({ status: 'error', message: `worker_name mismatch: token is ${worker_name} but submitted ${submitted_worker}` });
       }
     } else {
-      // Unauthenticated fallback: use worker_name from body (webminer)
       worker_name = req.query.worker_name || req.body.worker_name;
       if (!worker_name || typeof worker_name !== 'string') {
         return res.status(400).json({ status: 'error', message: 'Missing worker_name. Authenticate with JWT or provide worker_name in body.' });
       }
     }
 
-    // Sanitize/cap length of client-controlled fields, matching the hardened
-    // node-relayed route (previously unbounded here, allowing oversized or
-    // malformed instance_id/device_type/worker_name to reach the DB/hash input)
     const cleanWorkerName = String(worker_name).trim().substring(0, 100);
     const cleanInstanceId = instance_id ? String(instance_id).trim().substring(0, 50) : instance_id;
     const cleanDeviceType = String(device_type).trim().substring(0, 50);
@@ -2217,7 +2170,7 @@ app.get('/miner_heartbeat', (req, res) => {
   res.json({ status: 'ok', time: Date.now() });
 });
 
-// /active_bounties_list – giữ để tương thích
+// active bounties list
 app.get('/active_bounties_list', (req, res) => {
   try {
     const blocks = db.getBlocks(20);
@@ -2228,7 +2181,7 @@ app.get('/active_bounties_list', (req, res) => {
   }
 });
 
-// ─── Mining user stats ─────────────────────────────────
+// Mining user stats
 app.get('/mining/user-stats', (req, res) => {
   const username = req.query.username;
   if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
@@ -2251,7 +2204,7 @@ app.get('/mining/user-stats', (req, res) => {
   }
 });
 
-// ─── TEST / HEALTH ──────────────────────────────────────
+// test health
 app.get('/api/test', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString(), message: 'ChocoHub API is running', uptime: process.uptime() });
 });
@@ -2260,7 +2213,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString(), dbHash: getDbHash() });
 });
 
-// ─── BACKUP ENDPOINTS ──────────────────────────────────
+// backup endpoints
 app.post('/api/backup/register', (req, res) => {
   const { url, token, name, description, owner, platform, clientId, users, blocks, total_items } = req.body;
   if (!url || !token) return res.status(400).json({ status: 'error', message: 'Missing url or token' });
@@ -2293,7 +2246,6 @@ app.get('/api/backup/nodes', (req, res) => {
   res.json({ status: 'success', nodes: registeredBackupNodes });
 });
 
-// Track best snapshot seen globally (reset on server restart, but prevents back-to-back downgrades)
 let bestSnapshotMetrics = { users: 0, blocks: 0, total_items: 0 };
 
 app.post('/api/backup/sync', (req, res) => {
@@ -2307,7 +2259,6 @@ app.post('/api/backup/sync', (req, res) => {
       const incomingUsers = (data.state.users || []).length;
       const incomingBlockCount = (data.state.blocks || []).length;
 
-      // Layer 1: compare against all registered backup nodes' reported data
       const now = Date.now();
       let bestKnownUsers = 0, bestKnownBlocks = 0;
       for (const info of Object.values(registeredBackupNodes)) {
@@ -2316,11 +2267,9 @@ app.post('/api/backup/sync', (req, res) => {
         if (info.blocks > bestKnownBlocks) bestKnownBlocks = info.blocks;
       }
 
-      // Layer 2: also compare against best snapshot we've already accepted this session
       if (bestSnapshotMetrics.users > bestKnownUsers) bestKnownUsers = bestSnapshotMetrics.users;
       if (bestSnapshotMetrics.blocks > bestKnownBlocks) bestKnownBlocks = bestSnapshotMetrics.blocks;
 
-      // Reject if significantly behind peers or previously accepted state
       if (bestKnownUsers > 0 && incomingUsers < bestKnownUsers * 0.8) {
         console.warn(`🚫 Rejected FULL_SNAPSHOT: incoming has ${incomingUsers} users, best known is ${bestKnownUsers}. Refusing downgrade.`);
         return res.json({ type: 'SNAPSHOT_REJECTED', status: 'error', message: `Best backup node has ${bestKnownUsers} users but this snapshot has only ${incomingUsers}. Refusing restore.` });
@@ -2330,7 +2279,6 @@ app.post('/api/backup/sync', (req, res) => {
         return res.json({ type: 'SNAPSHOT_REJECTED', status: 'error', message: `Best backup node has ${bestKnownBlocks} blocks but this snapshot has only ${incomingBlockCount}. Refusing restore.` });
       }
 
-      // Layer 3: absolute floor — even if no peers exist, reject obviously empty snapshots
       const ABSOLUTE_MIN_USERS = 5;
       const ABSOLUTE_MIN_BLOCKS = 5;
       if ((bestKnownUsers === 0 && bestKnownBlocks === 0) && (incomingUsers < ABSOLUTE_MIN_USERS || incomingBlockCount < ABSOLUTE_MIN_BLOCKS)) {
@@ -2342,7 +2290,6 @@ app.post('/api/backup/sync', (req, res) => {
       db.importFullState(data.state);
       console.log('✅ Full database restored from backup client');
 
-      // Update best known snapshot metrics (prevents future downgrades in this session)
       const incomingTotal = incomingUsers + incomingBlockCount
         + (data.state.stakes || []).length
         + (data.state.snake_claims || []).length
@@ -2350,7 +2297,6 @@ app.post('/api/backup/sync', (req, res) => {
       if (incomingUsers > bestSnapshotMetrics.users) bestSnapshotMetrics.users = incomingUsers;
       if (incomingBlockCount > bestSnapshotMetrics.blocks) bestSnapshotMetrics.blocks = incomingBlockCount;
 
-      // Đảm bảo các tài khoản đặc biệt tồn tại sau khi restore
       NodeFeesRouter.ensureHoldingAccount();
       NodeFeesRouter.ensureNodeFeesAccount();
       // swap_holding
@@ -2392,11 +2338,9 @@ app.post('/api/backup/sync', (req, res) => {
   }
 });
 
-// ════════════════════════════════════════════════════
-//  MINING NODE MANAGEMENT
-// ════════════════════════════════════════════════════
+// MINING NODES
 
-// Register a new mining node (requires master token)
+// register a new mining node (requires token)
 app.post('/api/nodes/register', nodeRegisterLimit, (req, res) => {
   try {
     const { name, url, token, owner, location } = req.body;
@@ -2406,7 +2350,6 @@ app.post('/api/nodes/register', nodeRegisterLimit, (req, res) => {
     if (token !== NODE_MASTER_TOKEN) {
       return res.status(401).json({ status: 'error', message: 'Invalid master token' });
     }
-    // Input sanitization
     const cleanName = String(name).trim().substring(0, 100);
     const cleanUrl = String(url).trim().substring(0, 500);
     const cleanOwner = String(owner || '').trim().substring(0, 100);
@@ -2421,7 +2364,6 @@ app.post('/api/nodes/register', nodeRegisterLimit, (req, res) => {
     if (existing) {
       return res.json({ status: 'success', message: 'Node already registered', auth_token: existing.auth_token, id: existing.id });
     }
-    // If same name exists with a different URL (tunnel restarted), update it — prevents duplicates
     const sameName = db.getMiningNodeByName(cleanName);
     if (sameName) {
       db.updateMiningNodeUrl(sameName.id, cleanUrl);
@@ -2437,7 +2379,7 @@ app.post('/api/nodes/register', nodeRegisterLimit, (req, res) => {
   }
 });
 
-// Node heartbeat (requires node auth token)
+// Node heartbeat
 app.post('/api/nodes/heartbeat', nodeRateLimit, (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -2450,7 +2392,6 @@ app.post('/api/nodes/heartbeat', nodeRateLimit, (req, res) => {
       return res.status(401).json({ status: 'error', message: 'Invalid node token' });
     }
     const { connected_miners, cpu_load, ping_ms, blockchain_height } = req.body;
-    // Validate ranges
     const miners = Math.max(0, Math.min(10000, parseInt(connected_miners) || 0));
     const cpu = Math.max(0, Math.min(100, parseFloat(cpu_load) || 0));
     const ping = Math.max(0, Math.min(10000, parseFloat(ping_ms) || 0));
@@ -2463,7 +2404,7 @@ app.post('/api/nodes/heartbeat', nodeRateLimit, (req, res) => {
   }
 });
 
-// List active nodes (public — for miner discovery)
+// List active nodes
 app.get('/api/nodes', (req, res) => {
   try {
     const nodes = db.getActiveMiningNodes();
@@ -2486,7 +2427,7 @@ app.get('/api/nodes', (req, res) => {
   }
 });
 
-// Server-side node discovery (pings nodes from server, not browser)
+// Server node discovery (pings nodes from server, not browser)
 app.get('/api/nodes/discover', async (req, res) => {
   try {
     const nodes = db.getActiveMiningNodes();
@@ -2598,8 +2539,7 @@ app.get('/api/miner-info', (req, res) => {
   }
 });
 
-// Public proxy: miner sends job request here, server forwards to node
-// (bypasses localtunnel interstitial that blocks browser requests)
+// Public proxy: miner sends job request here, server forwards to node (dont actually make really sense, we should remove this
 app.post('/api/proxy/get_job', nodeRateLimit, async (req, res) => {
   try {
     const { node_id, worker_name, instance_id, device_type } = req.body;
@@ -2623,7 +2563,7 @@ app.post('/api/proxy/get_job', nodeRateLimit, async (req, res) => {
   }
 });
 
-// Public proxy: miner sends solution here, server forwards to node
+// Public proxy miner sends solution here, server forwards to node (dont really makes sense too)
 app.post('/api/proxy/submit_solution', nodeRateLimit, async (req, res) => {
   try {
     const { node_id, bounty_id, nonce, worker_name, instance_id, device_type } = req.body;
@@ -2647,7 +2587,6 @@ app.post('/api/proxy/submit_solution', nodeRateLimit, async (req, res) => {
   }
 });
 
-// Public proxy: miner sends heartbeat through main server (bypasses 511)
 app.post('/api/proxy/heartbeat', nodeRateLimit, async (req, res) => {
   try {
     const { node_id, miners } = req.body;
@@ -2671,7 +2610,6 @@ app.post('/api/proxy/heartbeat', nodeRateLimit, async (req, res) => {
   }
 });
 
-// Internal: Node gets job (proxied from main server)
 app.post('/api/nodes/get_job', nodeRateLimit, (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -2701,7 +2639,7 @@ app.post('/api/nodes/get_job', nodeRateLimit, (req, res) => {
   }
 });
 
-// Internal: Node submits solution (tagged with node_id)
+// Node submits solution (server just validates)
 app.post('/api/nodes/submit_solution', nodeSubmitLimit, (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -2717,7 +2655,6 @@ app.post('/api/nodes/submit_solution', nodeSubmitLimit, (req, res) => {
     if (!bounty_id || nonce === undefined || !worker_name) {
       return res.status(400).json({ status: 'error', message: 'Missing bounty_id, nonce, or worker_name' });
     }
-    // Validate nonce is a number
     const parsedNonce = parseInt(nonce);
     if (isNaN(parsedNonce) || parsedNonce < 0) {
       return res.status(400).json({ status: 'error', message: 'Invalid nonce' });
@@ -2730,7 +2667,7 @@ app.post('/api/nodes/submit_solution', nodeSubmitLimit, (req, res) => {
   }
 });
 
-// Node sync blocks (for node to sync blockchain from main server)
+// Node sync blocks
 app.get('/api/nodes/sync-blocks', nodeRateLimit, (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -2755,9 +2692,6 @@ app.get('/api/nodes/sync-blocks', nodeRateLimit, (req, res) => {
   }
 });
 
-// Node restore blockchain to main server (emergency recovery)
-// 🚫 DISABLED — archiver restores can conflict with backup-node full-snapshot restores.
-// Re-enable by removing the early return below in case of total data loss.
 app.post('/api/nodes/restore-blockchain', nodeRegisterLimit, (req, res) => {
   return res.status(503).json({ status: 'error', message: 'Archiver blockchain restore is disabled. Use backup node snapshot restore instead.' });
   try {
@@ -2797,7 +2731,6 @@ app.post('/api/nodes/restore-blockchain', nodeRegisterLimit, (req, res) => {
       }
     }
 
-    // Validate and sanitize blocks
     const validBlocks = [];
     for (const block of sorted) {
       if (!block || typeof block !== 'object') continue;
@@ -2833,9 +2766,6 @@ app.post('/api/nodes/restore-blockchain', nodeRegisterLimit, (req, res) => {
   }
 });
 
-// Admin: trigger restore from best backup node
-// 🚫 DISABLED — archiver restores can conflict with backup-node full-snapshot restores.
-// Re-enable by removing the early return below in case of total data loss.
 app.post('/api/nodes/trigger-restore', nodeRegisterLimit, async (req, res) => {
   return res.status(503).json({ status: 'error', message: 'Archiver blockchain restore is disabled. Use backup node snapshot restore instead.' });
   try {
@@ -2857,7 +2787,6 @@ app.post('/api/nodes/trigger-restore', nodeRegisterLimit, async (req, res) => {
 
     console.log(`🔄 Triggering restore from node: ${bestNode.name} (height: ${bestNode.last_block_height})`);
 
-    // Fetch full chain from the backup node
     const nodeUrl = bestNode.url.replace(/\/+$/, '');
     const resp = await fetch(`${nodeUrl}/full-chain`, {
       method: 'GET',
@@ -2874,12 +2803,10 @@ app.post('/api/nodes/trigger-restore', nodeRegisterLimit, async (req, res) => {
       return res.json({ status: 'error', message: 'Node returned empty chain' });
     }
 
-    // Verify minimum block count
     if (data.blocks.length < 100) {
       return res.status(400).json({ status: 'error', message: `Node has only ${data.blocks.length} blocks (minimum 100 required)` });
     }
 
-    // Validate chain integrity
     const sorted = [...data.blocks].sort((a, b) => a.height - b.height);
     if (sorted[0].height !== 0) {
       return res.status(400).json({ status: 'error', message: 'Chain must start at height 0' });
@@ -2914,7 +2841,7 @@ app.post('/api/nodes/trigger-restore', nodeRegisterLimit, async (req, res) => {
   }
 });
 
-// Admin: delete a node
+// delete a node
 app.delete('/api/nodes/:id', requireAdminSession, (req, res) => {
   try {
     const id = parseInt(req.params.id);
@@ -2925,7 +2852,7 @@ app.delete('/api/nodes/:id', requireAdminSession, (req, res) => {
   }
 });
 
-// ─── SPA fallback ──────────────────────────────────────
+// SPA fallback
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, 'public', 'index.html');
   try {
@@ -2949,7 +2876,7 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-// ─── KHỞI ĐỘNG CÁC DỊCH VỤ ──────────────────────────
+// start
 blockchain.startPoSMinting();
 NodeFeesRouter.initNodeFees();
 
@@ -2968,7 +2895,7 @@ app.listen(PORT, () => {
   console.log('');
   backupClient.start();
 
-  // ─── Startup blockchain restoration from mining nodes ──
+  // Startup blockchain restoration from mining nodes (dead code rn)
   setTimeout(async () => {
     const blockCount = db.getBlockCount();
     if (blockCount === 0) {
