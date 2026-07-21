@@ -1,5 +1,3 @@
-// blockchain.js - PoW chuẩn với blockchain liên tục, per-worker difficulty, reward 0.05 CC/block
-// Tích hợp mempool và phí giao dịch
 const crypto = require('crypto');
 const db = require('./db');
 
@@ -88,11 +86,9 @@ const DEVICE_REWARD_MULTIPLIERS = {
   'default': 1.0
 };
 
-// ─── Cấu hình mempool ────────────────────────────
 const MAX_MEMPOOL_PER_BLOCK = 50;                // Max mempool per block, bruh
 const MEMPOOL_HOLDING_ACCOUNT = 'mempool_holding'; // The account that holds mempool transactions
 
-// ─── Helper: chuyển difficulty → target hex ──
 function difficultyToTarget(difficulty) {
   const maxTarget = (1n << 256n) - 1n;
   const diffScaled = BigInt(Math.floor(difficulty * 1000));
@@ -101,7 +97,6 @@ function difficultyToTarget(difficulty) {
   return targetValue.toString(16).padStart(64, '0');
 }
 
-// ─── Khởi tạo blockchain (genesis) ─────────────
 function initBlockchain() {
   const last = db.getLastBlock();
   if (!last) {
@@ -128,7 +123,6 @@ function initBlockchain() {
   }
 }
 
-// ─── Lấy block cuối ────────────────────────────
 function getLastBlock() {
   return db.getLastBlock();
 }
@@ -153,7 +147,6 @@ function decayWorkerDifficulty(workerName, missedSeconds) {
   console.log(`⏱️ ${workerName} timed out (${missedSeconds.toFixed(1)}s, no solve): difficulty ${currentDiff.toFixed(1)} → ${newDiff.toFixed(1)}`);
 }
 
-// ─── Lấy job cho worker (tạo mới nếu chưa có) ─
 function getJobForWorker(workerName, instanceId, deviceType) {
   const diffKey = instanceId ? workerName + ':' + instanceId : workerName;
 
@@ -195,6 +188,7 @@ function getJobForWorker(workerName, instanceId, deviceType) {
   const height = lastBlock ? lastBlock.height + 1 : 0;
   const prevHash = lastBlock ? lastBlock.hash : '0'.repeat(64);
 
+  // if you're making a custom miner, we use mining/register-tier to get tiers, this is only a fallback/misc
   let tier = db.getWorkerTier(diffKey);
   if (!tier || tier === 'cpu') {
     tier = db.getWorkerTier(workerName);
@@ -287,7 +281,7 @@ function preCreateJobs(fromHeight, count, lastPrevHash) {
   }
 }
 
-// ─── Chuyển đổi job object ─────────────────────
+// job object
 function mapJob(job) {
   if (!job) return null;
   return {
@@ -303,7 +297,6 @@ function mapJob(job) {
   };
 }
 
-// ─── Xử lý các giao dịch trong mempool khi tạo block ──
 function processMempoolForBlock(blockHeight, minerUser) {
   // Lấy tối đa MAX_MEMPOOL_PER_BLOCK giao dịch pending
   const txs = db.getPendingMempool(MAX_MEMPOOL_PER_BLOCK);
@@ -314,11 +307,9 @@ function processMempoolForBlock(blockHeight, minerUser) {
   let processed = 0;
   let totalFees = 0;
 
-  // Kiểm tra tài khoản holding
   const holding = db.getUser(MEMPOOL_HOLDING_ACCOUNT);
   if (!holding) {
     console.warn('⚠️ mempool_holding account does not exist!');
-    // Đánh dấu tất cả là failed
     for (const tx of txs) {
       db.markMempoolFailed(tx.id);
     }
@@ -326,7 +317,6 @@ function processMempoolForBlock(blockHeight, minerUser) {
   }
 
   for (const tx of txs) {
-    // Kiểm tra người nhận có tồn tại không
     const receiver = db.getUser(tx.to_username);
     if (!receiver) {
       db.markMempoolFailed(tx.id);
@@ -334,18 +324,14 @@ function processMempoolForBlock(blockHeight, minerUser) {
       continue;
     }
 
-    // Kiểm tra số dư holding
     if (holding.balance < tx.total_deducted) {
       db.markMempoolFailed(tx.id);
       console.warn(`❌ Mempool tx ${tx.id}: insufficient holding balance (${holding.balance} < ${tx.total_deducted})`);
       continue;
     }
 
-    // Trừ từ holding
     db.updateBalance(MEMPOOL_HOLDING_ACCOUNT, -tx.total_deducted);
-    // Cộng amount cho receiver
     db.updateBalance(tx.to_username, tx.amount);
-    // Cộng fee vào miner who included this block
     if (tx.fee > 0 && minerUser) {
       db.updateBalance(minerUser, tx.fee);
       try {
@@ -354,15 +340,12 @@ function processMempoolForBlock(blockHeight, minerUser) {
     }
     totalFees += tx.fee;
 
-    // Đánh dấu đã xác nhận
     db.markMempoolConfirmed(tx.id, blockHeight);
     processed++;
 
-    // Ghi log giao dịch (tuỳ chọn)
     try {
       db.addTransaction(tx.from_username, tx.to_username, tx.amount);
     } catch (e) {
-      // Bỏ qua lỗi ghi log
     }
 
     console.log(`✅ Mempool tx ${tx.id} confirmed in block ${blockHeight}: ${tx.amount} CC to ${tx.to_username}, fee ${tx.fee} CC → miner ${minerUser}`);
@@ -371,13 +354,13 @@ function processMempoolForBlock(blockHeight, minerUser) {
   return { processed: processed, totalFees: totalFees };
 }
 
-// ─── Helper: multiplicador por tipo de dispositivo ─
+// multiplier per device
 function getDeviceMultiplier(deviceType) {
   const key = (deviceType || 'default').toLowerCase().trim();
   return DEVICE_REWARD_MULTIPLIERS[key] || DEVICE_REWARD_MULTIPLIERS['default'];
 }
 
-// ─── Submit solution ────────────────────────────
+// submit solution
 function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, instanceId, nodeId) {
   const diffKey = instanceId ? workerName + ':' + instanceId : workerName;
   const userName = diffKey.includes(':') ? diffKey.split(':')[0] : diffKey;
@@ -396,11 +379,6 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     throw new Error(`Block ${job.height} already mined. Submit at next height.`);
   }
 
-  // Atomically claim this job for solving: flip status active→solving in one
-  // UPDATE...WHERE. If a concurrent request already claimed it (or it was
-  // already solved), this affects 0 rows and we reject immediately — closes
-  // the race window where two polls/submits could both see status='active'
-  // for the same job_id and both proceed to submit a (still-valid) nonce.
   const claimResult = db.prepare(
     `UPDATE mining_jobs SET status = 'solving' WHERE id = ? AND status = 'active'`
   ).run(jobId);
@@ -420,18 +398,17 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     throw new Error('Worker suspended for suspicious behavior. Contact admin to appeal.');
   }
 
-  // Check user-level suspension (blocks ALL workers of this user)
+  // Check user suspension
   if (db.isUserSuspended(userName)) {
     console.warn(`🚫 User ${userName} is suspended at account level`);
     throw new Error('Account suspended for suspicious behavior. Contact admin to appeal.');
   }
 
-  // Kiểm tra nonce (hash uses diffKey to match client computation)
   const input = job.prev_hash + String(nonce).padStart(20, '0') + diffKey;
   const hashHex = crypto.createHash('sha256').update(input).digest('hex');
 
   if (hashHex >= job.target_hex) {
-    // Invalid nonce: release the claim so the job can be retried/re-served
+    // Invalid nonce
     db.prepare(`UPDATE mining_jobs SET status = 'active' WHERE id = ?`).run(jobId);
     return { status: 'error', reason: `Invalid nonce: hash ${hashHex.substring(0,12)}... >= target` };
   }
@@ -442,11 +419,6 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   let tier = job.tier || 'cpu';
   let tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cpu;
 
-  // Auto-tier: upgrade if sustained hashrate exceeds tier max (multi-device rigs)
-  // Only adjusts between mobile → cpu → gpu (embedded tiers stay fixed)
-  // Hysteresis: skip if this diffKey changed tier in the last 60s, to avoid
-  // thread-race flapping (e.g. two CPU threads under one instance reporting
-  // inconsistent per-solve hashrates and bouncing the tier back and forth).
   if (hashrateReported && hashrateReported > 0 && tierConfig.maxHashrate) {
     const reportedRatio = hashrateReported / tierConfig.maxHashrate;
     if (reportedRatio > 2.0) {
@@ -477,7 +449,6 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   }
 
   // Cross-check reported hashrate vs device capability
-  // Use worker's CURRENT tier from DB (not stale job.tier) to avoid false flags after auto-tier
   let currentTier = tier;
   let currentTierConfig = tierConfig;
   try {
@@ -511,30 +482,22 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     }
   }
 
-  // Hashrate validation (cross-check reported hashrate vs actual solve time)
+  // Hashrate validation
   const jobCreatedTimestamp = parseFlexibleDate(job.created_at);
   const actualSolveTime = timestamp - jobCreatedTimestamp;
 
-  // PoW solve times are exponentially (memoryless) distributed, not fixed —
-  // a single solve landing far below the *average* implied time is normal
-  // random variance, not evidence of cheating. VARIANCE_TOLERANCE widens the
-  // window before flagging, and MIN_SOLVE_TIME_FLOOR prevents division blowups
-  // on very fast (lucky, low-difficulty) solves.
+  // pow varience and tolerance
   const VARIANCE_TOLERANCE = 8;
   const MIN_SOLVE_TIME_FLOOR = 0.25; // seconds
 
-  // Cross-check actual hashrate vs device capability
-  // For high-capability tiers (cpu/gpu), allow fast solves on low diff
-  // For low-capability tiers (avr/esp), flag impossibly fast solves
+
   if (tierConfig.maxHashrate && tierConfig.maxHashrate <= 1000) {
-    // Low-hashrate tier: check if solve time is realistic for the tier
     const minRealisticTime = job.difficulty / (tierConfig.maxHashrate * VARIANCE_TOLERANCE);
     console.log(`🔍 Anti-cheat: tier=${tier} maxHR=${tierConfig.maxHashrate} diff=${job.difficulty} solveTime=${actualSolveTime.toFixed(4)}s minRealistic=${minRealisticTime.toFixed(4)}s`);
     if (actualSolveTime <= minRealisticTime) {
       const solveTimeFloor = Math.max(actualSolveTime, MIN_SOLVE_TIME_FLOOR);
       const actualHashrate = job.difficulty / solveTimeFloor;
       const actualRatio = actualHashrate / tierConfig.maxHashrate;
-      // Extra detail if hashrate was also missing/zero
       const hrNote = (!hashrateReported || hashrateReported <= 0)
         ? ` (also: hashrate_reported missing/zero — possible bypass attempt)`
         : ` (reported: ${hashrateReported} H/s)`;
@@ -553,10 +516,6 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
       }
     }
   } else if (tierConfig.maxHashrate) {
-    // High-capability tier: check if actual hashrate exceeds max.
-    // Use the same variance-tolerant floor as the low-hashrate branch above —
-    // a single fast/lucky solve at low difficulty is expected PoW randomness, 
-    // not proof of a faster device.
     const solveTimeFloor = Math.max(actualSolveTime, MIN_SOLVE_TIME_FLOOR);
     const actualHashrate = job.difficulty / solveTimeFloor;
     const actualRatio = actualHashrate / tierConfig.maxHashrate;
@@ -579,21 +538,11 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   }
 
   if (hashrateReported && hashrateReported > 0) {
-    // Use a solve-time floor here too — actualSolveTime is measured with
-    // second-precision timestamps, so any solve completing within the same
-    // second as job creation reads as exactly 0, making ratio = 0/expected
-    // always trip the check regardless of whether the hashrate was honest.
-    // Floor both sides so the ratio reflects real variance, not timestamp
-    // quantization.
     const solveTimeForRatio = Math.max(actualSolveTime, MIN_SOLVE_TIME_FLOOR);
     const expectedSolveTime = job.difficulty / hashrateReported;
     const ratio = solveTimeForRatio / expectedSolveTime;
     console.log(`🔍 Anti-cheat [check4/reported-vs-actual]: tier=${tier} diff=${job.difficulty} hashrateReported=${hashrateReported} rawActualSolveTime=${actualSolveTime.toFixed(4)}s (floored=${solveTimeForRatio.toFixed(4)}s) expectedSolveTime=${expectedSolveTime.toFixed(4)}s ratio=${ratio.toFixed(4)} (flag if <${(1/(VARIANCE_TOLERANCE*6)).toFixed(4)}) job.created_at=${job.created_at} now_ts=${timestamp}`);
 
-    // Solve time is exponentially distributed around the expected value, so
-    // a legit worker will regularly solve well under the "expected" time —
-    // only flag truly extreme outliers (previously 20x, which fired constantly
-    // on ordinary variance).
     if (ratio < (1 / (VARIANCE_TOLERANCE * 6))) {
       const reason = `Solved in ${actualSolveTime.toFixed(1)}s but reported hashrate ${hashrateReported} H/s implies ${expectedSolveTime.toFixed(1)}s (ratio ${ratio.toFixed(3)})`;
       const warnResult = db.addWorkerWarning(diffKey, reason);
@@ -612,19 +561,17 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     }
   }
 
-  // 🆕 Read tier and multiplier from job record (immutable, server-controlled)
+  // Read tier and multiplier from job record
   const tierMultiplier = job.reward_multiplier || 1.0;
 
-  // ─── Device multiplier: use tier from job, legacy fallback for old jobs ──
+  // Device multiplier
   let deviceMultiplier = tierMultiplier;
   if (!job.tier) {
     deviceMultiplier = getDeviceMultiplier(deviceType);
     console.log(`⚠️ Legacy job ${jobId} using device_type multiplier: ${deviceMultiplier}x`);
   }
 
-  // 🆕 Reward split: 5% to PoS pool (flat, always), rest to miner
-  // If nodeId: 90% miner / 5% node / 5% PoS
-  // If no node: 95% miner / 5% PoS
+  // block reward split
   const POS_REWARD_SHARE = 0.05;
   const posContribution = parseFloat((REWARD_PER_BLOCK * POS_REWARD_SHARE).toFixed(8)); // always 0.0025 CC
 
@@ -641,12 +588,11 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   // miner reward = minerBase × tier_multiplier
   const deviceReward = parseFloat((minerBase * deviceMultiplier).toFixed(8));
 
-  // ─── Mining Boost: multiplicador 1.3x se ativo ──
+  // mining boost
   const boostMultiplier = db.getMiningBoostMultiplier(diffKey);
   const finalReward = parseFloat((deviceReward * boostMultiplier).toFixed(8));
   const bonusReward = parseFloat((finalReward - deviceReward).toFixed(8));
 
-  // 🆕 Credit PoS pool + miner + node — ALL in one transaction to prevent race condition
   const newBlock = {
     height: job.height,
     hash: hashHex,
@@ -663,7 +609,6 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     pos_contribution: posContribution
   };
 
-  // Atomic: block insert + balance + PoS pool + node earnings — rolls back on failure
   db.submitBlockTransaction(newBlock, userName, finalReward, posContribution, nodeId, nodeContribution);
 
   if (nodeId && nodeContribution > 0) {
@@ -674,33 +619,25 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     console.log(`⚡ Mining boost active for ${diffKey}: ${deviceReward} → ${finalReward} CC (${boostMultiplier}x)`);
   }
 
-  // ─── Xử lý mempool ──────────────────────────────
   const mempoolResult = processMempoolForBlock(newBlock.height, userName);
 
-  // Cập nhật tx_count và total_fees cho block
   if (mempoolResult.processed > 0 || mempoolResult.totalFees > 0) {
     db.updateBlockFees(newBlock.height, mempoolResult.totalFees);
     newBlock.tx_count = mempoolResult.processed;
     newBlock.total_fees = mempoolResult.totalFees;
   }
 
-  // Mark the winning job solved, then wipe ALL active jobs at this height
-  // (other workers may still have active jobs targeting the same height —
-  // leaving them alive is what caused the UNIQUE constraint rejection loop).
   db.markJobSolved(jobId);
   db.deleteJobsAtHeight(job.height, jobId);
   db.deleteJobsForWorker(diffKey, jobId);
 
-  // Pre-create jobs at next heights for other miners
   preCreateJobs(newBlock.height + 1, JOB_POOL_SIZE, hashHex);
 
-  // Điều chỉnh difficulty cho instance dựa trên thời gian giải
   const solveTime = (timestamp - parseFlexibleDate(job.created_at));
   if (solveTime > 0) {
     adjustWorkerDifficulty(diffKey, solveTime);
   }
 
-  // Gửi thông báo (webhook)
   sendMinerWebhook(diffKey, newBlock.height, tier, finalReward);
 
   const logParts = [
@@ -726,7 +663,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   };
 }
 
-// ─── Điều chỉnh difficulty cho worker ──────────
+// adjust diff
 function adjustWorkerDifficulty(workerName, solveTime) {
   const currentDiff = db.getWorkerDifficulty(workerName) || INITIAL_DIFFICULTY;
   const targetTime = TARGET_SOLVE_TIME;
@@ -744,7 +681,7 @@ function adjustWorkerDifficulty(workerName, solveTime) {
   console.log(`👷 Worker ${workerName}: difficulty ${currentDiff.toFixed(1)} → ${newDiff.toFixed(1)} (solve time ${solveTime.toFixed(1)}s)`);
 }
 
-// ─── Đặt lại difficulty về mức an toàn cho tier ──
+// cap worker diff
 function capWorkerDifficulty(workerName, tier) {
   const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cpu;
   const currentDiff = db.getWorkerDifficulty(workerName);
@@ -756,7 +693,7 @@ function capWorkerDifficulty(workerName, tier) {
   }
 }
 
-// ─── Webhook ─────────────────────────────────────
+// discord webhook activation
 async function sendMinerWebhook(worker, height, device, reward) {
   try {
     await fetch(process.env.DISCORD_WEBHOOK_URL, {
@@ -777,7 +714,7 @@ async function sendMinerWebhook(worker, height, device, reward) {
   }
 }
 
-// ─── PoS (giữ nguyên từ cũ) ────────────────────
+// PoS
 const POS_BLOCK_INTERVAL = 30000;
 const MIN_STAKE = 10;
 let currentValidator = null;
@@ -820,24 +757,18 @@ function startPoSMinting() {
   console.log('🏦 PoS reward distribution started (fee-funded pool, proportional stake share)');
 }
 
-// ─── Khởi tạo khi load module ──────────────────
 initBlockchain();
 
-// ─── Export các hàm ─────────────────────────────
 module.exports = {
-  // Config (for other modules to read)
   TIER_CONFIG,
   TIER_INITIAL_DIFFICULTY,
-  // PoW mới
   getLastBlock: getLastBlock,
   getJobForWorker: getJobForWorker,
   submitSolution: submitSolution,
-  // PoS
   startPoSMinting: startPoSMinting,
   distributePoSRewards: distributePoSRewards,
   getCurrentValidator: getCurrentValidator,
   getCurrentDifficulty: function() { return INITIAL_DIFFICULTY; },
-  // Hàm cũ (để tương thích – có thể bỏ dần)
   getActiveBounties: function() { return {}; },
   getJob: function(id) { return null; },
   startAutoBounty: function() {},
