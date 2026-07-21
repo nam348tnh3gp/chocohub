@@ -126,14 +126,13 @@ function getLastBlock() {
   return db.getLastBlock();
 }
 
-// ─── Helper: parse SQLite datetime('now') or ISO string ──
 function parseFlexibleDate(str) {
   if (!str) return 0;
   const iso = str.includes('T') ? str : str.replace(' ', 'T');
   return new Date(iso.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(iso) ? iso : iso + 'Z').getTime() / 1000;
 }
 
-// ─── Decay difficulty when a job times out without a solve ──
+// decay worker diff
 function decayWorkerDifficulty(workerName, missedSeconds) {
   const currentDiff = db.getWorkerDifficulty(workerName) || INITIAL_DIFFICULTY;
   const overrun = missedSeconds / TARGET_SOLVE_TIME;
