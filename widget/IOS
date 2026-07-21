@@ -1,12 +1,9 @@
-// ChocoHub Widget — Amber Theme (4 decimals for latest block)
-// iOS Scriptable — giống màu mining.html
+// ChocoHub Widget for IOS, made by Ruvyzvat (also know as the guy from nowhere)
 
-// ---------- CẤU HÌNH ----------
 const CH_USER = "node_fees"; //change your account
 const SERVER_URL = "https://chocohub-r011.onrender.com";
 const LOGO_URL = "https://raw.githubusercontent.com/nam348tnh3gp/chocohub/main/public/favicon.ico";
 
-// ---------- BẢNG MÀU ----------
 const COLORS = {
   bg: { start: "#0a0a0c", end: "#14151a" },
   text: { primary: "#ffb86c", muted: "#8b949e", accent: "#ffb86c" }
@@ -57,7 +54,6 @@ async function createWidget(data) {
   mainStack.layoutVertically();
   mainStack.setPadding(8, 14, 14, 14);
 
-  // Header: ChocoHub + icon cạnh nhau
   const headerRow = mainStack.addStack();
   headerRow.layoutHorizontally();
   headerRow.centerAlignContent();
@@ -71,23 +67,19 @@ async function createWidget(data) {
   }
   mainStack.addSpacer(6);
   
-  // Tên người dùng
   const userRow = mainStack.addStack();
   userRow.centerAlignContent();
   addStyledText(userRow, data.username, 16, "medium");
   mainStack.addSpacer(4);
   
-  // Số dư
   addStyledText(mainStack, `${data.balance.toFixed(4)} CC`, 22, "bold");
   mainStack.addSpacer(6);
   
-  // Đường kẻ
   const divider = mainStack.addStack();
   divider.backgroundColor = new Color(COLORS.text.accent, 0.3);
   divider.size = new Size(-1, 1);
   mainStack.addSpacer(6);
   
-  // Dòng thống kê
   const statsRow = mainStack.addStack();
   statsRow.layoutHorizontally();
   statsRow.spacing = 12;
@@ -104,24 +96,20 @@ async function createWidget(data) {
   
   statsRow.addSpacer();
   
-  // Block gần nhất (latest) – hiển thị dạng "Latest: #11 by username"
   const latestBlock = data.recentBlocks[0];
   if (latestBlock) {
     mainStack.addSpacer(6);
     const blockRow = mainStack.addStack();
     blockRow.layoutHorizontally();
     
-    // "Latest:"
     addStyledText(blockRow, "Latest:", 12, "regular", 0.7, COLORS.text.muted);
     blockRow.addSpacer(4);
     
-    // Lấy số block (height) hoặc id/hash fallback
     let blockNumber = latestBlock.height;
     let displayId;
     if (blockNumber !== undefined && blockNumber !== null) {
       displayId = `#${blockNumber}`;
     } else {
-      // Fallback: dùng id hoặc hash
       const rawId = latestBlock.id || latestBlock.hash || '?';
       displayId = rawId.length > 8 ? rawId.substring(0, 8) + '…' : rawId;
     }
@@ -132,16 +120,13 @@ async function createWidget(data) {
     addStyledText(blockRow, "by", 11, "regular", 0.6, COLORS.text.muted);
     blockRow.addSpacer(4);
     
-    // Tên miner – ưu tiên miner, username, solver_username
     const miner = latestBlock.miner || latestBlock.username || latestBlock.solver_username || 'unknown';
     addStyledText(blockRow, miner, 12, "medium", 0.9, COLORS.text.primary);
     
-    // Thêm reward nếu có (tùy chọn, có thể bỏ nếu muốn gọn)
     blockRow.addSpacer();
     const reward = (latestBlock.reward || 0).toFixed(4);
     addStyledText(blockRow, `${reward} CC`, 11, "regular", 0.7, COLORS.text.muted);
   } else {
-    // Không có block nào
     mainStack.addSpacer(6);
     const noBlockRow = mainStack.addStack();
     addStyledText(noBlockRow, "No blocks yet", 11, "regular", 0.5, COLORS.text.muted);
