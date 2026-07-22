@@ -34,9 +34,9 @@ This is a good question, we use device based multipliers to miners
 | `gpu` | 1.0x |
 | `ASIC` (upcoming) | 0.5x |
 
-## Rewards Distribution
+> In case of microcontrollers mining, mostly devices are more profitable than electricity bills (depends highly on device, compared to other coins, ours is more profitable ON MICROCONTROLLERS)
 
-Here is the breakdown of the rewards distribution as requested:
+## Rewards Distribution
 
 | Category       | Percentage |
 | :------------- | :--------- |
@@ -44,8 +44,6 @@ Here is the breakdown of the rewards distribution as requested:
 | Mining-nodes Fees | 5%     |
 | Staking Pool   | 5%         |
 | **Total**      | **100%**   |
-
-> In case of microcontrollers mining, mostly devices are more profitable than electricity bills (depends highly on device, compared to other coins, ours is more profitable ON MICROCONTROLLERS)
 
 ---
 
