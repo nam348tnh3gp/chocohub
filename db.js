@@ -1114,6 +1114,33 @@ db.exec(`
 ensureColumn('mining_nodes', 'last_block_height', 'INTEGER DEFAULT 0');
 ensureColumn('transactions', 'description', "TEXT DEFAULT ''");
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS trusted_blocks (
+    height INTEGER PRIMARY KEY,
+    hash TEXT UNIQUE NOT NULL,
+    prev_hash TEXT NOT NULL,
+    miner TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    difficulty REAL NOT NULL,
+    job_id TEXT NOT NULL,
+    signature TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS trusted_jobs (
+    id TEXT PRIMARY KEY,
+    height INTEGER NOT NULL,
+    prev_hash TEXT NOT NULL,
+    miner TEXT,
+    node_id TEXT NOT NULL,
+    nonce_target TEXT NOT NULL,
+    difficulty REAL NOT NULL,
+    status TEXT DEFAULT 'active',
+    created_at INTEGER NOT NULL
+  );
+`);
+ensureColumn('trusted_blocks', 'signature', 'TEXT DEFAULT ""');
 
 const MAX_MINING_NODES = 50;
 
@@ -1250,8 +1277,8 @@ function upsertTrustedBlocks(blocks = []) {
     if (typeof block.height !== 'number') continue;
     const row = db.prepare('SELECT height FROM trusted_blocks WHERE height = ? OR hash = ?').get(block.height, block.hash);
     if (row) continue;
-    db.prepare("INSERT INTO trusted_blocks (height, hash, prev_hash, miner, node_id, nonce, timestamp, difficulty, job_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))")
-      .run(block.height, block.hash, block.prev_hash || '', block.miner || '', block.node_id || '', String(block.nonce || ''), Number(block.timestamp) || Math.floor(Date.now() / 1000), Number(block.difficulty) || 1, block.job_id || '');
+    db.prepare("INSERT INTO trusted_blocks (height, hash, prev_hash, miner, node_id, nonce, timestamp, difficulty, job_id, signature, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))")
+      .run(block.height, block.hash, block.prev_hash || '', block.miner || '', block.node_id || '', String(block.nonce || ''), Number(block.timestamp) || Math.floor(Date.now() / 1000), Number(block.difficulty) || 1, block.job_id || '', block.signature || '');
     inserted++;
   }
   return inserted;
