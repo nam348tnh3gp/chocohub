@@ -1,7 +1,5 @@
-// dh.js – Diffie‑Hellman (RFC 5114 modp2048) + RSA server authentication
 const crypto = require('crypto');
 
-// ─── Nhóm DH chuẩn (RFC 5114 modp2048) ──────────────────
 const MODP2048_PRIME_HEX =
   'FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1' +
   '29024E088A67CC74020BBEA63B139B22514A08798E3404DD' +
@@ -24,8 +22,8 @@ const MODP2048_PRIME_LEN = MODP2048_PRIME.length;   // 256 bytes
 
 class DHExchange {
   /**
-   * Tạo cặp khóa DH từ nhóm chuẩn (khuyến nghị: 'modp2048').
-   * @param {string} groupName – 'modp2048'
+   * Create a DH key pair from the standard group (recommended: 'modp2048').
+   * @param {string} groupName - 'modp2048'
    * @returns {{ privateKey: string, publicKey: string, prime: string, generator: string, group: string }}
    */
   static generateStandardKeyPair(groupName = 'modp2048') {
@@ -41,15 +39,15 @@ class DHExchange {
   }
 
   /**
-   * Sinh cặp khóa DH (2048‑bit) – giữ lại để tương thích, gọi hàm chuẩn.
+   * Generate a 2048-bit DH key pair. Kept for compatibility and forwards to the standard helper.
    */
   static generateKeyPair() {
     return DHExchange.generateStandardKeyPair('modp2048');
   }
 
   /**
-   * Tính shared secret từ private key của mình và public key của đối tác.
-   * Tự động đệm public key nếu cần thiết.
+   * Compute the shared secret from our private key and the peer public key.
+   * Pad the peer public key automatically when needed.
    */
   static computeSharedSecret(ourPrivateKey, theirPublicKey, prime, generator) {
     const primeBuf = Buffer.from(prime, 'base64');
@@ -58,8 +56,6 @@ class DHExchange {
 
     const dh = crypto.createDiffieHellman(primeBuf, generatorBuf);
     dh.setPrivateKey(Buffer.from(ourPrivateKey, 'base64'));
-
-    // Xử lý public key của đối tác: đệm cho đủ primeLen nếu bị thiếu
     let theirPub = Buffer.from(theirPublicKey, 'base64');
     if (theirPub.length < primeLen) {
       const padded = Buffer.alloc(primeLen, 0);
@@ -81,7 +77,7 @@ class DHExchange {
   }
 
   /**
-   * Tạo chữ ký HMAC‑SHA256 cho thông điệp.
+   * Create an HMAC-SHA256 signature for a message.
    */
   static sign(message, sessionKey) {
     return crypto.createHmac('sha256', Buffer.from(sessionKey, 'base64'))
@@ -90,7 +86,7 @@ class DHExchange {
   }
 
   /**
-   * Xác minh chữ ký HMAC (so sánh an toàn).
+   * Verify an HMAC signature with a constant-time comparison.
    */
   static verify(message, signature, sessionKey) {
     const expected = DHExchange.sign(message, sessionKey);
@@ -105,9 +101,9 @@ class DHExchange {
   }
 
   /**
-   * Ký dữ liệu bằng RSA private key (PEM).
-   * @param {string} data – dữ liệu cần ký (JSON string)
-   * @param {string} privateKeyPem – private key PEM
+   * Sign data with an RSA private key (PEM).
+   * @param {string} data - Data to sign (JSON string)
+   * @param {string} privateKeyPem - Private key PEM
    * @returns {string} chữ ký base64
    */
   static signWithPrivateKey(data, privateKeyPem) {
@@ -118,10 +114,10 @@ class DHExchange {
   }
 
   /**
-   * Xác minh chữ ký bằng RSA public key (PEM).
-   * @param {string} data – dữ liệu đã ký
-   * @param {string} signature – chữ ký base64
-   * @param {string} publicKeyPem – public key PEM
+   * Verify a signature with an RSA public key (PEM).
+   * @param {string} data - Signed data
+   * @param {string} signature - Base64 signature
+   * @param {string} publicKeyPem - Public key PEM
    * @returns {boolean}
    */
   static verifyWithPublicKey(data, signature, publicKeyPem) {

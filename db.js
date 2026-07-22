@@ -1,8 +1,3 @@
-// db.js – Full fix + PoS Staking + Leaderboard + Backup full snapshot + Transactions
-// 🆕 Thêm bảng worker_difficulty cho per-worker dynamic difficulty
-// 🆕 Thêm blockchain tables: blocks, mining_jobs
-// 🆕 Thêm mempool và node_fees
-// 🆕 Thêm admin functions: deleteUser, setUserBanned, ensureBannedColumn
 
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
@@ -13,7 +8,6 @@ const path = require('path');
 const db = new Database(path.join(__dirname, 'chocohub.db'));
 db.pragma('journal_mode = WAL');
 
-// Helper: chuyển datetime từ SQLite (YYYY-MM-DD HH:MM:SS) sang ISO string (YYYY-MM-DDTHH:MM:SSZ)
 function toISO(dateStr) {
     if (!dateStr) return null;
     if (dateStr.includes('Z') || dateStr.includes('+')) return dateStr;
@@ -21,7 +15,6 @@ function toISO(dateStr) {
     return dateStr.replace(' ', 'T') + 'Z';
 }
 
-// Khởi tạo bảng
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,7 +70,7 @@ db.exec(`
   INSERT OR IGNORE INTO sync_seq (id, seq) VALUES (1, 0);
   INSERT OR IGNORE INTO pos_reward_pool (id, balance, total_fees, last_distribution_at) VALUES (1, 0, 0, datetime('now'));
 
-  -- Bảng lưu lịch sử gửi/nhận CC
+  -- Store CC send/receive history
   CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     from_username TEXT NOT NULL,
@@ -87,7 +80,7 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 
-  -- 🆕 Bảng lưu difficulty riêng cho từng worker
+  -- Add per-worker difficulty storage
   CREATE TABLE IF NOT EXISTS worker_difficulty (
     worker_name TEXT PRIMARY KEY,
     difficulty REAL NOT NULL DEFAULT 10,
@@ -95,7 +88,7 @@ db.exec(`
     updated_at TEXT DEFAULT (datetime('now'))
   );
 
-  -- 🆕 Bảng blockchain mới
+  -- Add the main blockchain table
   CREATE TABLE IF NOT EXISTS blocks (
     height INTEGER PRIMARY KEY,
     hash TEXT UNIQUE NOT NULL,
@@ -122,7 +115,7 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 
-  -- 🆕 Bảng mempool
+  -- Add the mempool table
   CREATE TABLE IF NOT EXISTS mempool (
     id TEXT PRIMARY KEY,
     from_username TEXT NOT NULL,
@@ -136,7 +129,7 @@ db.exec(`
     block_height INTEGER DEFAULT NULL
   );
 
-  -- 🆕 Bảng node_fees (lưu số dư và tổng phí thu)
+  -- Add node_fees (balance and total collected fees)
   CREATE TABLE IF NOT EXISTS node_fees (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     balance REAL NOT NULL DEFAULT 0,
@@ -145,7 +138,7 @@ db.exec(`
   );
   INSERT OR IGNORE INTO node_fees (id, balance, total_collected) VALUES (1, 0, 0);
 
-  -- 🆕 Bảng game_sessions (proof-of-play cho Snake)
+  -- Add game_sessions (proof-of-play for Snake)
   CREATE TABLE IF NOT EXISTS game_sessions (
     id TEXT PRIMARY KEY,
     username TEXT NOT NULL,
@@ -154,7 +147,7 @@ db.exec(`
     used INTEGER DEFAULT 0
   );
 
-  -- 🆕 Bảng mining_boosts (ad-click boost)
+  -- Add mining_boosts (ad-click boost)
   CREATE TABLE IF NOT EXISTS mining_boosts (
     worker_name TEXT PRIMARY KEY,
     multiplier REAL NOT NULL DEFAULT 1.0,
@@ -163,7 +156,7 @@ db.exec(`
     last_activation_at INTEGER DEFAULT 0
   );
 
-  -- Tạo index cho hiệu suất
+  -- Create indexes for performance
   CREATE INDEX IF NOT EXISTS idx_mining_jobs_assigned_to_status ON mining_jobs(assigned_to, status);
   CREATE INDEX IF NOT EXISTS idx_blocks_height ON blocks(height DESC);
   CREATE INDEX IF NOT EXISTS idx_mempool_status ON mempool(status);
@@ -174,7 +167,6 @@ db.exec(`
 
 console.log('✅ Database ready (better-sqlite3)');
 
-// ─── Auth ─────────────────────────────────────────
 function authenticate(username, pin) {
   username = username.trim();
   let user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
@@ -206,7 +198,6 @@ function updateBalance(username, amount) {
   db.prepare('UPDATE users SET balance = balance + ? WHERE username = ?').run(amount, username.trim());
 }
 
-// ─── Transactions ────────────────────────────────
 function addTransaction(from_username, to_username, amount, description) {
   const desc = description || '';
   return db.prepare('INSERT INTO transactions (from_username, to_username, amount, description) VALUES (?, ?, ?, ?)').run(from_username.trim(), to_username.trim(), amount, desc);
@@ -226,7 +217,6 @@ function getTransactions(username, limit = 20) {
   }));
 }
 
-// ─── Blocks & Miners (cũ) ─────────────────────────
 function getRecentBlocks(limit = 10) {
   const rows = db.prepare('SELECT bounty_id as id, username, reward, mined_at FROM blocks_mined ORDER BY mined_at DESC LIMIT ?').all(limit);
   return rows.map(row => ({
@@ -239,7 +229,6 @@ function getActiveMiners(limit = 5) {
   return db.prepare('SELECT DISTINCT username, "web" as device FROM blocks_mined ORDER BY mined_at DESC LIMIT ?').all(limit);
 }
 
-// ─── Staking ─────────────────────────────────────
 function getStake(username) {
   username = username.trim();
   let row = db.prepare('SELECT * FROM stakes WHERE username = ?').get(username);
@@ -354,7 +343,6 @@ function distributePosRewards(minStake = 10) {
   };
 }
 
-// ─── Snake claim ─────────────────────────────────
 function getLastSnakeClaim(username) {
   const row = db.prepare('SELECT claimed_at FROM snake_claims WHERE username=? ORDER BY claimed_at DESC LIMIT 1').get(username.trim());
   if (row && row.claimed_at) row.claimed_at = toISO(row.claimed_at);
@@ -365,7 +353,6 @@ function insertSnakeClaim(username, apples, mode, reward) {
   return db.prepare('INSERT INTO snake_claims (username, apples, mode, reward) VALUES (?, ?, ?, ?)').run(username.trim(), apples, mode || 'normal', reward);
 }
 
-// ─── Leaderboard ─────────────────────────────────
 function getLeaderboard(mode, limit = 10) {
   return db.prepare(`
     SELECT username, MAX(apples) as score, MAX(reward) as reward 
@@ -377,7 +364,6 @@ function getLeaderboard(mode, limit = 10) {
   `).all(mode, limit);
 }
 
-// ─── Sequence (giữ lại nếu cần) ──────────────────
 function getSeq() {
   const row = db.prepare('SELECT seq FROM sync_seq WHERE id = 1').get();
   return row ? row.seq : 0;
@@ -388,7 +374,6 @@ function incrementSeq() {
   return db.prepare('SELECT seq FROM sync_seq WHERE id = 1').get().seq;
 }
 
-// 🟢 Hỗ trợ hash nhanh cho health check
 function getAllUsers() {
   return db.prepare('SELECT username, balance, banned FROM users').all();
 }
@@ -401,7 +386,6 @@ function getPosRewardPoolSnapshot() {
   return getPosRewardPool();
 }
 
-// 🆕 Dọn dẹp bounty cũ (giữ 100 bounty active gần nhất)
 function cleanupOldBounties() {
   const count = db.prepare('SELECT COUNT(*) as count FROM bounties WHERE status = ?').get('active');
   if (count && count.count > 100) {
@@ -416,9 +400,6 @@ function cleanupOldBounties() {
   }
 }
 
-// ═══════════════════════════════════════════════════
-// 🆕 FULL DATABASE SNAPSHOT – GIỚI HẠN 10 BLOCKS + 10 BOUNTIES
-// ═══════════════════════════════════════════════════
 function exportFullState() {
   const users = db.prepare('SELECT username, pin_hash, balance FROM users').all();
   const stakes = db.prepare('SELECT username, amount, pending_reward FROM stakes').all();
@@ -457,7 +438,7 @@ function importFullState(state) {
     db.exec('DELETE FROM snake_claims');
     db.exec('DELETE FROM bounties');
     db.exec('DELETE FROM sync_seq');
-    // Xóa thêm bảng mới nếu có dữ liệu cũ (tuỳ chọn)
+    // Drop the new table only when old data is present (optional)
     // db.exec('DELETE FROM blocks');
     // db.exec('DELETE FROM mining_jobs');
 
@@ -498,7 +479,6 @@ function importFullState(state) {
   return true;
 }
 
-// 🆕 Quản lý difficulty riêng cho từng worker
 function getWorkerDifficulty(workerName) {
   const row = db.prepare('SELECT difficulty FROM worker_difficulty WHERE worker_name = ?').get(workerName);
   return row ? row.difficulty : null;
@@ -515,9 +495,6 @@ function setWorkerDifficulty(workerName, difficulty, lastSolveTime) {
   `).run(workerName, difficulty, lastSolveTime);
 }
 
-// ═══════════════════════════════════════════════════
-// 🆕 BLOCKCHAIN HELPER FUNCTIONS
-// ═══════════════════════════════════════════════════
 
 function getLastBlock() {
   const block = db.prepare('SELECT * FROM blocks ORDER BY height DESC LIMIT 1').get();
@@ -534,9 +511,6 @@ function getBlockByHash(hash) {
   return withTotalReward(block);
 }
 
-// Adds a computed total_reward field (reward + total_fees) without changing
-// the stored reward column, so the explorer can show what the miner actually
-// received while accounting/auditing still sees pure PoW reward separately.
 function withTotalReward(block) {
   if (!block) return block;
   block.total_reward = Number(((block.reward || 0) + (block.total_fees || 0)).toFixed(8));
@@ -583,7 +557,6 @@ function deleteJobsForWorker(workerName, exceptJobId) {
   `).run(workerName, exceptJobId);
 }
 
-// Invalidate all active jobs at a given block height (called after a block is accepted)
 function deleteJobsAtHeight(height, exceptJobId) {
   if (exceptJobId) {
     db.prepare(`
@@ -626,11 +599,7 @@ function getBlocksByMiner(minerName, sinceTimestamp) {
   return blocks.map(withTotalReward);
 }
 
-// ═══════════════════════════════════════════════════
-// 🆕 MEMPOOL FUNCTIONS
-// ═══════════════════════════════════════════════════
 
-// Thêm giao dịch vào mempool
 function addToMempool(tx) {
   const { id, from_username, to_username, amount, fee, total_deducted } = tx;
   db.prepare(`
@@ -640,7 +609,6 @@ function addToMempool(tx) {
   return id;
 }
 
-// Lấy các giao dịch pending (sắp xếp theo thời gian cũ nhất trước)
 function getPendingMempool(limit = 50) {
   return db.prepare(`
     SELECT * FROM mempool 
@@ -650,13 +618,11 @@ function getPendingMempool(limit = 50) {
   `).all(limit);
 }
 
-// Đếm số lượng giao dịch pending
 function getMempoolCount() {
   const row = db.prepare('SELECT COUNT(*) as count FROM mempool WHERE status = ?').get('pending');
   return row ? row.count : 0;
 }
 
-// Đánh dấu giao dịch đã xác nhận
 function markMempoolConfirmed(txId, blockHeight) {
   db.prepare(`
     UPDATE mempool 
@@ -665,7 +631,6 @@ function markMempoolConfirmed(txId, blockHeight) {
   `).run(blockHeight, txId);
 }
 
-// Đánh dấu giao dịch thất bại (do không đủ balance)
 function markMempoolFailed(txId) {
   db.prepare(`
     UPDATE mempool SET status = 'failed', confirmed_at = datetime('now')
@@ -673,7 +638,6 @@ function markMempoolFailed(txId) {
   `).run(txId);
 }
 
-// Đánh dấu giao dịch đã được hoàn tiền
 function markMempoolRefunded(txId) {
   db.prepare(`
     UPDATE mempool SET status = 'refunded', confirmed_at = datetime('now')
@@ -681,12 +645,10 @@ function markMempoolRefunded(txId) {
   `).run(txId);
 }
 
-// Lấy thông tin một giao dịch theo ID
 function getMempoolTx(txId) {
   return db.prepare('SELECT * FROM mempool WHERE id = ?').get(txId);
 }
 
-// Dọn dẹp các giao dịch pending quá hạn (trả về danh sách các tx để hoàn tiền)
 function getExpiredMempool(expireSeconds) {
   return db.prepare(`
     SELECT * FROM mempool 
@@ -695,9 +657,6 @@ function getExpiredMempool(expireSeconds) {
   `).all(expireSeconds);
 }
 
-// ═══════════════════════════════════════════════════
-// 🆕 GAME SESSION FUNCTIONS (proof-of-play)
-// ═══════════════════════════════════════════════════
 
 function createGameSession(id, username, expiresAt) {
   const now = Math.floor(Date.now() / 1000);
@@ -721,9 +680,6 @@ function cleanupExpiredGameSessions() {
   db.prepare('DELETE FROM game_sessions WHERE expires_at < ?').run(now);
 }
 
-// ═══════════════════════════════════════════════════
-// 🆕 MINING BOOST FUNCTIONS
-// ═══════════════════════════════════════════════════
 
 function getMiningBoost(workerName) {
   const row = db.prepare('SELECT * FROM mining_boosts WHERE worker_name = ?').get(workerName.trim());
@@ -760,17 +716,12 @@ function getMiningBoostMultiplier(workerName) {
   return boost ? boost.multiplier : 1.0;
 }
 
-// ═══════════════════════════════════════════════════
-// 🆕 NODE FEES FUNCTIONS
-// ═══════════════════════════════════════════════════
 
-// Lấy số dư node_fees
 function getNodeFeesBalance() {
   const row = db.prepare('SELECT balance FROM node_fees WHERE id = 1').get();
   return row ? row.balance : 0;
 }
 
-// Cộng phí vào node_fees
 function addNodeFees(amount) {
   const fee = Number(amount) || 0;
   if (fee <= 0) return 0;
@@ -784,7 +735,6 @@ function addNodeFees(amount) {
   return fee;
 }
 
-// Trừ tiền từ node_fees (khi rút)
 function deductNodeFees(amount) {
   const fee = Number(amount) || 0;
   if (fee <= 0) return 0;
@@ -799,7 +749,6 @@ function deductNodeFees(amount) {
   return fee;
 }
 
-// Cập nhật trực tiếp số dư node_fees (để đặt lại balance)
 function setNodeFeesBalance(newBalance) {
   const bal = Number(newBalance) || 0;
   db.prepare(`
@@ -811,30 +760,24 @@ function setNodeFeesBalance(newBalance) {
   return bal;
 }
 
-// Lấy tổng phí đã thu
 function getTotalNodeFeesCollected() {
   const row = db.prepare('SELECT total_collected FROM node_fees WHERE id = 1').get();
   return row ? row.total_collected : 0;
 }
 
-// ═══════════════════════════════════════════════════
-// 🆕 ADMIN FUNCTIONS
-// ═══════════════════════════════════════════════════
 
-// Đảm bảo cột banned tồn tại
 function ensureBannedColumn() {
   try {
     db.prepare("ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0").run();
     console.log('✅ Banned column ensured');
   } catch (e) {
-    // Cột đã tồn tại hoặc lỗi khác, bỏ qua
+    // Column already exists or another error occurred; ignore it
     if (!e.message.includes('duplicate column name')) {
       console.warn('Could not ensure banned column:', e.message);
     }
   }
 }
 
-// Xóa user và các dữ liệu liên quan
 function deleteUser(username) {
   const user = getUser(username);
   if (!user) throw new Error('User not found');
@@ -843,11 +786,10 @@ function deleteUser(username) {
   db.prepare('DELETE FROM transactions WHERE from_username = ? OR to_username = ?').run(username, username);
   db.prepare('DELETE FROM snake_claims WHERE username = ?').run(username);
   db.prepare('DELETE FROM mempool WHERE from_username = ? OR to_username = ?').run(username, username);
-  // blocks_mined giữ lại để thống kê
+  // Keep blocks_mined for statistics
   console.log(`🗑️ Deleted user ${username} and related data`);
 }
 
-// Cập nhật trạng thái banned
 function setUserBanned(username, banned) {
   const user = getUser(username);
   if (!user) throw new Error('User not found');
@@ -855,7 +797,6 @@ function setUserBanned(username, banned) {
   console.log(`🔒 User ${username} ${banned ? 'banned' : 'unbanned'}`);
 }
 
-// Garantir coluna device_type na tabela blocks (para DBs existentes)
 function ensureBlockDeviceTypeColumn() {
   try {
     db.prepare("ALTER TABLE blocks ADD COLUMN device_type TEXT DEFAULT 'unknown'").run();
@@ -867,9 +808,6 @@ function ensureBlockDeviceTypeColumn() {
   }
 }
 
-// ═══════════════════════════════════════════════════
-// 🆕 SAFE COLUMN ADDITION HELPER
-// ═══════════════════════════════════════════════════
 function ensureColumn(tableName, columnName, columnDef) {
   try {
     const check = db.prepare(`PRAGMA table_info(${tableName})`).all();
@@ -885,9 +823,6 @@ function ensureColumn(tableName, columnName, columnDef) {
   }
 }
 
-// ═══════════════════════════════════════════════════
-// 🆕 TIER & FLAG MANAGEMENT FUNCTIONS
-// ═══════════════════════════════════════════════════
 
 function getWorkerTier(workerName) {
   const row = db.prepare('SELECT tier FROM worker_difficulty WHERE worker_name = ?').get(workerName);
@@ -1047,9 +982,6 @@ function getFlaggedWorkers() {
   });
 }
 
-// ═══════════════════════════════════════════════════
-// 🆕 USER-LEVEL FLAGS (blocks ALL workers of a user)
-// ═══════════════════════════════════════════════════
 
 function getUserFlags(username) {
   const row = db.prepare('SELECT * FROM user_flags WHERE username = ?').get(username);
@@ -1119,13 +1051,9 @@ function isUserSuspended(username) {
   return row ? Boolean(row.suspended) : false;
 }
 
-// Gọi ensureBannedColumn e ensureBlockDeviceTypeColumn quando module load
 ensureBannedColumn();
 ensureBlockDeviceTypeColumn();
 
-// ═══════════════════════════════════════════════════
-// 🆕 EXTEND EXISTING TABLES WITH NEW COLUMNS
-// ═══════════════════════════════════════════════════
 ensureColumn('worker_difficulty', 'tier', 'TEXT DEFAULT "cpu"');
 ensureColumn('worker_difficulty', 'tier_registered_at', 'INTEGER DEFAULT 0');
 ensureColumn('worker_difficulty', 'tier_changes', 'INTEGER DEFAULT 0');
@@ -1134,9 +1062,6 @@ ensureColumn('mining_jobs', 'reward_multiplier', 'REAL DEFAULT 1.0');
 ensureColumn('blocks', 'tier', 'TEXT DEFAULT "unknown"');
 ensureColumn('blocks', 'pos_contribution', 'REAL DEFAULT 0');
 
-// ═══════════════════════════════════════════════════
-// 🆕 CREATE WORKER_FLAGS TABLE
-// ═══════════════════════════════════════════════════
 db.exec(`
   CREATE TABLE IF NOT EXISTS worker_flags (
     worker_name TEXT PRIMARY KEY,
@@ -1189,9 +1114,6 @@ db.exec(`
 ensureColumn('mining_nodes', 'last_block_height', 'INTEGER DEFAULT 0');
 ensureColumn('transactions', 'description', "TEXT DEFAULT ''");
 
-// ═══════════════════════════════════════════════════
-// 🆕 MINING NODE FUNCTIONS
-// ═══════════════════════════════════════════════════
 
 const MAX_MINING_NODES = 50;
 
@@ -1282,7 +1204,6 @@ function addMiningNodeEarnings(id, amount) {
   `).run(amount, id);
 }
 
-// ─── Transaction-safe block submission ──────────
 function submitBlockTransaction(block, userName, finalReward, posContribution, nodeId, nodeContribution) {
   const runTransaction = db.transaction(() => {
     insertBlock(block);
@@ -1322,6 +1243,27 @@ function getWorkersByUsername(username) {
   `).all(username, username + ':%');
 }
 
+function upsertTrustedBlocks(blocks = []) {
+  let inserted = 0;
+  for (const block of blocks) {
+    if (!block || typeof block !== 'object') continue;
+    if (typeof block.height !== 'number') continue;
+    const row = db.prepare('SELECT height FROM trusted_blocks WHERE height = ? OR hash = ?').get(block.height, block.hash);
+    if (row) continue;
+    db.prepare("INSERT INTO trusted_blocks (height, hash, prev_hash, miner, node_id, nonce, timestamp, difficulty, job_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))")
+      .run(block.height, block.hash, block.prev_hash || '', block.miner || '', block.node_id || '', String(block.nonce || ''), Number(block.timestamp) || Math.floor(Date.now() / 1000), Number(block.difficulty) || 1, block.job_id || '');
+    inserted++;
+  }
+  return inserted;
+}
+
+function getTrustedBlocks(limit = 1000, offset = 0) {
+  return db.prepare('SELECT * FROM trusted_blocks ORDER BY height ASC LIMIT ? OFFSET ?').all(limit, offset);
+}
+
+function getTrustedTip() {
+  return db.prepare('SELECT * FROM trusted_blocks ORDER BY height DESC LIMIT 1').get();
+}
 function getWorkerRewardsLast10Min(username) {
   const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   return db.prepare(`
@@ -1331,7 +1273,6 @@ function getWorkerRewardsLast10Min(username) {
   `).get(username, tenMinAgo);
 }
 
-// ─── Exports ─────────────────────────────────────
 module.exports = {
   _db: db,
   prepare: (sql) => db.prepare(sql),
@@ -1408,22 +1349,18 @@ module.exports = {
   ensureBannedColumn,
   deleteUser,
   setUserBanned,
-  // 🆕 Tier management
   getWorkerTier,
   setWorkerTier,
-  // 🆕 Worker flags
   getWorkerFlags,
   addWorkerWarning,
   suspendWorker,
   clearWorkerSuspension,
   getFlaggedWorkers,
-  // 🆕 User-level flags
   getUserFlags,
   addUserWarning,
   suspendUser,
   clearUserSuspension,
   isUserSuspended,
-  // 🆕 Mining Nodes
   registerMiningNode,
   getMiningNodeByToken,
   getMiningNodeById,

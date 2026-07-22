@@ -1,3 +1,4 @@
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -18,14 +19,12 @@ const DHExchange = require('./dh');
 const SwapRouter = require('./routes/swap');
 const NodeFeesRouter = require('./routes/node_fees');
 
-// admin users & process token
 const ADMIN_USERS = ['chocoetom', 'Nam2010'];
 const NODE_MASTER_TOKEN = process.env.NODE_MASTER_TOKEN || 'null';
 if (!process.env.NODE_MASTER_TOKEN || NODE_MASTER_TOKEN === 'null') {
   console.warn('⚠️ WARNING: NODE_MASTER_TOKEN is default/weak. Set a real token in Render dashboard!');
 }
 
-// rate limiting at nodes endpoints (works for all mining nodes)
 const nodeRateLimit = rateLimit({ windowMs: 60 * 1000, max: 120, message: { status: 'error', message: 'Rate limit exceeded' } });
 const nodeSubmitLimit = rateLimit({ windowMs: 60 * 1000, max: 60, message: { status: 'error', message: 'Too many submissions' } });
 const nodeRegisterLimit = rateLimit({ windowMs: 5 * 60 * 1000, max: 10, message: { status: 'error', message: 'Too many registration attempts' } });
@@ -52,7 +51,6 @@ function canonicalStringify(obj) {
   return '{' + pairs.join(',') + '}';
 }
 
-//  RATE LIMITERS
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -97,7 +95,6 @@ const boostLimiter = rateLimit({
   message: { status: 'error', message: 'Too many boost activations, please slow down.' },
 });
 
-// Ports
 const PORT = process.env.PORT || 3000;
 const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 
@@ -150,11 +147,9 @@ if (fs.existsSync(TLS_KEY_PATH) && fs.existsSync(TLS_CERT_PATH)) {
   console.log('✅ TLS certificate generated without execSync.');
 }
 
-// DH Session Store
 const dhSessions = new Map();
 const serverDHKeys = DHExchange.generateStandardKeyPair('modp2048');
 
-// Allowed backup hostnames
 const ALLOWED_BACKUP_HOSTS = (process.env.BACKUP_SERVERS || '')
   .split(',').map(s => {
     try { return new URL(s.trim()).hostname; } catch { return ''; }
@@ -186,7 +181,6 @@ const registeredBackupNodes = {};
 const app = express();
 app.set('trust proxy', 1);
 
-// Session middleware
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 app.use(session({
   secret: sessionSecret,
@@ -205,7 +199,6 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Verify JWT token (API client)
 function verifyToken(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -224,77 +217,12 @@ function verifyToken(req, res, next) {
   }
 }
 
-//  ADMIN WEB INTERFACE
 app.get('/admin', (req, res) => {
   if (req.session.admin) {
     return res.redirect('/admin/dashboard');
   }
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <title>Admin Login - ChocoHub</title>
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { background: linear-gradient(135deg, #0a0a12 0%, #1a1a2a 100%); color: #eee4d8; font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-            .login-box { background: rgba(30,30,42,0.9); backdrop-filter: blur(10px); padding: 2.5rem; border-radius: 32px; box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05); width: 360px; text-align: center; transition: transform 0.3s; }
-            .login-box:hover { transform: translateY(-5px); }
-            h1 { background: linear-gradient(135deg, #f58a00, #ffbf00); -webkit-background-clip: text; background-clip: text; color: transparent; margin-bottom: 1.5rem; font-size: 2rem; letter-spacing: -0.5px; }
-            .input-group { margin-bottom: 1.2rem; text-align: left; }
-            .input-group label { display: block; margin-bottom: 0.4rem; font-size: 0.85rem; color: #aaa; letter-spacing: 0.5px; }
-            input { width: 100%; padding: 12px 16px; background: #2a2a36; border: 1px solid #3a3a46; border-radius: 16px; color: white; font-size: 1rem; transition: all 0.2s; outline: none; }
-            input:focus { border-color: #f58a00; box-shadow: 0 0 0 2px rgba(245,138,0,0.2); }
-            button { background: linear-gradient(135deg, #f58a00, #ff7e00); color: #0a0a12; border: none; padding: 12px 20px; border-radius: 40px; cursor: pointer; font-weight: bold; font-size: 1rem; width: 100%; transition: all 0.2s; margin-top: 0.5rem; }
-            button:hover { transform: scale(1.02); filter: brightness(1.05); }
-            .error { color: #ff6b6b; margin-top: 1rem; font-size: 0.85rem; }
-            .footer { margin-top: 1.5rem; font-size: 0.7rem; color: #555; }
-        </style>
-    </head>
-    <body>
-        <div class="login-box">
-            <h1>🍫 ChocoHub Admin</h1>
-            <form id="loginForm">
-                <div class="input-group">
-                    <label>Username</label>
-                    <input type="text" id="username" placeholder="chocoetom / Nam2010" required autocomplete="off">
-                </div>
-                <div class="input-group">
-                    <label>PIN</label>
-                    <input type="password" id="pin" placeholder="••••••" required autocomplete="off">
-                </div>
-                <button type="submit">🔐 Sign in</button>
-                <div id="errorMsg" class="error"></div>
-            </form>
-            <div class="footer">Secure session • HttpOnly cookie</div>
-        </div>
-        <script>
-            document.getElementById('loginForm').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const username = document.getElementById('username').value.trim();
-                const pin = document.getElementById('pin').value;
-                try {
-                    const resp = await fetch('/admin/login', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ username, pin })
-                    });
-                    const data = await resp.json();
-                    if (resp.ok && data.status === 'success') {
-                        window.location.href = '/admin/dashboard';
-                    } else {
-                        document.getElementById('errorMsg').innerText = data.message || 'Authentication failed';
-                    }
-                } catch(err) {
-                    document.getElementById('errorMsg').innerText = 'Network error';
-                }
-            });
-        </script>
-    </body>
-    </html>
-  `);
+  res.sendFile(path.join(__dirname, 'views', 'admin', 'login.html'));
 });
-
 app.post('/admin/login', async (req, res) => {
   const { username, pin } = req.body;
   if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing credentials' });
@@ -326,6 +254,7 @@ function requireAdminSession(req, res, next) {
   res.status(401).json({ status: 'error', message: 'Admin session required' });
 }
 
+
 app.get('/admin/api/all-users', requireAdminSession, async (req, res) => {
   try {
     const users = db.getAllUsers();
@@ -340,10 +269,9 @@ app.post('/admin/api/users', requireAdminSession, async (req, res) => {
     const { username, pin } = req.body;
     if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing username or pin' });
     if (username.length < 3 || pin.length < 4) return res.status(400).json({ status: 'error', message: 'Username min 3, PIN min 4' });
-    // Kiểm tra user đã tồn tại
+    // Check whether the user already exists
     const existing = db.getUser(username);
     if (existing) return res.status(400).json({ status: 'error', message: 'User already exists' });
-    // Tạo user bằng authenticate (sẽ tạo mới nếu chưa có)
     const result = db.authenticate(username, pin);
     res.json({ status: 'success', message: `User ${username} created`, user: { username, balance: result.balance || 0 } });
   } catch (err) {
@@ -364,7 +292,6 @@ app.delete('/admin/api/users/:username', requireAdminSession, async (req, res) =
   }
 });
 
-// Ban/Unban user
 app.post('/admin/api/users/:username/ban', requireAdminSession, async (req, res) => {
   try {
     const username = req.params.username;
@@ -379,7 +306,6 @@ app.post('/admin/api/users/:username/ban', requireAdminSession, async (req, res)
   }
 });
 
-// User detail
 app.get('/admin/api/users/:username/detail', requireAdminSession, async (req, res) => {
   try {
     const username = req.params.username;
@@ -392,6 +318,7 @@ app.get('/admin/api/users/:username/detail', requireAdminSession, async (req, re
     res.status(500).json({ status: 'error', message: err.message });
   }
 });
+
 
 app.get('/admin/api/all-swaps', requireAdminSession, async (req, res) => {
   try {
@@ -440,7 +367,6 @@ app.post('/admin/api/update-balance', requireAdminSession, async (req, res) => {
   }
 });
 
-// edit a user's staked amount (use for refunds/fix after a bug)
 app.post('/admin/api/update-stake', requireAdminSession, async (req, res) => {
   try {
     const { username, amount, action } = req.body;
@@ -512,11 +438,11 @@ app.delete('/admin/api/delete/:id', requireAdminSession, async (req, res) => {
   }
 });
 
-// worker flags
 
 app.get('/admin/api/flagged-workers', requireAdminSession, (req, res) => {
   try {
     const flagged = db.getFlaggedWorkers();
+    // Enrich with tier info
     const enriched = flagged.map(w => ({
       ...w,
       tier: db.getWorkerTier(w.worker_name)
@@ -549,1041 +475,9 @@ app.post('/admin/api/workers/:worker/clear', requireAdminSession, (req, res) => 
   }
 });
 
-// Admin Dashboard
 app.get('/admin/dashboard', requireAdminSession, (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Admin Dashboard - ChocoHub</title>
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-        <style>
-            :root {
-                --bg: #0b0a10;
-                --bg-elev: #14121c;
-                --card: #1a1826;
-                --card-hover: #201d2e;
-                --border: rgba(255,255,255,0.07);
-                --border-strong: rgba(255,255,255,0.14);
-                --gold: #f5a623;
-                --gold-bright: #ffc857;
-                --gold-dim: rgba(245,166,35,0.14);
-                --choco: #6b3f1d;
-                --cream: #f3e9d8;
-                --text: #ece5f2;
-                --text-dim: #9691a8;
-                --text-faint: #635f74;
-                --green: #4ade80;
-                --red: #ff6b6b;
-                --blue: #5b9dff;
-                --radius: 20px;
-                --radius-sm: 12px;
-                --shadow: 0 12px 40px rgba(0,0,0,0.45);
-            }
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body {
-                background:
-                    radial-gradient(1100px 500px at 15% -10%, rgba(245,166,35,0.10), transparent 60%),
-                    radial-gradient(900px 500px at 90% 0%, rgba(107,63,29,0.20), transparent 55%),
-                    var(--bg);
-                color: var(--text);
-                font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                padding: 2.5rem;
-                min-height: 100vh;
-            }
-            ::selection { background: var(--gold-dim); color: var(--gold-bright); }
-            ::-webkit-scrollbar { width: 8px; height: 8px; }
-            ::-webkit-scrollbar-thumb { background: #2a2736; border-radius: 8px; }
-            .container { max-width: 1440px; margin: 0 auto; }
-
-            .header {
-                display: flex; justify-content: space-between; align-items: center;
-                margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;
-                padding-bottom: 1.5rem; border-bottom: 1px solid var(--border);
-            }
-            .brand { display: flex; align-items: center; gap: 0.9rem; }
-            .brand-icon {
-                width: 46px; height: 46px; border-radius: 14px; display: flex; align-items: center; justify-content: center;
-                font-size: 1.4rem; background: linear-gradient(145deg, var(--gold), #c9791a);
-                box-shadow: 0 6px 18px rgba(245,166,35,0.35);
-            }
-            .brand-text h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.3px; color: var(--cream); }
-            .brand-text span { font-size: 0.78rem; color: var(--text-dim); font-weight: 500; }
-            .header-right { display: flex; align-items: center; gap: 0.9rem; }
-            .session-pill {
-                font-size: 0.78rem; color: var(--text-dim); background: var(--card);
-                border: 1px solid var(--border); padding: 0.45rem 0.9rem; border-radius: 40px;
-                display: flex; align-items: center; gap: 0.4rem;
-            }
-            .session-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
-            .logout-btn {
-                background: transparent; border: 1px solid var(--red); color: var(--red);
-                padding: 0.55rem 1.3rem; border-radius: 40px; text-decoration: none; font-size: 0.85rem; font-weight: 600;
-                transition: 0.2s;
-            }
-            .logout-btn:hover { background: var(--red); color: #0a0a12; }
-
-            .tabs { display: flex; gap: 0.4rem; margin-bottom: 1.8rem; flex-wrap: wrap; background: var(--bg-elev); padding: 0.4rem; border-radius: 40px; width: fit-content; border: 1px solid var(--border); }
-            .tab-btn {
-                background: none; border: none; color: var(--text-dim); padding: 0.6rem 1.3rem; font-size: 0.9rem;
-                font-weight: 600; cursor: pointer; border-radius: 40px; transition: 0.2s; font-family: inherit;
-                display: flex; align-items: center; gap: 0.4rem;
-            }
-            .tab-btn:hover { color: var(--cream); }
-            .tab-btn.active { color: #0a0a12; background: linear-gradient(135deg, var(--gold-bright), var(--gold)); box-shadow: 0 4px 14px rgba(245,166,35,0.3); }
-            .tab-content { display: none; animation: fadeIn 0.25s ease; }
-            .tab-content.active { display: block; }
-            @keyframes fadeIn { from { opacity: 0; transform: translateY(6px);} to { opacity:1; transform: translateY(0);} }
-
-            .card {
-                background: linear-gradient(180deg, var(--card), var(--bg-elev));
-                border: 1px solid var(--border); border-radius: var(--radius); padding: 1.6rem; margin-bottom: 1.6rem;
-                box-shadow: var(--shadow);
-            }
-            .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.2rem; flex-wrap: wrap; gap: 0.6rem; }
-            .card-head h2 { font-size: 1.05rem; font-weight: 700; color: var(--cream); display: flex; align-items: center; gap: 0.5rem; }
-            .refresh-btn {
-                font-size: 0.78rem; color: var(--text-dim); cursor: pointer; background: rgba(255,255,255,0.04);
-                border: 1px solid var(--border); padding: 0.4rem 0.9rem; border-radius: 40px; transition: 0.2s;
-                display: flex; align-items: center; gap: 0.35rem;
-            }
-            .refresh-btn:hover { color: var(--gold); border-color: var(--gold); }
-            .refresh-btn.spin svg { animation: spin 0.6s linear; }
-            @keyframes spin { to { transform: rotate(360deg); } }
-
-            table { width: 100%; border-collapse: collapse; }
-            th, td { padding: 13px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.84rem; }
-            th { color: var(--text-faint); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.6px; }
-            tbody tr { transition: background 0.15s; }
-            tbody tr:hover { background: rgba(255,255,255,0.02); }
-            .mono { font-family: 'JetBrains Mono', monospace; }
-
-            .status-pending { background: rgba(245,166,35,0.16); color: var(--gold-bright); padding: 4px 11px; border-radius: 40px; font-size: 0.72rem; font-weight: 700; display: inline-block; }
-            .status-completed { background: rgba(74,222,128,0.14); color: var(--green); padding: 4px 11px; border-radius: 40px; font-size: 0.72rem; font-weight: 700; display: inline-block; }
-            .badge-xno { background: rgba(91,157,255,0.16); color: var(--blue); padding: 3px 9px; border-radius: 12px; font-size: 0.68rem; font-weight: 600; }
-            .badge-duco { background: rgba(245,166,35,0.16); color: var(--gold-bright); padding: 3px 9px; border-radius: 12px; font-size: 0.68rem; font-weight: 600; }
-            .badge-cc { background: rgba(107,63,29,0.35); color: var(--cream); padding: 3px 9px; border-radius: 12px; font-size: 0.68rem; font-weight: 600; }
-
-            button { font-family: inherit; }
-            .btn { border: none; padding: 7px 14px; border-radius: 30px; cursor: pointer; font-weight: 600; font-size: 0.78rem; transition: 0.2s; }
-            .btn:active { transform: scale(0.96); }
-            .btn-complete { background: linear-gradient(135deg, var(--gold-bright), var(--gold)); color: #0a0a12; margin-right: 6px; }
-            .btn-complete:hover { filter: brightness(1.08); }
-            .btn-delete { background: rgba(255,107,107,0.15); color: var(--red); border: 1px solid rgba(255,107,107,0.3); }
-            .btn-delete:hover { background: var(--red); color: #0a0a12; }
-            .btn-ghost { background: rgba(255,255,255,0.05); color: var(--text); border: 1px solid var(--border); }
-            .btn-ghost:hover { border-color: var(--gold); color: var(--gold-bright); }
-            .btn-primary { background: linear-gradient(135deg, var(--gold-bright), var(--gold)); color: #0a0a12; }
-            .btn-primary:hover { filter: brightness(1.08); }
-            .btn-success { background: rgba(74,222,128,0.15); color: var(--green); border: 1px solid rgba(74,222,128,0.3); }
-            .btn-success:hover { background: var(--green); color: #0a0a12; }
-
-            .avatar {
-                width: 34px; height: 34px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center;
-                background: linear-gradient(145deg, var(--choco), #3a2210); color: var(--gold-bright); font-weight: 700;
-                font-size: 0.9rem; margin-right: 10px; vertical-align: middle;
-            }
-            .user-cell { display: flex; align-items: center; }
-
-            .gear-icon {
-                font-size: 1.1rem; cursor: pointer; padding: 6px 10px; border-radius: 8px; transition: 0.2s;
-                display: inline-block; user-select: none; border: 1px solid transparent;
-            }
-            .gear-icon:hover { background: rgba(255,255,255,0.06); border-color: var(--border); }
-            .empty-row td { text-align: center; color: var(--text-faint); padding: 2.5rem; }
-
-            .dropdown { position: relative; display: inline-block; }
-            .dropdown-content {
-                display: none; position: absolute; right: 0; top: calc(100% + 6px); background: #211f2e;
-                min-width: 190px; box-shadow: 0 12px 30px rgba(0,0,0,0.6); z-index: 1000; border-radius: 14px;
-                border: 1px solid var(--border-strong); padding: 6px; backdrop-filter: blur(10px);
-            }
-            .dropdown-content a {
-                color: var(--text); padding: 9px 12px; text-decoration: none; display: flex; align-items: center; gap: 8px;
-                font-size: 0.82rem; cursor: pointer; transition: background 0.15s; border-radius: 8px; font-weight: 500;
-            }
-            .dropdown-content a:hover { background: rgba(255,255,255,0.06); }
-            .dropdown-content .danger { color: var(--red); }
-            .dropdown-content .danger:hover { background: rgba(255,107,107,0.12); }
-            .dropdown-content .success { color: var(--green); }
-            .dropdown-content .success:hover { background: rgba(74,222,128,0.12); }
-            .dropdown-content .divider { height: 1px; background: var(--border); margin: 4px 6px; }
-            .dropdown.show .dropdown-content { display: block; }
-
-            .search-box { display: flex; gap: 0.6rem; flex-wrap: wrap; flex: 1; }
-            .search-box input {
-                flex: 1; min-width: 180px; padding: 10px 14px; background: rgba(255,255,255,0.03);
-                border: 1px solid var(--border); border-radius: var(--radius-sm); color: white; font-size: 0.85rem; outline: none; transition: 0.2s;
-            }
-            .search-box input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-dim); }
-
-            .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem; }
-            .stat-card {
-                background: linear-gradient(160deg, rgba(255,255,255,0.03), rgba(255,255,255,0));
-                border: 1px solid var(--border); padding: 1.3rem; border-radius: 16px; transition: 0.2s;
-            }
-            .stat-card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
-            .stat-label { font-size: 0.78rem; color: var(--text-dim); display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.5rem; }
-            .stat-card strong { display: block; font-size: 1.7rem; color: var(--gold-bright); font-weight: 800; letter-spacing: -0.5px; }
-
-            /* Modal */
-            .modal { display: none; position: fixed; inset: 0; background: rgba(6,5,10,0.72); backdrop-filter: blur(4px); z-index: 2000; justify-content: center; align-items: center; }
-            .modal-content {
-                background: linear-gradient(180deg, #201d2c, #17141f); border: 1px solid var(--border-strong); border-radius: 24px;
-                padding: 1.8rem; width: 420px; max-width: 90%; box-shadow: 0 30px 70px rgba(0,0,0,0.6); animation: pop 0.18s ease;
-            }
-            @keyframes pop { from { transform: scale(0.94); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-            .modal-content h3 { margin-bottom: 1rem; color: var(--cream); font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; }
-            .modal-content label { font-size: 0.78rem; color: var(--text-dim); display: block; margin: 0.8rem 0 0.3rem; font-weight: 600; }
-            .modal-content input {
-                width: 100%; padding: 11px 14px; background: rgba(255,255,255,0.04); border: 1px solid var(--border);
-                border-radius: var(--radius-sm); color: white; font-size: 0.9rem; outline: none; transition: 0.2s;
-            }
-            .modal-content input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-dim); }
-            .modal-buttons { display: flex; gap: 0.6rem; margin-top: 1.4rem; }
-            .modal-buttons button { flex: 1; padding: 11px; border-radius: 30px; }
-            .balance-actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
-            .balance-actions button { flex: 1; padding: 10px; border-radius: 14px; font-size: 0.8rem; }
-            .btn-add-bal { background: rgba(74,222,128,0.14); color: var(--green); border: 1px solid rgba(74,222,128,0.3); }
-            .btn-add-bal:hover { background: var(--green); color: #0a0a12; }
-            .btn-remove-bal { background: rgba(255,107,107,0.14); color: var(--red); border: 1px solid rgba(255,107,107,0.3); }
-            .btn-remove-bal:hover { background: var(--red); color: #0a0a12; }
-            .btn-set-bal { background: rgba(91,157,255,0.14); color: var(--blue); border: 1px solid rgba(91,157,255,0.3); }
-            .btn-set-bal:hover { background: var(--blue); color: #0a0a12; }
-            .current-balance-tag { font-size: 0.85rem; color: var(--text-dim); background: rgba(255,255,255,0.04); padding: 0.6rem 0.9rem; border-radius: 12px; margin-top: 0.4rem; }
-            .current-balance-tag b { color: var(--gold-bright); }
-
-            /* User detail drawer */
-            .drawer-overlay { display: none; position: fixed; inset: 0; background: rgba(6,5,10,0.6); z-index: 1900; }
-            .drawer {
-                position: fixed; top: 0; right: -420px; width: 400px; max-width: 90%; height: 100%; background: #17141f;
-                border-left: 1px solid var(--border-strong); z-index: 1950; transition: right 0.25s ease; padding: 1.8rem; overflow-y: auto;
-            }
-            .drawer.open { right: 0; }
-            .drawer-overlay.open { display: block; }
-            .drawer-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.4rem; }
-            .drawer-close { cursor: pointer; color: var(--text-dim); font-size: 1.3rem; background:none; border:none; }
-            .drawer-close:hover { color: var(--red); }
-            .drawer-section { margin-bottom: 1.4rem; }
-            .drawer-section h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-faint); margin-bottom: 0.6rem; }
-            .tx-item { display: flex; justify-content: space-between; font-size: 0.8rem; padding: 8px 0; border-bottom: 1px solid var(--border); }
-            .tx-item:last-child { border-bottom: none; }
-
-            /* Toasts */
-            #toastWrap { position: fixed; bottom: 24px; right: 24px; z-index: 3000; display: flex; flex-direction: column; gap: 10px; }
-            .toast {
-                background: #201d2c; border: 1px solid var(--border-strong); border-left: 4px solid var(--gold);
-                padding: 13px 18px; border-radius: 12px; font-size: 0.85rem; box-shadow: 0 12px 30px rgba(0,0,0,0.5);
-                min-width: 260px; animation: slideIn 0.25s ease; display: flex; align-items: center; gap: 8px;
-            }
-            .toast.success { border-left-color: var(--green); }
-            .toast.error { border-left-color: var(--red); }
-            @keyframes slideIn { from { transform: translateX(30px); opacity:0; } to { transform: translateX(0); opacity:1; } }
-
-            .pagination { display: flex; justify-content: flex-end; gap: 0.4rem; margin-top: 1rem; }
-            .pagination button {
-                background: rgba(255,255,255,0.04); border: 1px solid var(--border); color: var(--text-dim);
-                padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 0.78rem;
-            }
-            .pagination button.active { background: var(--gold); color: #0a0a12; border-color: var(--gold); font-weight: 700; }
-            .pagination button:hover:not(.active) { border-color: var(--gold); color: var(--gold-bright); }
-
-            @media (max-width: 768px) {
-                body { padding: 1rem; }
-                th, td { font-size: 0.7rem; padding: 9px 7px; }
-                .tab-btn { padding: 0.5rem 0.9rem; font-size: 0.8rem; }
-                .drawer { width: 100%; }
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <div class="brand">
-                    <div class="brand-icon">🍫</div>
-                    <div class="brand-text">
-                        <h1>ChocoHub Admin</h1>
-                        <span>Control center</span>
-                    </div>
-                </div>
-                <div class="header-right">
-                    <div class="session-pill"><span class="dot"></span> ${req.session.adminUsername}</div>
-                    <a href="/admin/logout" class="logout-btn">Logout</a>
-                </div>
-            </div>
-
-            <div class="tabs">
-                <button class="tab-btn active" data-tab="swaps">🔄 Swaps</button>
-                <button class="tab-btn" data-tab="users">👥 Users</button>
-                <button class="tab-btn" data-tab="miners">⛏️ Miners</button>
-                <button class="tab-btn" data-tab="nodes">🌐 Nodes</button>
-                <button class="tab-btn" data-tab="stats">📊 Statistics</button>
-            </div>
-
-            <div id="swaps-tab" class="tab-content active">
-                <div class="card">
-                    <div class="card-head">
-                        <h2>⏳ Pending Swaps</h2>
-                        <span class="refresh-btn" onclick="loadAllSwaps(this)">🔄 Refresh</span>
-                    </div>
-                    <div style="overflow-x: auto;">
-                        <table id="pendingTable">
-                            <thead><tr><th>ID</th><th>From</th><th>Amount</th><th>Type</th><th>Receiver</th><th>Details</th><th>Status</th><th>Actions</th></tr></thead>
-                            <tbody id="pendingBody"><tr class="empty-row"><td colspan="8">Loading…</td></tr></tbody>
-                        </table>
-                    </div>
-                </div>
-                <div class="card">
-                    <div class="card-head"><h2>✅ Completed Swaps</h2></div>
-                    <div style="overflow-x: auto;">
-                        <table id="completedTable">
-                            <thead><tr><th>ID</th><th>From</th><th>Amount</th><th>Type</th><th>Receiver</th><th>XNO TxID</th><th>Status</th><th>Completed At</th></tr></thead>
-                            <tbody id="completedBody"><tr class="empty-row"><td colspan="8">Loading…</td></tr></tbody>
-                        </table>
-                    </div>
-                    <div class="pagination" id="completedPagination"></div>
-                </div>
-            </div>
-
-            <div id="users-tab" class="tab-content">
-                <div class="card">
-                    <div class="card-head">
-                        <h2>👥 User Management</h2>
-                        <div style="display:flex;gap:0.6rem;">
-                            <button class="btn btn-ghost" onclick="exportUsers()">⬇️ Export CSV</button>
-                            <button class="btn btn-primary" onclick="openAddUserModal()">➕ Add User</button>
-                        </div>
-                    </div>
-                    <div class="search-box" style="margin-bottom:1rem;">
-                        <input type="text" id="userSearch" placeholder="Search by username…" oninput="searchUsers()">
-                    </div>
-                    <div style="overflow-x: auto;">
-                        <table id="usersTable">
-                            <thead><tr><th>User</th><th>Balance</th><th>Status</th><th>Actions</th></tr></thead>
-                            <tbody id="usersBody"><tr class="empty-row"><td colspan="4">Loading…</td></tr></tbody>
-                        </table>
-                    </div>
-                    <div class="pagination" id="usersPagination"></div>
-                </div>
-            </div>
-
-            <div id="stats-tab" class="tab-content">
-                <div class="card">
-                    <div class="card-head"><h2>📊 System Statistics</h2></div>
-                    <div id="statsContent">Loading…</div>
-                </div>
-            </div>
-
-            <div id="miners-tab" class="tab-content">
-                <div class="card">
-                    <div class="card-head">
-                        <h2>🚩 Flagged & Suspended Workers</h2>
-                        <span class="refresh-btn" onclick="loadFlaggedWorkers(this)">🔄 Refresh</span>
-                    </div>
-                    <div style="overflow-x: auto;">
-                        <table id="flaggedTable">
-                            <thead><tr><th>Worker</th><th>Tier</th><th>Warnings (24h)</th><th>Status</th><th>Suspended At</th><th>Reason</th><th>Actions</th></tr></thead>
-                            <tbody id="flaggedBody"><tr class="empty-row"><td colspan="7">Loading…</td></tr></tbody>
-                        </table>
-                    </div>
-                </div>
-                <div class="card">
-                    <div class="card-head"><h2>🔧 Manual Worker Control</h2></div>
-                    <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end;">
-                        <div>
-                            <label style="display:block;margin-bottom:4px;font-size:0.78rem;color:var(--text-dim);">Worker name</label>
-                            <input type="text" id="manualWorkerName" placeholder="worker_name" style="padding:10px 14px;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:12px;color:white;width:200px;">
-                        </div>
-                        <div>
-                            <label style="display:block;margin-bottom:4px;font-size:0.78rem;color:var(--text-dim);">Reason</label>
-                            <input type="text" id="manualReason" placeholder="Reason for suspension" style="padding:10px 14px;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:12px;color:white;width:250px;">
-                        </div>
-                        <button onclick="manualSuspend()" class="btn btn-delete" style="padding:10px 20px;">🚫 Suspend</button>
-                        <button onclick="manualClear()" class="btn btn-success" style="padding:10px 20px;">✅ Clear</button>
-                    </div>
-                </div>
-            </div>
-
-            <div id="nodes-tab" class="tab-content">
-                <div class="card">
-                    <div class="card-head">
-                        <h2>🌐 Mining Nodes</h2>
-                        <span class="refresh-btn" onclick="loadNodes(this)">🔄 Refresh</span>
-                    </div>
-                    <div style="overflow-x: auto;">
-                        <table id="nodesTable">
-                            <thead><tr><th>Name</th><th>URL</th><th>Miners</th><th>CPU</th><th>Ping</th><th>Blocks Relayed</th><th>Actions</th></tr></thead>
-                            <tbody id="nodesBody"><tr class="empty-row"><td colspan="7">Loading…</td></tr></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Edit Balance Modal -->
-        <div id="editModal" class="modal">
-            <div class="modal-content">
-                <h3>✏️ Edit Balance</h3>
-                <p style="font-size:0.85rem;color:var(--text-dim);">User: <strong id="editUsername" style="color:var(--cream);"></strong></p>
-                <div class="current-balance-tag">Current balance: <b id="currentBalance"></b> CC</div>
-                <label>Amount</label>
-                <input type="number" id="editAmount" placeholder="0.0000" step="any">
-                <div class="balance-actions">
-                    <button class="btn-add-bal" onclick="saveBalance('add')">➕ Add</button>
-                    <button class="btn-remove-bal" onclick="saveBalance('remove')">➖ Remove</button>
-                    <button class="btn-set-bal" onclick="saveBalance('set')">📝 Set</button>
-                </div>
-                <div class="modal-buttons">
-                    <button class="btn btn-ghost" onclick="closeModal()" style="flex:1;">Cancel</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Edit Stake Modal -->
-        <div id="editStakeModal" class="modal">
-            <div class="modal-content">
-                <h3>🔧 Manage Stake</h3>
-                <p style="font-size:0.85rem;color:var(--text-dim);">User: <strong id="editStakeUsername" style="color:var(--cream);"></strong></p>
-                <div class="current-balance-tag">Current staked: <b id="currentStake">0.0000</b> CC · Pending reward: <b id="currentPendingReward">0.0000</b> CC</div>
-                <label>Amount</label>
-                <input type="number" id="editStakeAmount" placeholder="0.0000" step="any">
-                <div class="balance-actions">
-                    <button class="btn-add-bal" onclick="saveStake('add')">➕ Add</button>
-                    <button class="btn-remove-bal" onclick="saveStake('remove')">➖ Remove</button>
-                    <button class="btn-set-bal" onclick="saveStake('set')">📝 Set</button>
-                </div>
-                <div class="modal-buttons">
-                    <button class="btn btn-ghost" onclick="closeEditStakeModal()" style="flex:1;">Cancel</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Add User Modal -->
-        <div id="addUserModal" class="modal">
-            <div class="modal-content">
-                <h3>➕ Add New User</h3>
-                <label>Username</label>
-                <input type="text" id="newUsername" placeholder="Username (min 3 chars)">
-                <label>PIN (4-8 digits)</label>
-                <input type="password" id="newPin" placeholder="PIN" maxlength="8">
-                <div class="modal-buttons">
-                    <button class="btn btn-primary" onclick="addUser()">Create</button>
-                    <button class="btn btn-ghost" onclick="closeAddUserModal()">Cancel</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Fulfill XNO Modal -->
-        <div id="fulfillXnoModal" class="modal">
-            <div class="modal-content">
-                <h3>🟦 Complete XNO Swap</h3>
-                <p style="font-size:0.85rem;color:var(--text-dim);">Swap ID: <strong id="fulfillSwapId" style="color:var(--cream);"></strong></p>
-                <p style="font-size:0.85rem;color:var(--text-dim);">Receiver: <strong id="fulfillReceiver" style="color:var(--cream);"></strong></p>
-                <p style="font-size:0.85rem;color:var(--text-dim);">Amount XNO: <strong id="fulfillAmount"></strong></p>
-                <label>XNO Transaction Hash (optional)</label>
-                <input type="text" id="xnoTxid" placeholder="nano_tx_hash…">
-                <div class="modal-buttons">
-                    <button class="btn btn-primary" onclick="confirmCompleteWithXno()">✅ Complete</button>
-                    <button class="btn btn-ghost" onclick="closeXnoModal()">Cancel</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Generic Confirm Modal -->
-        <div id="confirmModal" class="modal">
-            <div class="modal-content">
-                <h3 id="confirmTitle">⚠️ Are you sure?</h3>
-                <p id="confirmMessage" style="font-size:0.88rem;color:var(--text-dim);line-height:1.5;"></p>
-                <div class="modal-buttons">
-                    <button class="btn btn-delete" id="confirmYesBtn" style="flex:1;">Confirm</button>
-                    <button class="btn btn-ghost" onclick="closeConfirm()" style="flex:1;">Cancel</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- User Detail Drawer -->
-        <div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
-        <div class="drawer" id="userDrawer">
-            <div class="drawer-header">
-                <h3 id="drawerUsername" style="color:var(--cream);"></h3>
-                <button class="drawer-close" onclick="closeDrawer()">✕</button>
-            </div>
-            <div class="drawer-section">
-                <h4>Balance</h4>
-                <div class="current-balance-tag" id="drawerBalance">-</div>
-            </div>
-            <div class="drawer-section">
-                <h4>Staking</h4>
-                <div class="current-balance-tag" id="drawerStake">-</div>
-                <button class="btn" style="margin-top:10px;width:100%;" onclick="openEditStakeModal()">🔧 Manage Stake</button>
-            </div>
-            <div class="drawer-section">
-                <h4>Recent Transactions</h4>
-                <div id="drawerTx">Loading…</div>
-            </div>
-        </div>
-
-        <div id="toastWrap"></div>
-
-        <script>
-            let allSwaps = [];
-            let allUsers = [];
-            let currentEditUser = null;
-            let currentPendingSwap = null;
-            let usersPage = 1, completedPage = 1;
-            const PAGE_SIZE = 12;
-
-            // ─── Toast + Confirm (replaces alert/confirm) ─────────────
-            function toast(message, type = 'info') {
-                const wrap = document.getElementById('toastWrap');
-                const el = document.createElement('div');
-                el.className = 'toast ' + type;
-                const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
-                el.innerHTML = '<span>' + icon + '</span><span>' + message + '</span>';
-                wrap.appendChild(el);
-                setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; setTimeout(() => el.remove(), 300); }, 3800);
-            }
-
-            function askConfirm(message, onYes, title) {
-                document.getElementById('confirmTitle').innerText = title || '⚠️ Are you sure?';
-                document.getElementById('confirmMessage').innerText = message;
-                const modal = document.getElementById('confirmModal');
-                modal.style.display = 'flex';
-                const yesBtn = document.getElementById('confirmYesBtn');
-                const newYes = yesBtn.cloneNode(true);
-                yesBtn.parentNode.replaceChild(newYes, yesBtn);
-                newYes.addEventListener('click', () => { modal.style.display = 'none'; onYes(); });
-            }
-            function closeConfirm() { document.getElementById('confirmModal').style.display = 'none'; }
-
-            // ─── Tabs ──────────────────────────────────────────────────
-            document.querySelectorAll('.tab-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                    btn.classList.add('active');
-                    document.getElementById(btn.dataset.tab + '-tab').classList.add('active');
-                    if (btn.dataset.tab === 'users') loadUsers();
-                    if (btn.dataset.tab === 'stats') loadStats();
-                    if (btn.dataset.tab === 'miners') loadFlaggedWorkers();
-                    if (btn.dataset.tab === 'nodes') loadNodes();
-                });
-            });
-
-            function spinBtn(btn) {
-                if (!btn) return;
-                btn.classList.add('spin');
-                setTimeout(() => btn.classList.remove('spin'), 600);
-            }
-
-            function getSwapTypeBadge(type) {
-                const badges = {
-                    'duco': '<span class="badge-duco">💰 DUCO</span>',
-                    'duco_to_cc': '<span class="badge-duco">🔄 DUCO→CC</span>',
-                    'xno_to_cc': '<span class="badge-xno">🟦 XNO→CC</span>',
-                    'cc_to_xno': '<span class="badge-xno">➡️ CC→XNO</span>',
-                    'ccpoc': '<span class="badge-cc">🍫 CC PoC</span>'
-                };
-                return badges[type] || '<span class="badge-cc">🍫 CC</span>';
-            }
-
-            function formatSwapDetails(swap) {
-                if (swap.swap_type === 'xno_to_cc') return 'XNO: ' + (swap.amount_xno?.toFixed(8) || '?') + ' XNO → ' + swap.amount_cc + ' CC';
-                if (swap.swap_type === 'cc_to_xno') return swap.amount_cc + ' CC → ' + (swap.amount_cc * 0.000002).toFixed(8) + ' XNO';
-                if (swap.swap_type === 'duco') return swap.amount_cc + ' CC → ' + (swap.amount_cc/10) + ' DUCO';
-                if (swap.swap_type === 'duco_to_cc') return (swap.amount_duco || swap.amount_cc/10) + ' DUCO → ' + swap.amount_cc + ' CC';
-                return swap.amount_cc + ' CC';
-            }
-
-            async function loadAllSwaps(btn) {
-                spinBtn(btn);
-                try {
-                    const resp = await fetch('/admin/api/all-swaps');
-                    const data = await resp.json();
-                    if (data.status === 'success' && Array.isArray(data.swaps)) {
-                        allSwaps = data.swaps;
-                        renderPending(allSwaps.filter(s => s.status === 'pending'));
-                        renderCompleted(allSwaps.filter(s => s.status === 'completed'));
-                    }
-                } catch(e) { console.error(e); }
-            }
-
-            function renderPending(swaps) {
-                const tbody = document.getElementById('pendingBody');
-                if (swaps.length === 0) { tbody.innerHTML = '<tr class="empty-row"><td colspan="8">✨ No pending swaps</td></tr>'; return; }
-                tbody.innerHTML = '';
-                for (const swap of swaps) {
-                    const row = tbody.insertRow();
-                    row.insertCell(0).innerHTML = '<span class="mono">' + swap.id + '</span>';
-                    row.insertCell(1).innerText = swap.from_user;
-                    row.insertCell(2).innerText = swap.amount_cc;
-                    row.insertCell(3).innerHTML = getSwapTypeBadge(swap.swap_type);
-                    row.insertCell(4).innerText = swap.receiver;
-                    row.insertCell(5).innerHTML = '<small>' + formatSwapDetails(swap) + '</small>';
-                    row.insertCell(6).innerHTML = '<span class="status-pending">pending</span>';
-                    const actions = row.insertCell(7);
-                    const completeBtn = document.createElement('button');
-                    completeBtn.innerText = '✅ Complete'; completeBtn.className = 'btn btn-complete';
-                    completeBtn.onclick = () => swap.swap_type === 'cc_to_xno' ? openXnoModal(swap) : completeSwap(swap.id);
-                    const deleteBtn = document.createElement('button');
-                    deleteBtn.innerText = '🗑️'; deleteBtn.className = 'btn btn-delete';
-                    deleteBtn.onclick = () => deleteSwap(swap.id);
-                    actions.appendChild(completeBtn); actions.appendChild(deleteBtn);
-                }
-            }
-
-            function renderCompleted(swaps) {
-                const tbody = document.getElementById('completedBody');
-                const totalPages = Math.max(1, Math.ceil(swaps.length / PAGE_SIZE));
-                if (completedPage > totalPages) completedPage = totalPages;
-                if (swaps.length === 0) { tbody.innerHTML = '<tr class="empty-row"><td colspan="8">📭 No completed swaps yet</td></tr>'; document.getElementById('completedPagination').innerHTML = ''; return; }
-                const pageSwaps = swaps.slice((completedPage-1)*PAGE_SIZE, completedPage*PAGE_SIZE);
-                tbody.innerHTML = '';
-                for (const swap of pageSwaps) {
-                    const row = tbody.insertRow();
-                    row.insertCell(0).innerHTML = '<span class="mono">' + swap.id + '</span>';
-                    row.insertCell(1).innerText = swap.from_user;
-                    row.insertCell(2).innerText = swap.amount_cc;
-                    row.insertCell(3).innerHTML = getSwapTypeBadge(swap.swap_type);
-                    row.insertCell(4).innerText = swap.receiver;
-                    row.insertCell(5).innerHTML = swap.xno_txid ? '<span style="color:#5b9dff;font-size:0.7rem;" class="mono">' + swap.xno_txid.substring(0, 18) + '…</span>' : '-';
-                    row.insertCell(6).innerHTML = '<span class="status-completed">completed</span>';
-                    row.insertCell(7).innerText = swap.completed_at ? new Date(swap.completed_at).toLocaleString() : '-';
-                }
-                renderPagination('completedPagination', totalPages, completedPage, (p) => { completedPage = p; renderCompleted(swaps); });
-            }
-
-            function renderPagination(containerId, totalPages, current, onClick) {
-                const el = document.getElementById(containerId);
-                if (totalPages <= 1) { el.innerHTML = ''; return; }
-                el.innerHTML = '';
-                for (let i = 1; i <= totalPages; i++) {
-                    const b = document.createElement('button');
-                    b.innerText = i;
-                    if (i === current) b.classList.add('active');
-                    b.onclick = () => onClick(i);
-                    el.appendChild(b);
-                }
-            }
-
-            function openXnoModal(swap) {
-                currentPendingSwap = swap;
-                document.getElementById('fulfillSwapId').innerText = swap.id;
-                document.getElementById('fulfillReceiver').innerText = swap.receiver;
-                document.getElementById('fulfillAmount').innerHTML = '<span style="color:#5b9dff">' + (swap.amount_cc * 0.000002).toFixed(8) + ' XNO</span>';
-                document.getElementById('xnoTxid').value = '';
-                document.getElementById('fulfillXnoModal').style.display = 'flex';
-            }
-            function closeXnoModal() { document.getElementById('fulfillXnoModal').style.display = 'none'; currentPendingSwap = null; }
-            async function confirmCompleteWithXno() {
-                if (!currentPendingSwap) return;
-                await completeSwap(currentPendingSwap.id, document.getElementById('xnoTxid').value.trim());
-                closeXnoModal();
-            }
-
-            // ─── Users ─────────────────────────────────────────────────
-            async function loadUsers() {
-                try {
-                    const resp = await fetch('/admin/api/all-users');
-                    const data = await resp.json();
-                    if (data.status === 'success') { allUsers = data.users; renderUsers(allUsers); }
-                } catch(e) { console.error(e); }
-            }
-
-            function initials(name) { return name.substring(0, 2).toUpperCase(); }
-
-            function renderUsers(users) {
-                const tbody = document.getElementById('usersBody');
-                const totalPages = Math.max(1, Math.ceil(users.length / PAGE_SIZE));
-                if (usersPage > totalPages) usersPage = totalPages;
-                if (users.length === 0) { tbody.innerHTML = '<tr class="empty-row"><td colspan="4">👻 No users found</td></tr>'; document.getElementById('usersPagination').innerHTML=''; return; }
-                const pageUsers = users.slice((usersPage-1)*PAGE_SIZE, usersPage*PAGE_SIZE);
-                tbody.innerHTML = '';
-                for (const user of pageUsers) {
-                    const row = tbody.insertRow();
-                    const userCell = row.insertCell(0);
-                    userCell.innerHTML = '<div class="user-cell"><span class="avatar">' + initials(user.username) + '</span>' + user.username + (window.isAdmin(user.username) ? ' <small style="color:var(--gold-bright);margin-left:6px;">★ admin</small>' : '') + '</div>';
-                    userCell.style.cursor = 'pointer';
-                    userCell.onclick = () => openDrawer(user.username);
-                    row.insertCell(1).innerHTML = '<span style="color:var(--gold-bright)" class="mono">' + user.balance.toFixed(4) + ' CC</span>';
-                    row.insertCell(2).innerHTML = user.banned ? '<span style="color:var(--red);">🚫 Banned</span>' : '<span style="color:var(--green);">✅ Active</span>';
-                    const actions = row.insertCell(3);
-
-                    const dropdownDiv = document.createElement('div'); dropdownDiv.className = 'dropdown';
-                    const gearSpan = document.createElement('span'); gearSpan.className = 'gear-icon'; gearSpan.innerHTML = '⚙️';
-                    gearSpan.onclick = function(e) { e.stopPropagation(); this.parentElement.classList.toggle('show'); };
-                    dropdownDiv.appendChild(gearSpan);
-
-                    const dropdownContent = document.createElement('div'); dropdownContent.className = 'dropdown-content';
-
-                    const viewLink = document.createElement('a');
-                    viewLink.innerHTML = '👁️ View Details';
-                    viewLink.onclick = (e) => { e.stopPropagation(); openDrawer(user.username); this_close(e); };
-                    dropdownContent.appendChild(viewLink);
-
-                    const editLink = document.createElement('a');
-                    editLink.innerHTML = '✏️ Edit Balance';
-                    editLink.onclick = (e) => { e.stopPropagation(); openEditModal(user.username, user.balance); this_close(e); };
-                    dropdownContent.appendChild(editLink);
-
-                    const isAdminUser = window.isAdmin(user.username);
-                    if (!isAdminUser) {
-                        const divider = document.createElement('div'); divider.className = 'divider';
-                        dropdownContent.appendChild(divider);
-
-                        const banLink = document.createElement('a');
-                        const isBanned = user.banned;
-                        banLink.innerHTML = isBanned ? '🔓 Unban' : '🚫 Ban';
-                        banLink.className = isBanned ? 'success' : 'danger';
-                        banLink.onclick = (e) => { e.stopPropagation(); toggleBan(user.username, !isBanned); this_close(e); };
-                        dropdownContent.appendChild(banLink);
-
-                        const deleteLink = document.createElement('a');
-                        deleteLink.innerHTML = '🗑️ Delete';
-                        deleteLink.className = 'danger';
-                        deleteLink.onclick = (e) => { e.stopPropagation(); deleteUser(user.username); this_close(e); };
-                        dropdownContent.appendChild(deleteLink);
-                    }
-
-                    function this_close(e) { e.target.closest('.dropdown').classList.remove('show'); }
-
-                    dropdownDiv.appendChild(dropdownContent);
-                    actions.appendChild(dropdownDiv);
-                }
-                renderPagination('usersPagination', totalPages, usersPage, (p) => { usersPage = p; renderUsers(users); });
-
-                document.addEventListener('click', function() {
-                    document.querySelectorAll('.dropdown.show').forEach(d => d.classList.remove('show'));
-                }, { once: true });
-            }
-
-            window.isAdmin = function(username) {
-                const adminUsers = ['chocoetom', 'Nam2010'];
-                return adminUsers.includes(username);
-            };
-
-            function searchUsers() {
-                const term = document.getElementById('userSearch').value.toLowerCase();
-                usersPage = 1;
-                renderUsers(allUsers.filter(u => u.username.toLowerCase().includes(term)));
-            }
-
-            function exportUsers() { window.open('/admin/api/users/export/csv', '_blank'); }
-
-            // ─── User detail drawer ───────────────────────────────────
-            async function openDrawer(username) {
-                document.getElementById('drawerUsername').innerText = username;
-                document.getElementById('drawerBalance').innerHTML = 'Loading…';
-                document.getElementById('drawerStake').innerHTML = 'Loading…';
-                document.getElementById('drawerTx').innerHTML = 'Loading…';
-                document.getElementById('userDrawer').classList.add('open');
-                document.getElementById('drawerOverlay').classList.add('open');
-                try {
-                    const resp = await fetch('/admin/api/users/' + encodeURIComponent(username) + '/detail');
-                    const data = await resp.json();
-                    if (data.status !== 'success') { toast(data.message || 'Failed to load user', 'error'); return; }
-                    if (!data.user) { toast('User data missing in response', 'error'); return; }
-                    const balance = Number(data.user.balance) || 0;
-                    const banned = !!data.user.banned;
-                    const stakeAmount = Number((data.stake && data.stake.amount) || 0);
-                    const pendingReward = Number((data.stake && data.stake.pending_reward) || 0);
-                    document.getElementById('drawerBalance').innerHTML = '<b>' + balance.toFixed(4) + '</b> CC &nbsp; ' + (banned ? '<span style="color:var(--red);">🚫 Banned</span>' : '<span style="color:var(--green);">✅ Active</span>');
-                    currentStakeSnapshot = { amount: stakeAmount, pending_reward: pendingReward };
-                    document.getElementById('drawerStake').innerHTML = '<b>' + stakeAmount.toFixed(4) + '</b> CC staked · <b>' + pendingReward.toFixed(4) + '</b> CC pending reward';
-                    const txHtml = data.transactions && data.transactions.length
-                        ? data.transactions.map(t => '<div class="tx-item"><span>' + (t.type || t.description || 'tx') + '</span><span class="mono">' + (t.amount !== undefined ? Number(t.amount).toFixed(4) : '') + '</span></div>').join('')
-                        : '<div style="color:var(--text-faint);font-size:0.85rem;">No transactions found</div>';
-                    document.getElementById('drawerTx').innerHTML = txHtml;
-                } catch(e) { console.error('openDrawer failed:', e); toast(e.message || 'Failed to load user', 'error'); }
-            }
-            function closeDrawer() {
-                document.getElementById('userDrawer').classList.remove('open');
-                document.getElementById('drawerOverlay').classList.remove('open');
-            }
-
-            // ─── Add / Delete / Ban ───────────────────────────────────
-            function openAddUserModal() {
-                document.getElementById('newUsername').value = '';
-                document.getElementById('newPin').value = '';
-                document.getElementById('addUserModal').style.display = 'flex';
-            }
-            function closeAddUserModal() { document.getElementById('addUserModal').style.display = 'none'; }
-
-            async function addUser() {
-                const username = document.getElementById('newUsername').value.trim();
-                const pin = document.getElementById('newPin').value.trim();
-                if (username.length < 3) return toast('Username must be at least 3 characters', 'error');
-                if (pin.length < 4) return toast('PIN must be at least 4 characters', 'error');
-                try {
-                    const resp = await fetch('/admin/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, pin }) });
-                    const data = await resp.json();
-                    if (data.status === 'success') { toast('User created successfully', 'success'); closeAddUserModal(); loadUsers(); }
-                    else toast(data.message, 'error');
-                } catch(e) { toast(e.message, 'error'); }
-            }
-
-            function deleteUser(username) {
-                askConfirm('Delete user "' + username + '"? This cannot be undone.', async () => {
-                    try {
-                        const resp = await fetch('/admin/api/users/' + encodeURIComponent(username), { method: 'DELETE' });
-                        const data = await resp.json();
-                        if (data.status === 'success') { toast('User deleted', 'success'); loadUsers(); }
-                        else toast(data.message, 'error');
-                    } catch(e) { toast(e.message, 'error'); }
-                }, '🗑️ Delete user?');
-            }
-
-            function toggleBan(username, banned) {
-                askConfirm((banned ? 'Ban' : 'Unban') + ' user "' + username + '"?', async () => {
-                    try {
-                        const resp = await fetch('/admin/api/users/' + encodeURIComponent(username) + '/ban', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ banned }) });
-                        const data = await resp.json();
-                        if (data.status === 'success') { toast(data.message, 'success'); loadUsers(); }
-                        else toast(data.message, 'error');
-                    } catch(e) { toast(e.message, 'error'); }
-                }, banned ? '🚫 Ban user?' : '🔓 Unban user?');
-            }
-
-            // ─── Edit Balance (add / remove / set) ────────────────────
-            function openEditModal(username, currentBalance) {
-                currentEditUser = username;
-                document.getElementById('editUsername').innerText = username;
-                document.getElementById('currentBalance').innerText = currentBalance.toFixed(4);
-                document.getElementById('editAmount').value = '';
-                document.getElementById('editModal').style.display = 'flex';
-            }
-            function closeModal() { document.getElementById('editModal').style.display = 'none'; currentEditUser = null; }
-
-            async function saveBalance(action) {
-                const amount = parseFloat(document.getElementById('editAmount').value);
-                if (isNaN(amount) || amount < 0) return toast('Please enter a valid amount', 'error');
-                try {
-                    const resp = await fetch('/admin/api/update-balance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: currentEditUser, amount, action }) });
-                    const data = await resp.json();
-                    if (data.status === 'success') {
-                        toast('Balance updated → ' + data.new_balance.toFixed(4) + ' CC', 'success');
-                        closeModal(); loadUsers();
-                    } else toast(data.message, 'error');
-                } catch(e) { toast(e.message, 'error'); }
-            }
-
-            // ─── Edit Stake (admin) ────────────────────────────────────
-            let currentStakeUser = null;
-            let currentStakeSnapshot = { amount: 0, pending_reward: 0 };
-
-            function openEditStakeModal() {
-                const username = document.getElementById('drawerUsername').innerText;
-                if (!username) return;
-                currentStakeUser = username;
-                document.getElementById('editStakeUsername').innerText = username;
-                document.getElementById('currentStake').innerText = (Number(currentStakeSnapshot.amount) || 0).toFixed(4);
-                document.getElementById('currentPendingReward').innerText = (Number(currentStakeSnapshot.pending_reward) || 0).toFixed(4);
-                document.getElementById('editStakeAmount').value = '';
-                document.getElementById('editStakeModal').style.display = 'flex';
-            }
-            function closeEditStakeModal() {
-                document.getElementById('editStakeModal').style.display = 'none';
-                currentStakeUser = null;
-            }
-
-            async function saveStake(action) {
-                const amount = parseFloat(document.getElementById('editStakeAmount').value);
-                if (isNaN(amount) || amount < 0) return toast('Please enter a valid amount', 'error');
-                try {
-                    const resp = await fetch('/admin/api/update-stake', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ username: currentStakeUser, amount, action })
-                    });
-                    const data = await resp.json();
-                    if (data.status === 'success') {
-                        toast('Stake updated → ' + data.new_stake.toFixed(4) + ' CC staked', 'success');
-                        currentStakeSnapshot = { amount: data.new_stake, pending_reward: data.pending_reward };
-                        document.getElementById('currentStake').innerText = data.new_stake.toFixed(4);
-                        document.getElementById('currentPendingReward').innerText = (Number(data.pending_reward) || 0).toFixed(4);
-                        document.getElementById('drawerStake').innerHTML = '<b>' + data.new_stake.toFixed(4) + '</b> CC staked · <b>' + (Number(data.pending_reward) || 0).toFixed(4) + '</b> CC pending reward';
-                        document.getElementById('editStakeAmount').value = '';
-                        closeEditStakeModal();
-                    } else {
-                        toast(data.message, 'error');
-                    }
-                } catch(e) { toast(e.message, 'error'); }
-            }
-
-            // ─── Swap Actions ──────────────────────────────────────────
-            function completeSwap(id, xnoTxid = null) {
-                askConfirm('Mark swap #' + id + ' as completed?', async () => {
-                    try {
-                        const body = xnoTxid ? { request_id: id, xno_txid: xnoTxid } : { request_id: id };
-                        const resp = await fetch('/admin/api/fulfill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-                        const data = await resp.json();
-                        if (data.status === 'success') { toast('Swap completed' + (xnoTxid ? ' — XNO txid saved' : ''), 'success'); loadAllSwaps(); loadStats(); }
-                        else toast(data.message || 'Unknown error', 'error');
-                    } catch(e) { toast(e.message, 'error'); }
-                }, '✅ Complete swap?');
-            }
-
-            function deleteSwap(id) {
-                askConfirm('Delete swap request #' + id + '?', async () => {
-                    try {
-                        const resp = await fetch('/admin/api/delete/' + id, { method: 'DELETE' });
-                        const data = await resp.json();
-                        if (data.status === 'success') { toast('Swap deleted', 'success'); loadAllSwaps(); loadStats(); }
-                        else toast(data.message || 'Unknown error', 'error');
-                    } catch(e) { toast(e.message, 'error'); }
-                }, '🗑️ Delete swap?');
-            }
-
-            // ─── Statistics ────────────────────────────────────────────
-            async function loadStats() {
-                try {
-                    const resp = await fetch('/admin/api/all-swaps');
-                    const data = await resp.json();
-                    const usersResp = await fetch('/admin/api/all-users');
-                    const usersData = await usersResp.json();
-                    if (data.status === 'success' && usersData.status === 'success') {
-                        const totalSwaps = data.swaps.length;
-                        const pendingSwaps = data.swaps.filter(s => s.status === 'pending').length;
-                        const completedSwaps = data.swaps.filter(s => s.status === 'completed').length;
-                        const xnoSwaps = data.swaps.filter(s => s.swap_type === 'xno_to_cc' || s.swap_type === 'cc_to_xno').length;
-                        const totalUsers = usersData.users.length;
-                        const bannedUsers = usersData.users.filter(u => u.banned).length;
-                        const totalBalance = usersData.users.reduce((sum, u) => sum + u.balance, 0);
-                        const avgBalance = totalUsers > 0 ? totalBalance / totalUsers : 0;
-                        const topHolder = usersData.users.slice().sort((a,b) => b.balance - a.balance)[0];
-
-                        document.getElementById('statsContent').innerHTML =
-                            '<div class="stats-grid">' +
-                            statCard('📊', 'Total Swaps', totalSwaps) +
-                            statCard('⏳', 'Pending Swaps', pendingSwaps) +
-                            statCard('✅', 'Completed Swaps', completedSwaps) +
-                            statCard('🟦', 'XNO Swaps', xnoSwaps) +
-                            statCard('👥', 'Total Users', totalUsers) +
-                            statCard('🚫', 'Banned Users', bannedUsers) +
-                            statCard('💰', 'Total CC Supply', totalBalance.toFixed(4) + ' CC') +
-                            statCard('📈', 'Average Balance', avgBalance.toFixed(4) + ' CC') +
-                            statCard('👑', 'Top Holder', topHolder ? topHolder.username + ' (' + topHolder.balance.toFixed(2) + ' CC)' : '-') +
-                            '</div>';
-                    }
-                } catch(e) { console.error(e); }
-            }
-            function statCard(icon, label, value) {
-                return '<div class="stat-card"><div class="stat-label">' + icon + ' ' + label + '</div><strong>' + value + '</strong></div>';
-            }
-
-            // ─── Flagged Workers ───────────────────────────────────────
-            async function loadFlaggedWorkers(btn) {
-                spinBtn(btn);
-                try {
-                    const resp = await fetch('/admin/api/flagged-workers');
-                    const data = await resp.json();
-                    const tbody = document.getElementById('flaggedBody');
-                    if (!data.workers || data.workers.length === 0) { tbody.innerHTML = '<tr class="empty-row"><td colspan="7">✅ No flagged workers</td></tr>'; return; }
-                    tbody.innerHTML = '';
-                    for (const w of data.workers) {
-                        const row = tbody.insertRow();
-                        row.insertCell(0).innerHTML = '<code style="color:var(--gold-bright)">' + w.worker_name + '</code>';
-                        row.insertCell(1).innerHTML = '<span style="color:var(--text-dim);font-size:0.8rem">' + (w.tier || 'cpu') + '</span>';
-                        const warnCount = w.warning_count || 0;
-                        row.insertCell(2).innerHTML = warnCount >= 3 ? '<span style="color:var(--red);font-weight:bold">' + warnCount + ' ⚠️</span>' : '<span style="color:var(--gold-bright)">' + warnCount + '</span>';
-                        row.insertCell(3).innerHTML = w.suspended ? '<span class="status-pending">🚫 Suspended</span>' : '<span class="status-completed">⚠️ Warned</span>';
-                        row.insertCell(4).innerText = w.suspended_at ? new Date(w.suspended_at * 1000).toLocaleString() : '-';
-                        row.insertCell(5).innerHTML = '<small style="color:var(--text-dim)">' + (w.suspension_reason || '-') + '</small>';
-                        const actions = row.insertCell(6);
-                        const clearBtn = document.createElement('button'); clearBtn.className = 'btn btn-complete'; clearBtn.textContent = '✅ Clear';
-                        clearBtn.onclick = () => clearWorkerSuspension(w.worker_name);
-                        actions.appendChild(clearBtn);
-                        if (!w.suspended) {
-                            const suspBtn = document.createElement('button'); suspBtn.className = 'btn btn-delete'; suspBtn.textContent = '🚫 Suspend'; suspBtn.style.marginLeft = '6px';
-                            suspBtn.onclick = () => { document.getElementById('manualWorkerName').value = w.worker_name; };
-                            actions.appendChild(suspBtn);
-                        }
-                    }
-                } catch(e) { console.error(e); }
-            }
-
-            function clearWorkerSuspension(workerName) {
-                askConfirm('Clear all warnings and suspension for "' + workerName + '"?', async () => {
-                    try {
-                        const resp = await fetch('/admin/api/workers/' + encodeURIComponent(workerName) + '/clear', { method: 'POST' });
-                        const data = await resp.json();
-                        if (data.status === 'success') { toast(data.message, 'success'); loadFlaggedWorkers(); }
-                        else toast(data.message, 'error');
-                    } catch(e) { toast(e.message, 'error'); }
-                }, '✅ Clear suspension?');
-            }
-
-            function manualSuspend() {
-                const workerName = document.getElementById('manualWorkerName').value.trim();
-                const reason = document.getElementById('manualReason').value.trim();
-                if (!workerName) return toast('Enter a worker name', 'error');
-                askConfirm('Suspend worker "' + workerName + '"?', async () => {
-                    try {
-                        const resp = await fetch('/admin/api/workers/' + encodeURIComponent(workerName) + '/suspend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: reason || 'Manual suspension by admin' }) });
-                        const data = await resp.json();
-                        if (data.status === 'success') { toast(data.message, 'success'); loadFlaggedWorkers(); }
-                        else toast(data.message, 'error');
-                    } catch(e) { toast(e.message, 'error'); }
-                }, '🚫 Suspend worker?');
-            }
-
-            function manualClear() {
-                const workerName = document.getElementById('manualWorkerName').value.trim();
-                if (!workerName) return toast('Enter a worker name', 'error');
-                clearWorkerSuspension(workerName);
-            }
-
-            // ─── Mining Nodes ──────────────────────────────────────────
-            async function loadNodes(btn) {
-                spinBtn(btn);
-                try {
-                    const resp = await fetch('/api/nodes');
-                    const data = await resp.json();
-                    const tbody = document.getElementById('nodesBody');
-                    if (!data.nodes || data.nodes.length === 0) { tbody.innerHTML = '<tr class="empty-row"><td colspan="7">🌐 No nodes registered</td></tr>'; return; }
-                    tbody.innerHTML = '';
-                    for (const n of data.nodes) {
-                        const row = tbody.insertRow();
-                        row.insertCell(0).innerText = n.name;
-                        row.insertCell(1).innerHTML = '<small class="mono" style="color:var(--text-dim)">' + n.url + '</small>';
-                        row.insertCell(2).innerText = n.connected_miners;
-                        row.insertCell(3).innerText = (n.cpu_load || 0).toFixed(1) + '%';
-                        row.insertCell(4).innerText = (n.ping_ms || 0) + 'ms';
-                        row.insertCell(5).innerText = n.total_blocks_relayed || 0;
-                        const actions = row.insertCell(6);
-                        const delBtn = document.createElement('button'); delBtn.className = 'btn btn-delete'; delBtn.textContent = '🗑️ Delete';
-                        delBtn.onclick = () => deleteNode(n.id);
-                        actions.appendChild(delBtn);
-                    }
-                } catch(e) { console.error(e); }
-            }
-
-            function deleteNode(id) {
-                askConfirm('Delete mining node #' + id + '?', async () => {
-                    try {
-                        const resp = await fetch('/api/nodes/' + id, { method: 'DELETE' });
-                        const data = await resp.json();
-                        if (data.status === 'success') { toast(data.message, 'success'); loadNodes(); }
-                        else toast(data.message, 'error');
-                    } catch(e) { toast(e.message, 'error'); }
-                }, '🗑️ Delete node?');
-            }
-
-            // ─── Init ──────────────────────────────────────────────────
-            loadAllSwaps();
-            loadUsers();
-            loadStats();
-            setInterval(() => { loadAllSwaps(); loadStats(); }, 30000);
-        </script>
-    </body>
-    </html>
-  `);
+  res.sendFile(path.join(__dirname, 'views', 'admin', 'dashboard.html'));
 });
-
-// public endpoints
 app.get('/api/server/public-key', (req, res) => {
   res.json({
     status: 'success',
@@ -1593,7 +487,6 @@ app.get('/api/server/public-key', (req, res) => {
   });
 });
 
-// dh exchange
 app.post('/api/dh/exchange', (req, res) => {
   const { clientId, clientPublicKey, token } = req.body;
   if (!clientId || !clientPublicKey || !token) {
@@ -1654,17 +547,15 @@ function verifyDHSignature(req, res, next) {
 }
 app.use(verifyDHSignature);
 
-// Swap Module
 app.use('/swap', SwapRouter);
 
-// node fees module
 app.use('/node_fees', NodeFeesRouter.router);
 
-// auth endpoint
 app.post('/auth', authLimiter, (req, res) => {
   const { username, pin } = req.body;
   if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing fields' });
   try {
+    // Check whether the user is banned
     const user = db.getUser(username);
     if (user && user.banned) {
       return res.status(403).json({ status: 'error', message: 'Account is banned' });
@@ -1714,7 +605,7 @@ app.get('/get_transactions', (req, res) => {
   try {
     const user = db.getUser(username);
     if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
-    // Nếu bị ban vẫn có thể xem lịch sử? Tùy chọn, tôi vẫn cho phép.
+    // Banned users can still view history if we choose to allow it.
     const transactions = db.getTransactions(username, 20);
     res.json({ status: 'success', transactions });
   } catch (e) {
@@ -1780,7 +671,6 @@ app.get('/pos/info', (req, res) => {
   }
 });
 
-// send cc route, and verify token (cant use if banned ;/)
 app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
   const { to_username, amount } = req.body;
   const from_username = req.user.username;
@@ -1792,29 +682,32 @@ app.post('/send_cc', verifyToken, sendLimiter, (req, res) => {
     if (isNaN(sendAmount) || sendAmount <= 0) {
       return res.status(400).json({ status: 'error', message: 'Invalid amount' });
     }
+    // Check the sender.
     const sender = db.getUser(from_username);
     if (!sender) return res.status(404).json({ status: 'error', message: 'Sender not found' });
     if (sender.banned) {
       return res.status(403).json({ status: 'error', message: 'Account is banned' });
     }
+    // Check the recipient.
     const receiver = db.getUser(to_username);
     if (!receiver) return res.status(404).json({ status: 'error', message: 'Receiver not found' });
     if (receiver.banned) {
       return res.status(403).json({ status: 'error', message: 'Cannot send to banned account' });
     }
 
-    // 1% node fee
+    // Calculate the fee using the node_fees config, defaulting to 1%.
     const feePercent = NodeFeesRouter.TRANSACTION_FEE_PERCENT || 1;
     const fee = parseFloat((sendAmount * feePercent / 100).toFixed(8));
     const totalDeducted = parseFloat((sendAmount + fee).toFixed(8));
-    
+
+    // Check the balance.
     if (sender.balance < totalDeducted) {
       return res.status(400).json({ status: 'error', message: `Insufficient balance. Need ${totalDeducted} CC (including ${fee} CC fee)` });
     }
 
+    // Deduct funds from the sender and move them into mempool_holding.
     db.updateBalance(from_username, -totalDeducted);
     db.updateBalance('mempool_holding', totalDeducted);
-
     const txId = 'tx_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
     const mempoolTx = {
       id: txId,
@@ -1914,10 +807,9 @@ app.post('/pos/unstake', verifyToken, stakeLimiter, (req, res) => {
 });
 
 
-// ad mining boost
 const boostChallenges = new Map();
-const BOOST_CHALLENGE_TTL = 120; // seconds
-const BOOST_MIN_VIEW_SECONDS = 10; // minimum time viewing
+const BOOST_CHALLENGE_TTL = 120; // segundos
+const BOOST_MIN_VIEW_SECONDS = 10; // Minimum seconds between challenge and activate.
 
 setInterval(() => {
   const now = Math.floor(Date.now() / 1000);
@@ -1940,11 +832,13 @@ app.post('/mining/boost/activate', boostLimiter, (req, res) => {
   if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
   if (!challenge_id) return res.status(400).json({ status: 'error', message: 'Missing challenge_id' });
   try {
+    // Validate the challenge (implicit authentication).
     const challenge = boostChallenges.get(challenge_id);
     if (!challenge) return res.status(400).json({ status: 'error', message: 'Invalid or expired challenge' });
     if (challenge.username !== username.trim()) return res.status(400).json({ status: 'error', message: 'Challenge belongs to another user' });
     if (challenge.used) return res.status(400).json({ status: 'error', message: 'Challenge already used' });
 
+    // Validate the minimum viewing time.
     const now = Math.floor(Date.now() / 1000);
     const elapsed = now - challenge.issued_at;
     if (elapsed < BOOST_MIN_VIEW_SECONDS) {
@@ -1958,6 +852,7 @@ app.post('/mining/boost/activate', boostLimiter, (req, res) => {
     if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
     if (user && user.banned) return res.status(403).json({ status: 'error', message: 'Account is banned' });
 
+    // Mark the challenge as used and activate the boost.
     challenge.used = true;
     boostChallenges.set(challenge_id, challenge);
     const result = db.activateMiningBoost(username, 1.3);
@@ -1995,9 +890,7 @@ app.get('/mining/boost/status', (req, res) => {
   }
 });
 
-// MINING ROUTES
 
-// Register miner tier (need this or will fallback to cpu tier)
 app.post('/mining/register-tier', verifyToken, (req, res) => {
   try {
     const workerName = req.user.username;
@@ -2026,7 +919,6 @@ app.post('/mining/register-tier', verifyToken, (req, res) => {
   }
 });
 
-// get current miner tier
 app.get('/mining/tier', verifyToken, (req, res) => {
   try {
     const workerName = req.user.username;
@@ -2081,7 +973,6 @@ app.get('/block/:height', (req, res) => {
   }
 });
 
-// get job for worker
 app.post('/get_job', (req, res) => {
   try {
     const { worker_name, instance_id, device_type } = req.body;
@@ -2102,7 +993,6 @@ app.post('/get_job', (req, res) => {
   }
 });
 
-// get job by id
 app.get('/get_job/:id', (req, res) => {
   try {
     const job = db.getActiveJob(req.params.id);
@@ -2121,7 +1011,6 @@ app.get('/get_job/:id', (req, res) => {
   }
 });
 
-// Submit solution
 app.post('/submit_solution', (req, res) => {
   try {
     const bounty_id = req.query.bounty_id || req.body.bounty_id;
@@ -2134,6 +1023,7 @@ app.post('/submit_solution', (req, res) => {
       return res.status(400).json({ status: 'error', message: 'Missing required parameters: bounty_id, nonce' });
     }
 
+    // Support both JWT-authenticated (MPG miner) and unauthenticated (webminer) flows
     let worker_name;
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -2143,17 +1033,22 @@ app.post('/submit_solution', (req, res) => {
       } catch (e) {
         return res.status(403).json({ status: 'error', message: 'Invalid or expired token' });
       }
+      // If token is present, submitted worker_name must match
       const submitted_worker = req.query.worker_name || req.body.worker_name;
       if (submitted_worker && submitted_worker !== worker_name) {
         return res.status(403).json({ status: 'error', message: `worker_name mismatch: token is ${worker_name} but submitted ${submitted_worker}` });
       }
     } else {
+      // Unauthenticated fallback: use worker_name from body (webminer)
       worker_name = req.query.worker_name || req.body.worker_name;
       if (!worker_name || typeof worker_name !== 'string') {
         return res.status(400).json({ status: 'error', message: 'Missing worker_name. Authenticate with JWT or provide worker_name in body.' });
       }
     }
 
+    // Sanitize/cap length of client-controlled fields, matching the hardened
+    // node-relayed route (previously unbounded here, allowing oversized or
+    // malformed instance_id/device_type/worker_name to reach the DB/hash input)
     const cleanWorkerName = String(worker_name).trim().substring(0, 100);
     const cleanInstanceId = instance_id ? String(instance_id).trim().substring(0, 50) : instance_id;
     const cleanDeviceType = String(device_type).trim().substring(0, 50);
@@ -2165,12 +1060,10 @@ app.post('/submit_solution', (req, res) => {
   }
 });
 
-// Heartbeat
 app.get('/miner_heartbeat', (req, res) => {
   res.json({ status: 'ok', time: Date.now() });
 });
 
-// active bounties list
 app.get('/active_bounties_list', (req, res) => {
   try {
     const blocks = db.getBlocks(20);
@@ -2181,7 +1074,6 @@ app.get('/active_bounties_list', (req, res) => {
   }
 });
 
-// Mining user stats
 app.get('/mining/user-stats', (req, res) => {
   const username = req.query.username;
   if (!username) return res.status(400).json({ status: 'error', message: 'Missing username' });
@@ -2204,16 +1096,65 @@ app.get('/mining/user-stats', (req, res) => {
   }
 });
 
-// test health
 app.get('/api/test', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString(), message: 'ChocoHub API is running', uptime: process.uptime() });
 });
 
+function trustedValidateChain(blocks = []) {
+  if (!Array.isArray(blocks) || blocks.length === 0) return { ok: false, message: 'Empty chain' };
+  const sorted = [...blocks].sort((a, b) => a.height - b.height);
+  for (let i = 0; i < sorted.length; i++) {
+    const block = sorted[i];
+    if (typeof block.height !== 'number' || !block.hash || !block.prev_hash) return { ok: false, message: 'Invalid block' };
+    if (i > 0) {
+      if (sorted[i].height !== sorted[i - 1].height + 1) return { ok: false, message: 'Height gap' };
+      if (sorted[i].prev_hash !== sorted[i - 1].hash) return { ok: false, message: 'Prev hash mismatch' };
+    }
+  }
+  return { ok: true, blocks: sorted };
+}
+
+function trustedCanonizeRemote(blocks = []) {
+  const check = trustedValidateChain(blocks);
+  if (!check.ok) return { ok: false, message: check.message };
+  const sorted = check.blocks;
+  const tip = db.getTrustedTip ? db.getTrustedTip() : null;
+  if (tip && sorted[sorted.length - 1].height <= tip.height) {
+    return { ok: true, imported: 0, tip };
+  }
+  const imported = db.upsertTrustedBlocks ? db.upsertTrustedBlocks(sorted) : 0;
+  return { ok: true, imported, tip: db.getTrustedTip ? db.getTrustedTip() : null };
+}
+app.get('/api/trusted/chain', (req, res) => {
+  try {
+    const limit = Math.min(5000, Math.max(1, parseInt(req.query.limit) || 1000));
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const blocks = db.getTrustedBlocks ? db.getTrustedBlocks(limit, offset) : [];
+    const tip = db.getTrustedTip ? db.getTrustedTip() : null;
+    res.json({ status: 'success', blocks, tip, total: blocks.length });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+app.post('/api/trusted/sync', (req, res) => {
+  try {
+    const token = req.body?.token || req.headers['x-trusted-token'];
+    if (token !== (process.env.TRUSTED_TOKEN || process.env.NODE_MASTER_TOKEN || 'trusted-global-token')) {
+      return res.status(401).json({ status: 'error', message: 'Invalid trusted token' });
+    }
+    const blocks = Array.isArray(req.body?.blocks) ? req.body.blocks : [];
+    const imported = db.upsertTrustedBlocks ? db.upsertTrustedBlocks(blocks) : 0;
+    const tip = db.getTrustedTip ? db.getTrustedTip() : null;
+    res.json({ status: 'success', imported, tip, received: blocks.length });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
 app.get('/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString(), dbHash: getDbHash() });
 });
 
-// backup endpoints
 app.post('/api/backup/register', (req, res) => {
   const { url, token, name, description, owner, platform, clientId, users, blocks, total_items } = req.body;
   if (!url || !token) return res.status(400).json({ status: 'error', message: 'Missing url or token' });
@@ -2259,6 +1200,7 @@ app.post('/api/backup/sync', (req, res) => {
       const incomingUsers = (data.state.users || []).length;
       const incomingBlockCount = (data.state.blocks || []).length;
 
+      // Layer 1: compare against all registered backup nodes' reported data
       const now = Date.now();
       let bestKnownUsers = 0, bestKnownBlocks = 0;
       for (const info of Object.values(registeredBackupNodes)) {
@@ -2267,9 +1209,11 @@ app.post('/api/backup/sync', (req, res) => {
         if (info.blocks > bestKnownBlocks) bestKnownBlocks = info.blocks;
       }
 
+      // Layer 2: also compare against best snapshot we've already accepted this session
       if (bestSnapshotMetrics.users > bestKnownUsers) bestKnownUsers = bestSnapshotMetrics.users;
       if (bestSnapshotMetrics.blocks > bestKnownBlocks) bestKnownBlocks = bestSnapshotMetrics.blocks;
 
+      // Reject if significantly behind peers or previously accepted state
       if (bestKnownUsers > 0 && incomingUsers < bestKnownUsers * 0.8) {
         console.warn(`🚫 Rejected FULL_SNAPSHOT: incoming has ${incomingUsers} users, best known is ${bestKnownUsers}. Refusing downgrade.`);
         return res.json({ type: 'SNAPSHOT_REJECTED', status: 'error', message: `Best backup node has ${bestKnownUsers} users but this snapshot has only ${incomingUsers}. Refusing restore.` });
@@ -2279,6 +1223,7 @@ app.post('/api/backup/sync', (req, res) => {
         return res.json({ type: 'SNAPSHOT_REJECTED', status: 'error', message: `Best backup node has ${bestKnownBlocks} blocks but this snapshot has only ${incomingBlockCount}. Refusing restore.` });
       }
 
+      // Layer 3: absolute floor — even if no peers exist, reject obviously empty snapshots
       const ABSOLUTE_MIN_USERS = 5;
       const ABSOLUTE_MIN_BLOCKS = 5;
       if ((bestKnownUsers === 0 && bestKnownBlocks === 0) && (incomingUsers < ABSOLUTE_MIN_USERS || incomingBlockCount < ABSOLUTE_MIN_BLOCKS)) {
@@ -2290,13 +1235,13 @@ app.post('/api/backup/sync', (req, res) => {
       db.importFullState(data.state);
       console.log('✅ Full database restored from backup client');
 
+      // Update best known snapshot metrics (prevents future downgrades in this session)
       const incomingTotal = incomingUsers + incomingBlockCount
         + (data.state.stakes || []).length
         + (data.state.snake_claims || []).length
         + (data.state.bounties || []).length;
       if (incomingUsers > bestSnapshotMetrics.users) bestSnapshotMetrics.users = incomingUsers;
       if (incomingBlockCount > bestSnapshotMetrics.blocks) bestSnapshotMetrics.blocks = incomingBlockCount;
-
       NodeFeesRouter.ensureHoldingAccount();
       NodeFeesRouter.ensureNodeFeesAccount();
       // swap_holding
@@ -2338,9 +1283,7 @@ app.post('/api/backup/sync', (req, res) => {
   }
 });
 
-// MINING NODES
 
-// register a new mining node (requires token)
 app.post('/api/nodes/register', nodeRegisterLimit, (req, res) => {
   try {
     const { name, url, token, owner, location } = req.body;
@@ -2350,6 +1293,7 @@ app.post('/api/nodes/register', nodeRegisterLimit, (req, res) => {
     if (token !== NODE_MASTER_TOKEN) {
       return res.status(401).json({ status: 'error', message: 'Invalid master token' });
     }
+    // Input sanitization
     const cleanName = String(name).trim().substring(0, 100);
     const cleanUrl = String(url).trim().substring(0, 500);
     const cleanOwner = String(owner || '').trim().substring(0, 100);
@@ -2364,6 +1308,7 @@ app.post('/api/nodes/register', nodeRegisterLimit, (req, res) => {
     if (existing) {
       return res.json({ status: 'success', message: 'Node already registered', auth_token: existing.auth_token, id: existing.id });
     }
+    // If same name exists with a different URL (tunnel restarted), update it — prevents duplicates
     const sameName = db.getMiningNodeByName(cleanName);
     if (sameName) {
       db.updateMiningNodeUrl(sameName.id, cleanUrl);
@@ -2379,7 +1324,6 @@ app.post('/api/nodes/register', nodeRegisterLimit, (req, res) => {
   }
 });
 
-// Node heartbeat
 app.post('/api/nodes/heartbeat', nodeRateLimit, (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -2392,6 +1336,7 @@ app.post('/api/nodes/heartbeat', nodeRateLimit, (req, res) => {
       return res.status(401).json({ status: 'error', message: 'Invalid node token' });
     }
     const { connected_miners, cpu_load, ping_ms, blockchain_height } = req.body;
+    // Validate ranges
     const miners = Math.max(0, Math.min(10000, parseInt(connected_miners) || 0));
     const cpu = Math.max(0, Math.min(100, parseFloat(cpu_load) || 0));
     const ping = Math.max(0, Math.min(10000, parseFloat(ping_ms) || 0));
@@ -2404,7 +1349,6 @@ app.post('/api/nodes/heartbeat', nodeRateLimit, (req, res) => {
   }
 });
 
-// List active nodes
 app.get('/api/nodes', (req, res) => {
   try {
     const nodes = db.getActiveMiningNodes();
@@ -2427,7 +1371,6 @@ app.get('/api/nodes', (req, res) => {
   }
 });
 
-// Server node discovery (pings nodes from server, not browser)
 app.get('/api/nodes/discover', async (req, res) => {
   try {
     const nodes = db.getActiveMiningNodes();
@@ -2470,7 +1413,6 @@ app.get('/api/nodes/discover', async (req, res) => {
   }
 });
 
-// Miner info endpoint — returns active workers with full details: tier, flags, boost, difficulty, rewards
 app.get('/api/miner-info', (req, res) => {
   try {
     const username = (req.query.username || '').trim();
@@ -2539,7 +1481,6 @@ app.get('/api/miner-info', (req, res) => {
   }
 });
 
-// Public proxy: miner sends job request here, server forwards to node (dont actually make really sense, we should remove this
 app.post('/api/proxy/get_job', nodeRateLimit, async (req, res) => {
   try {
     const { node_id, worker_name, instance_id, device_type } = req.body;
@@ -2563,7 +1504,6 @@ app.post('/api/proxy/get_job', nodeRateLimit, async (req, res) => {
   }
 });
 
-// Public proxy miner sends solution here, server forwards to node (dont really makes sense too)
 app.post('/api/proxy/submit_solution', nodeRateLimit, async (req, res) => {
   try {
     const { node_id, bounty_id, nonce, worker_name, instance_id, device_type } = req.body;
@@ -2639,7 +1579,6 @@ app.post('/api/nodes/get_job', nodeRateLimit, (req, res) => {
   }
 });
 
-// Node submits solution (server just validates)
 app.post('/api/nodes/submit_solution', nodeSubmitLimit, (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -2655,6 +1594,7 @@ app.post('/api/nodes/submit_solution', nodeSubmitLimit, (req, res) => {
     if (!bounty_id || nonce === undefined || !worker_name) {
       return res.status(400).json({ status: 'error', message: 'Missing bounty_id, nonce, or worker_name' });
     }
+    // Validate nonce is a number
     const parsedNonce = parseInt(nonce);
     if (isNaN(parsedNonce) || parsedNonce < 0) {
       return res.status(400).json({ status: 'error', message: 'Invalid nonce' });
@@ -2667,7 +1607,6 @@ app.post('/api/nodes/submit_solution', nodeSubmitLimit, (req, res) => {
   }
 });
 
-// Node sync blocks
 app.get('/api/nodes/sync-blocks', nodeRateLimit, (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -2731,6 +1670,7 @@ app.post('/api/nodes/restore-blockchain', nodeRegisterLimit, (req, res) => {
       }
     }
 
+    // Validate and sanitize blocks
     const validBlocks = [];
     for (const block of sorted) {
       if (!block || typeof block !== 'object') continue;
@@ -2787,6 +1727,7 @@ app.post('/api/nodes/trigger-restore', nodeRegisterLimit, async (req, res) => {
 
     console.log(`🔄 Triggering restore from node: ${bestNode.name} (height: ${bestNode.last_block_height})`);
 
+    // Fetch full chain from the backup node
     const nodeUrl = bestNode.url.replace(/\/+$/, '');
     const resp = await fetch(`${nodeUrl}/full-chain`, {
       method: 'GET',
@@ -2803,10 +1744,12 @@ app.post('/api/nodes/trigger-restore', nodeRegisterLimit, async (req, res) => {
       return res.json({ status: 'error', message: 'Node returned empty chain' });
     }
 
+    // Verify minimum block count
     if (data.blocks.length < 100) {
       return res.status(400).json({ status: 'error', message: `Node has only ${data.blocks.length} blocks (minimum 100 required)` });
     }
 
+    // Validate chain integrity
     const sorted = [...data.blocks].sort((a, b) => a.height - b.height);
     if (sorted[0].height !== 0) {
       return res.status(400).json({ status: 'error', message: 'Chain must start at height 0' });
@@ -2841,7 +1784,6 @@ app.post('/api/nodes/trigger-restore', nodeRegisterLimit, async (req, res) => {
   }
 });
 
-// delete a node
 app.delete('/api/nodes/:id', requireAdminSession, (req, res) => {
   try {
     const id = parseInt(req.params.id);
@@ -2852,7 +1794,6 @@ app.delete('/api/nodes/:id', requireAdminSession, (req, res) => {
   }
 });
 
-// SPA fallback
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, 'public', 'index.html');
   try {
@@ -2876,7 +1817,6 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-// start
 blockchain.startPoSMinting();
 NodeFeesRouter.initNodeFees();
 
@@ -2895,7 +1835,7 @@ app.listen(PORT, () => {
   console.log('');
   backupClient.start();
 
-  // Startup blockchain restoration from mining nodes (dead code rn)
+  // ─── Startup blockchain restoration from mining nodes ──
   setTimeout(async () => {
     const blockCount = db.getBlockCount();
     if (blockCount === 0) {
