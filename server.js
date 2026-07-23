@@ -1,4 +1,3 @@
-
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -891,33 +890,7 @@ app.get('/mining/boost/status', (req, res) => {
 });
 
 
-app.post('/mining/register-tier', verifyToken, (req, res) => {
-  try {
-    const workerName = req.user.username;
-    const { tier, instance_id } = req.body;
-    const tierKey = instance_id ? `${workerName}:${instance_id}` : workerName;
-
-    if (!tier) {
-      return res.status(400).json({ status: 'error', message: 'Missing tier. Valid tiers: embedded_avr, embedded_arm, embedded_esp, embedded_esp32, mobile, cpu, gpu' });
-    }
-
-    db.setWorkerTier(tierKey, tier);
-
-    const tierInfo = blockchain.TIER_CONFIG ? blockchain.TIER_CONFIG[tier] : null;
-
-    res.json({
-      status: 'success',
-      message: `Tier registered as ${tier}`,
-      worker: tierKey,
-      tier,
-      multiplier: tierInfo ? tierInfo.multiplier : null,
-      max_difficulty: tierInfo ? tierInfo.maxDifficulty : null,
-      description: tierInfo ? tierInfo.description : null
-    });
-  } catch (e) {
-    res.status(400).json({ status: 'error', message: e.message });
-  }
-});
+// ĐÃ XÓA endpoint /mining/register-tier
 
 app.get('/mining/tier', verifyToken, (req, res) => {
   try {
