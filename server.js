@@ -1413,7 +1413,7 @@ app.get('/api/miner-info', (req, res) => {
         const flags = db.getWorkerFlags(w.worker_name);
         const boost = db.getMiningBoostMultiplier(w.worker_name);
         const lastShare = w.last_solve_time || 0;
-        const uptime = w.updated_at ? now - Math.floor(new Date(w.updated_at).getTime() / 1000) : 0;
+        const uptime = lastShare > 0 ? now - lastShare : 0;
         const perWorkerReward = db.prepare(`
           SELECT COALESCE(SUM(reward), 0) as total FROM blocks
           WHERE miner = ? AND timestamp >= ?
@@ -1423,6 +1423,7 @@ app.get('/api/miner-info', (req, res) => {
           name: w.worker_name,
           difficulty: w.difficulty,
           tier: w.tier || 'cpu',
+          device_type: w.device_type || 'unknown',
           tier_changes: w.tier_changes || 0,
           last_share: lastShare,
           last_share_ago: lastShare > 0 ? now - lastShare : null,

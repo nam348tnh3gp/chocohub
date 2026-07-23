@@ -484,15 +484,16 @@ function getWorkerDifficulty(workerName) {
   return row ? row.difficulty : null;
 }
 
-function setWorkerDifficulty(workerName, difficulty, lastSolveTime) {
+function setWorkerDifficulty(workerName, difficulty, lastSolveTime, deviceType) {
   db.prepare(`
-    INSERT INTO worker_difficulty (worker_name, difficulty, last_solve_time, updated_at)
-    VALUES (?, ?, ?, datetime('now'))
+    INSERT INTO worker_difficulty (worker_name, difficulty, last_solve_time, updated_at, device_type)
+    VALUES (?, ?, ?, datetime('now'), ?)
     ON CONFLICT(worker_name) DO UPDATE SET
       difficulty = excluded.difficulty,
       last_solve_time = excluded.last_solve_time,
-      updated_at = datetime('now')
-  `).run(workerName, difficulty, lastSolveTime);
+      updated_at = datetime('now'),
+      device_type = CASE WHEN excluded.device_type != 'unknown' THEN excluded.device_type ELSE device_type END
+  `).run(workerName, difficulty, lastSolveTime, deviceType || 'unknown');
 }
 
 
@@ -1057,6 +1058,7 @@ ensureBlockDeviceTypeColumn();
 ensureColumn('worker_difficulty', 'tier', 'TEXT DEFAULT "cpu"');
 ensureColumn('worker_difficulty', 'tier_registered_at', 'INTEGER DEFAULT 0');
 ensureColumn('worker_difficulty', 'tier_changes', 'INTEGER DEFAULT 0');
+ensureColumn('worker_difficulty', 'device_type', 'TEXT DEFAULT "unknown"');
 ensureColumn('mining_jobs', 'tier', 'TEXT DEFAULT "cpu"');
 ensureColumn('mining_jobs', 'reward_multiplier', 'REAL DEFAULT 1.0');
 ensureColumn('blocks', 'tier', 'TEXT DEFAULT "unknown"');

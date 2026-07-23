@@ -201,13 +201,13 @@ function getJobForWorker(workerName, instanceId, deviceType) {
   let diff = db.getWorkerDifficulty(diffKey);
   if (diff === null) {
     diff = TIER_INITIAL_DIFFICULTY[tier] || INITIAL_DIFFICULTY;
-    db.setWorkerDifficulty(diffKey, diff, Date.now());
+    db.setWorkerDifficulty(diffKey, diff, Date.now(), deviceType);
   }
 
   diff = Math.max(MIN_DIFFICULTY, Math.min(tierConfig.maxDifficulty, diff));
 
   // Persist the capped difficulty so stored value stays within tier limits
-  db.setWorkerDifficulty(diffKey, diff, Date.now());
+  db.setWorkerDifficulty(diffKey, diff, Date.now(), deviceType);
 
   // Try to grab a pool job at the next height
   const poolJob = db.prepare(
