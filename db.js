@@ -1403,5 +1403,8 @@ module.exports = {
   deactivateMiningNode,
   pruneMiningNodes,
   getWorkersByUsername,
-  getWorkerRewardsLast10Min
+  getWorkerRewardsLast10Min,
+  upsertTrustedBlocks,
+  getTrustedBlocks,
+  getTrustedTip
 };
