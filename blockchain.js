@@ -673,7 +673,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   // Adjust the instance difficulty based on solve time.
   const solveTime = (timestamp - parseFlexibleDate(job.created_at));
   if (solveTime > 0) {
-    adjustWorkerDifficulty(diffKey, solveTime);
+    adjustWorkerDifficulty(diffKey, solveTime, deviceType);
   }
 
   // Send a webhook notification.
@@ -702,7 +702,7 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   };
 }
 
-function adjustWorkerDifficulty(workerName, solveTime) {
+function adjustWorkerDifficulty(workerName, solveTime, deviceType) {
   const currentDiff = db.getWorkerDifficulty(workerName) || INITIAL_DIFFICULTY;
   const targetTime = TARGET_SOLVE_TIME;
 
@@ -715,7 +715,7 @@ function adjustWorkerDifficulty(workerName, solveTime) {
   newDiff = Math.max(MIN_DIFFICULTY, Math.min(tierMax, newDiff));
   newDiff = Math.round(newDiff * 10) / 10;
 
-  db.setWorkerDifficulty(workerName, newDiff, Date.now());
+  db.setWorkerDifficulty(workerName, newDiff, Date.now(), deviceType);
   console.log(`👷 Worker ${workerName}: difficulty ${currentDiff.toFixed(1)} → ${newDiff.toFixed(1)} (solve time ${solveTime.toFixed(1)}s)`);
 }
 
