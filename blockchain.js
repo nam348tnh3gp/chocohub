@@ -1,8 +1,8 @@
 const crypto = require('crypto');
 const db = require('./db');
 
-const REWARD_PER_BLOCK = 0.05;                  // 0.05 CC block reward.
-const INITIAL_DIFFICULTY = 5;                  // Initial global difficulty
+const REWARD_PER_BLOCK = 0.05;
+const INITIAL_DIFFICULTY = 5;
 const TIER_INITIAL_DIFFICULTY = {
   embedded_avr: 1,
   embedded_arm: 5,
@@ -13,14 +13,13 @@ const TIER_INITIAL_DIFFICULTY = {
   gpu: 1000,
   asic: 10000
 };
-const JOB_EXPIRE_SECONDS = 15;                  // Time until a job expires
-const MIN_DIFFICULTY = 1;                       // Minimum possible difficulty
-const MAX_DIFFICULTY = 1000000000;              // Maximum possible difficulty
-const DIFFICULTY_ADJUSTMENT_FACTOR = 0.5;       // Difficulty adjustment factor (maximum change)
-const TARGET_SOLVE_TIME = 10;                   // Expected solve time for each worker; timeouts cause difficulty to drop
+const JOB_EXPIRE_SECONDS = 15;
+const MIN_DIFFICULTY = 1;
+const MAX_DIFFICULTY = 1000000000;
+const DIFFICULTY_ADJUSTMENT_FACTOR = 0.5;
+const TARGET_SOLVE_TIME = 10;
 
 const TIER_CONFIG = {
-  // Tier definitions, multiplier, max difficulty, and max hash rate, tuned for most users
   embedded_avr: {
     multiplier: 3.5,
     maxDifficulty: 25,
@@ -77,15 +76,15 @@ const DEVICE_REWARD_MULTIPLIERS = {
   'web_miner': 1.0,
   'cpu': 1.0,
   'cpu_miner': 1.0,
-  'gpu': 1.0, // Changed from 0.5 to 1.0
+  'gpu': 1.0,
   'gpu_miner': 1.0,
   'nvidia': 1.0,
   'amd': 1.0,
   'default': 1.0
 };
 
-const MAX_MEMPOOL_PER_BLOCK = 50;                // Maximum mempool transactions per block
-const MEMPOOL_HOLDING_ACCOUNT = 'mempool_holding'; // Escrow account for mempool transactions
+const MAX_MEMPOOL_PER_BLOCK = 50;
+const MEMPOOL_HOLDING_ACCOUNT = 'mempool_holding';
 
 function difficultyToTarget(difficulty) {
   const maxTarget = (1n << 256n) - 1n;
@@ -114,7 +113,6 @@ function initBlockchain() {
     console.log('🌱 Genesis block created Succesfuly :)');
   }
 
-  // Seed pool job at next height
   const lastBlock = getLastBlock();
   if (lastBlock) {
     preCreateJobs(lastBlock.height + 1, JOB_POOL_SIZE, lastBlock.hash);
@@ -152,11 +150,11 @@ function getJobForWorker(workerName, instanceId, deviceType) {
     const ageSeconds = (Date.now() / 1000) - createdTs;
     if (ageSeconds > JOB_EXPIRE_SECONDS) {
       decayWorkerDifficulty(diffKey, ageSeconds);
-      db.setWorkerDifficulty(diffKey + '_timeout', Date.now(), Date.now());
+      db.setWorkerTimeout(diffKey, Date.now());
     }
   }
 
-  const lastTimeout = db.getWorkerDifficulty(diffKey + '_timeout');
+  const lastTimeout = db.getWorkerTimeout(diffKey);
   if (lastTimeout) {
     const cooldownElapsed = (Date.now() - lastTimeout) / 1000;
     if (cooldownElapsed < 10) {
@@ -164,7 +162,7 @@ function getJobForWorker(workerName, instanceId, deviceType) {
       if (existingJob) return mapJob(existingJob);
       return { status: 'cooldown', message: 'Wait before requesting a new job', retry_after: Math.ceil(10 - cooldownElapsed) };
     }
-    db.setWorkerDifficulty(diffKey + '_timeout', 0, 0);
+    db.setWorkerTimeout(diffKey, 0);
   }
 
   db.cleanupExpiredJobs(JOB_EXPIRE_SECONDS);
@@ -205,11 +203,8 @@ function getJobForWorker(workerName, instanceId, deviceType) {
   }
 
   diff = Math.max(MIN_DIFFICULTY, Math.min(tierConfig.maxDifficulty, diff));
-
-  // Persist the capped difficulty so stored value stays within tier limits
   db.setWorkerDifficulty(diffKey, diff, Date.now(), deviceType);
 
-  // Try to grab a pool job at the next height
   const poolJob = db.prepare(
     'SELECT * FROM mining_jobs WHERE height = ? AND status = ? AND assigned_to = ? ORDER BY created_at ASC LIMIT 1'
   ).get(height, 'active', '_pool');
@@ -240,7 +235,6 @@ function getJobForWorker(workerName, instanceId, deviceType) {
     reward_multiplier: multiplier
   });
 
-  // Pre-create jobs at next heights so other miners have work too
   preCreateJobs(height + 1, 10, prevHash);
 
   const newJob = db.getActiveJob(jobId);
@@ -300,11 +294,9 @@ function processMempoolForBlock(blockHeight, minerUser) {
   let processed = 0;
   let totalFees = 0;
 
-  // Check the holding account.
   const holding = db.getUser(MEMPOOL_HOLDING_ACCOUNT);
   if (!holding) {
     console.warn('⚠️ mempool_holding account does not exist!');
-    // Mark all as failed.
     for (const tx of txs) {
       db.markMempoolFailed(tx.id);
     }
@@ -312,7 +304,6 @@ function processMempoolForBlock(blockHeight, minerUser) {
   }
 
   for (const tx of txs) {
-    // Check whether the recipient exists.
     const receiver = db.getUser(tx.to_username);
     if (!receiver) {
       db.markMempoolFailed(tx.id);
@@ -320,18 +311,14 @@ function processMempoolForBlock(blockHeight, minerUser) {
       continue;
     }
 
-    // Check the holding balance.
     if (holding.balance < tx.total_deducted) {
       db.markMempoolFailed(tx.id);
       console.warn(`❌ Mempool tx ${tx.id}: insufficient holding balance (${holding.balance} < ${tx.total_deducted})`);
       continue;
     }
 
-    // Deduct from holding.
     db.updateBalance(MEMPOOL_HOLDING_ACCOUNT, -tx.total_deducted);
-    // Credit the receiver with the amount.
     db.updateBalance(tx.to_username, tx.amount);
-    // Credit the fee to the miner who included this block.
     if (tx.fee > 0 && minerUser) {
       db.updateBalance(minerUser, tx.fee);
       try {
@@ -340,16 +327,12 @@ function processMempoolForBlock(blockHeight, minerUser) {
     }
     totalFees += tx.fee;
 
-    // Mark the transaction as confirmed.
     db.markMempoolConfirmed(tx.id, blockHeight);
     processed++;
 
-    // Record the transaction log (optional).
     try {
       db.addTransaction(tx.from_username, tx.to_username, tx.amount);
-    } catch (e) {
-      // Ignore logging errors.
-    }
+    } catch (e) {}
 
     console.log(`✅ Mempool tx ${tx.id} confirmed in block ${blockHeight}: ${tx.amount} CC to ${tx.to_username}, fee ${tx.fee} CC → miner ${minerUser}`);
   }
@@ -373,18 +356,12 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     throw new Error('This job is assigned to another worker');
   }
 
-  // Reject if a block at this height already exists (prevents duplicates)
   const existingBlock = db.getBlockByHeight(job.height);
   if (existingBlock) {
     db.deleteJobsAtHeight(job.height, jobId);
     throw new Error(`Block ${job.height} already mined. Submit at next height.`);
   }
 
-  // Atomically claim this job for solving: flip status active→solving in one
-  // UPDATE...WHERE. If a concurrent request already claimed it (or it was
-  // already solved), this affects 0 rows and we reject immediately — closes
-  // the race window where two polls/submits could both see status='active'
-  // for the same job_id and both proceed to submit a (still-valid) nonce.
   const claimResult = db.prepare(
     `UPDATE mining_jobs SET status = 'solving' WHERE id = ? AND status = 'active'`
   ).run(jobId);
@@ -392,49 +369,38 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     throw new Error('Job not found or already solved');
   }
 
-  // Claim pool job for this worker
   if (job.assigned_to === '_pool') {
     db.prepare('UPDATE mining_jobs SET assigned_to = ? WHERE id = ?').run(diffKey, jobId);
   }
 
-  // Suspension check: per-instance flag first (targeted), then account-level (broad/manual)
   const flags = db.getWorkerFlags(diffKey);
   if (flags && flags.suspended) {
     console.warn(`🚫 Worker ${diffKey} attempted to submit solution`);
     throw new Error('Worker suspended for suspicious behavior. Contact admin to appeal.');
   }
 
-  // Check user-level suspension (blocks ALL workers of this user)
   if (db.isUserSuspended(userName)) {
     console.warn(`🚫 User ${userName} is suspended at account level`);
     throw new Error('Account suspended for suspicious behavior. Contact admin to appeal.');
   }
 
-  // Check the nonce (hash uses diffKey to match client-side computation).
   const input = job.prev_hash + String(nonce).padStart(20, '0') + diffKey;
   const hashHex = crypto.createHash('sha256').update(input).digest('hex');
 
   if (hashHex >= job.target_hex) {
-    // Invalid nonce: release the claim so the job can be retried/re-served
     db.prepare(`UPDATE mining_jobs SET status = 'active' WHERE id = ?`).run(jobId);
     return { status: 'error', reason: `Invalid nonce: hash ${hashHex.substring(0,12)}... >= target` };
   }
 
   const timestamp = Math.floor(Date.now() / 1000);
 
-  // Read tier from job record
   let tier = job.tier || 'cpu';
   let tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cpu;
 
-  // Auto-tier: upgrade if sustained hashrate exceeds tier max (multi-device rigs)
-  // Only adjusts between mobile → cpu → gpu (embedded tiers stay fixed)
-  // Hysteresis: skip if this diffKey changed tier in the last 60s, to avoid
-  // thread-race flapping (e.g. two CPU threads under one instance reporting
-  // inconsistent per-solve hashrates and bouncing the tier back and forth).
   if (hashrateReported && hashrateReported > 0 && tierConfig.maxHashrate) {
     const reportedRatio = hashrateReported / tierConfig.maxHashrate;
     if (reportedRatio > 2.0) {
-      const lastTierChange = db.getWorkerDifficulty(diffKey + '_tierchange') || 0;
+      const lastTierChange = db.getWorkerTimeout(diffKey + '_tierchange') || 0;
       const sinceChange = Date.now() - lastTierChange;
       if (sinceChange < 60000) {
         console.log(`⏸️ Auto-tier: skipping flip for ${diffKey} (last change ${(sinceChange/1000).toFixed(1)}s ago, cooldown 60s)`);
@@ -443,12 +409,12 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
         for (const t of adjustableTiers) {
           if (TIER_CONFIG[t].maxHashrate >= hashrateReported) {
             if (t !== tier && adjustableTiers.includes(tier)) {
-              console.log(`🔄 Auto-tier: ${userName} upgraded from ${tier} → ${t} (reported ${hashrateReported.toExponential(2)} H/s)`);
+              console.log(`🔄 Auto-tier: ${diffKey} upgraded from ${tier} → ${t} (reported ${hashrateReported.toExponential(2)} H/s)`);
               try {
-                db.setWorkerTier(userName, t);
-                db.setWorkerDifficulty(diffKey + '_tierchange', Date.now(), Date.now());
+                db.setWorkerTier(diffKey, t);
+                db.setWorkerTimeout(diffKey + '_tierchange', Date.now());
               } catch (e) {
-                console.warn(`⚠️ Auto-tier: could not persist tier change for ${userName} (${e.message}) — applying for this block only`);
+                console.warn(`⚠️ Auto-tier: could not persist tier change for ${diffKey} (${e.message}) — applying for this block only`);
               }
               tier = t;
               tierConfig = TIER_CONFIG[t];
@@ -460,23 +426,18 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     }
   }
 
-  // Cross-check reported hashrate vs device capability
-  // Use worker's CURRENT tier from DB (not stale job.tier) to avoid false flags after auto-tier
   let currentTier = tier;
   let currentTierConfig = tierConfig;
   try {
-    const workerInfo = db.getWorkerInfo(userName);
+    const workerInfo = db.getWorkerInfo(diffKey);
     if (workerInfo && workerInfo.tier && TIER_CONFIG[workerInfo.tier]) {
       currentTier = workerInfo.tier;
       currentTierConfig = TIER_CONFIG[currentTier];
     }
-  } catch (e) {
-    // Fall back to job tier if DB query fails
-  }
+  } catch (e) {}
 
   if (hashrateReported && hashrateReported > 0 && currentTierConfig.maxHashrate) {
     const reportedRatio = hashrateReported / currentTierConfig.maxHashrate;
-    // Threshold raised from 2.5x to 3.5x to accommodate variance in mobile/embedded devices
     if (reportedRatio > 3.5) {
       const reason = `Reported ${hashrateReported.toExponential(2)} H/s for ${currentTier} (max ${currentTierConfig.maxHashrate.toExponential(2)} H/s, ${reportedRatio.toFixed(1)}x over). Device type mismatch.`;
       db.addWorkerWarning(diffKey, reason);
@@ -495,30 +456,19 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     }
   }
 
-  // Hashrate validation (cross-check reported hashrate vs actual solve time)
   const jobCreatedTimestamp = parseFlexibleDate(job.created_at);
   const actualSolveTime = timestamp - jobCreatedTimestamp;
 
-  // PoW solve times are exponentially (memoryless) distributed, not fixed —
-  // a single solve landing far below the *average* implied time is normal
-  // random variance, not evidence of cheating. VARIANCE_TOLERANCE widens the
-  // window before flagging, and MIN_SOLVE_TIME_FLOOR prevents division blowups
-  // on very fast (lucky, low-difficulty) solves.
   const VARIANCE_TOLERANCE = 8;
-  const MIN_SOLVE_TIME_FLOOR = 0.25; // seconds
+  const MIN_SOLVE_TIME_FLOOR = 0.25;
 
-  // Cross-check actual hashrate vs device capability
-  // For high-capability tiers (cpu/gpu), allow fast solves on low diff
-  // For low-capability tiers (avr/esp), flag impossibly fast solves
   if (tierConfig.maxHashrate && tierConfig.maxHashrate <= 1000) {
-    // Low-hashrate tier: check if solve time is realistic for the tier
     const minRealisticTime = job.difficulty / (tierConfig.maxHashrate * VARIANCE_TOLERANCE);
     console.log(`🔍 Anti-cheat: tier=${tier} maxHR=${tierConfig.maxHashrate} diff=${job.difficulty} solveTime=${actualSolveTime.toFixed(4)}s minRealistic=${minRealisticTime.toFixed(4)}s`);
     if (actualSolveTime <= minRealisticTime) {
       const solveTimeFloor = Math.max(actualSolveTime, MIN_SOLVE_TIME_FLOOR);
       const actualHashrate = job.difficulty / solveTimeFloor;
       const actualRatio = actualHashrate / tierConfig.maxHashrate;
-      // Extra detail if hashrate was also missing/zero
       const hrNote = (!hashrateReported || hashrateReported <= 0)
         ? ` (also: hashrate_reported missing/zero — possible bypass attempt)`
         : ` (reported: ${hashrateReported} H/s)`;
@@ -537,10 +487,6 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
       }
     }
   } else if (tierConfig.maxHashrate) {
-    // High-capability tier: check if actual hashrate exceeds max.
-    // Use the same variance-tolerant floor as the low-hashrate branch above —
-    // a single fast/lucky solve at low difficulty is expected PoW randomness, 
-    // not proof of a faster device.
     const solveTimeFloor = Math.max(actualSolveTime, MIN_SOLVE_TIME_FLOOR);
     const actualHashrate = job.difficulty / solveTimeFloor;
     const actualRatio = actualHashrate / tierConfig.maxHashrate;
@@ -563,21 +509,11 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   }
 
   if (hashrateReported && hashrateReported > 0) {
-    // Use a solve-time floor here too — actualSolveTime is measured with
-    // second-precision timestamps, so any solve completing within the same
-    // second as job creation reads as exactly 0, making ratio = 0/expected
-    // always trip the check regardless of whether the hashrate was honest.
-    // Floor both sides so the ratio reflects real variance, not timestamp
-    // quantization.
     const solveTimeForRatio = Math.max(actualSolveTime, MIN_SOLVE_TIME_FLOOR);
     const expectedSolveTime = job.difficulty / hashrateReported;
     const ratio = solveTimeForRatio / expectedSolveTime;
     console.log(`🔍 Anti-cheat [check4/reported-vs-actual]: tier=${tier} diff=${job.difficulty} hashrateReported=${hashrateReported} rawActualSolveTime=${actualSolveTime.toFixed(4)}s (floored=${solveTimeForRatio.toFixed(4)}s) expectedSolveTime=${expectedSolveTime.toFixed(4)}s ratio=${ratio.toFixed(4)} (flag if <${(1/(VARIANCE_TOLERANCE*6)).toFixed(4)}) job.created_at=${job.created_at} now_ts=${timestamp}`);
 
-    // Solve time is exponentially distributed around the expected value, so
-    // a legit worker will regularly solve well under the "expected" time —
-    // only flag truly extreme outliers (previously 20x, which fired constantly
-    // on ordinary variance).
     if (ratio < (1 / (VARIANCE_TOLERANCE * 6))) {
       const reason = `Solved in ${actualSolveTime.toFixed(1)}s but reported hashrate ${hashrateReported} H/s implies ${expectedSolveTime.toFixed(1)}s (ratio ${ratio.toFixed(3)})`;
       const warnResult = db.addWorkerWarning(diffKey, reason);
@@ -597,31 +533,26 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
   }
   const tierMultiplier = job.reward_multiplier || 1.0;
 
-  // ─── Device multiplier: use tier from job, legacy fallback for old jobs ──
   let deviceMultiplier = tierMultiplier;
   if (!job.tier) {
     deviceMultiplier = getDeviceMultiplier(deviceType);
     console.log(`⚠️ Legacy job ${jobId} using device_type multiplier: ${deviceMultiplier}x`);
   }
-  // If nodeId: 90% miner / 5% node / 5% PoS
-  // If no node: 95% miner / 5% PoS
   const POS_REWARD_SHARE = 0.05;
-  const posContribution = parseFloat((REWARD_PER_BLOCK * POS_REWARD_SHARE).toFixed(8)); // always 0.0025 CC
+  const posContribution = parseFloat((REWARD_PER_BLOCK * POS_REWARD_SHARE).toFixed(8));
 
   let minerShare, nodeContribution;
   if (nodeId) {
     minerShare = 0.90;
-    nodeContribution = parseFloat((REWARD_PER_BLOCK * 0.05).toFixed(8)); // 0.0025 CC
+    nodeContribution = parseFloat((REWARD_PER_BLOCK * 0.05).toFixed(8));
   } else {
     minerShare = 0.95;
     nodeContribution = 0;
   }
   const minerBase = parseFloat((REWARD_PER_BLOCK * minerShare).toFixed(8));
 
-  // miner reward = minerBase × tier_multiplier
   const deviceReward = parseFloat((minerBase * deviceMultiplier).toFixed(8));
 
-  // ─── Mining Boost: multiplicador 1.3x se ativo ──
   const boostMultiplier = db.getMiningBoostMultiplier(diffKey);
   const finalReward = parseFloat((deviceReward * boostMultiplier).toFixed(8));
   const bonusReward = parseFloat((finalReward - deviceReward).toFixed(8));
@@ -641,7 +572,6 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     pos_contribution: posContribution
   };
 
-  // Atomic: block insert + balance + PoS pool + node earnings — rolls back on failure
   db.submitBlockTransaction(newBlock, userName, finalReward, posContribution, nodeId, nodeContribution);
 
   if (nodeId && nodeContribution > 0) {
@@ -652,7 +582,6 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     console.log(`⚡ Mining boost active for ${diffKey}: ${deviceReward} → ${finalReward} CC (${boostMultiplier}x)`);
   }
 
-  // ─── Xử lý mempool ──────────────────────────────
   const mempoolResult = processMempoolForBlock(newBlock.height, userName);
   if (mempoolResult.processed > 0 || mempoolResult.totalFees > 0) {
     db.updateBlockFees(newBlock.height, mempoolResult.totalFees);
@@ -660,23 +589,17 @@ function submitSolution(jobId, nonce, workerName, deviceType, hashrateReported, 
     newBlock.total_fees = mempoolResult.totalFees;
   }
 
-  // Mark the winning job solved, then wipe ALL active jobs at this height
-  // (other workers may still have active jobs targeting the same height —
-  // leaving them alive is what caused the UNIQUE constraint rejection loop).
   db.markJobSolved(jobId);
   db.deleteJobsAtHeight(job.height, jobId);
   db.deleteJobsForWorker(diffKey, jobId);
 
-  // Pre-create jobs at next heights for other miners
   preCreateJobs(newBlock.height + 1, JOB_POOL_SIZE, hashHex);
 
-  // Adjust the instance difficulty based on solve time.
   const solveTime = (timestamp - parseFlexibleDate(job.created_at));
   if (solveTime > 0) {
     adjustWorkerDifficulty(diffKey, solveTime, deviceType);
   }
 
-  // Send a webhook notification.
   sendMinerWebhook(diffKey, newBlock.height, tier, finalReward);
 
   const logParts = [
@@ -795,14 +718,11 @@ function startPoSMinting() {
 initBlockchain();
 
 module.exports = {
-  // Config (for other modules to read)
   TIER_CONFIG,
   TIER_INITIAL_DIFFICULTY,
-  // PoW mới
   getLastBlock: getLastBlock,
   getJobForWorker: getJobForWorker,
   submitSolution: submitSolution,
-  // PoS
   startPoSMinting: startPoSMinting,
   distributePoSRewards: distributePoSRewards,
   getCurrentValidator: getCurrentValidator,
