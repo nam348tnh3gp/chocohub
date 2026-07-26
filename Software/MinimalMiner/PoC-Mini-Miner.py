@@ -25,7 +25,7 @@ def load_env(path=None):
             if not line or line.startswith('#') or '=' not in line:
                 continue
             k, v = line.split('=', 1)
-            k, v = k.strip(), v.strip().strip('"').strip("'")
+            k, v = k.strip(), v.split('#')[0].strip().strip('"').strip("'")
             if k and k not in os.environ:
                 os.environ[k] = v
 
@@ -230,13 +230,13 @@ def main():
     if not plots_dir:
         print('[!] Set PLOTS_DIR in .env'); sys.exit(1)
 
-    bt = get_base_target(plot_size)
+    bt = 86400
 
     print(f'  Seed:       {seed_url}')
     print(f'  Address:    {address}')
     print(f'  Plots dir:  {plots_dir}')
     print(f'  Plot size:  {plot_size} GB')
-    print(f'  BaseTarget: {bt}')
+    print(f'  BaseTarget: {bt} (network consensus)')
     print(f'  Threads:    {max_workers}')
     print(f'  Interval:   {interval}s')
     print()
@@ -280,6 +280,7 @@ def main():
             height = challenge.get('block_height') or challenge.get('height') or 0
             gen_sig = challenge.get('challenge_seed') or challenge.get('generation_signature') or ''
             sig_bytes = gen_sig.encode()
+            bt = int(challenge.get('base_target', '86400'))
 
             futures = {
                 pool.submit(_scan_one_plot, ppath, challenge, plot_size, sig_bytes, bt): ppath

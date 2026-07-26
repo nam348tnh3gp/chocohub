@@ -143,8 +143,8 @@ def main():
     parser.add_argument('--quiet', '-q', action='store_true', help='No progress output')
     args = parser.parse_args()
 
-    if len(args.plot_id) < 16:
-        print(f'[!] plot_id must be at least 16 hex chars, got: {args.plot_id}')
+    if len(args.plot_id) < 16 or not all(c in '0123456789abcdefABCDEF' for c in args.plot_id):
+        print(f'[!] plot_id must be 16+ hex chars, got: {args.plot_id}')
         sys.exit(1)
     if args.size_gb <= 0:
         print('[!] size_gb must be > 0'); sys.exit(1)
