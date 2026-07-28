@@ -193,6 +193,14 @@ class BackupClient {
             console.log(`📥 [TCP] Restoring from backup (${users} users)...`);
             db.importFullState(msg.state);
             this.restored = true;
+            // Re-create system accounts after restore
+            ['swap_holding', 'swap_liquidity', 'mempool_holding', 'node_fees'].forEach(name => {
+              if (!db.getUser(name)) {
+                const pin = crypto.randomBytes(16).toString('hex');
+                db.authenticate(name, pin);
+                console.log(`🏦 Re-created ${name} account after restore`);
+              }
+            });
             console.log('✅ Database restored');
           }
         }
@@ -512,6 +520,14 @@ class BackupClient {
                   console.log(`📥 [${useDH ? 'DH' : 'TOKEN'}] Restoring from ${serverKey} (${users} users)...`);
                   db.importFullState(msg.state);
                   this.restored = true;
+                  // Re-create system accounts after restore
+                  ['swap_holding', 'swap_liquidity', 'mempool_holding', 'node_fees'].forEach(name => {
+                    if (!db.getUser(name)) {
+                      const pin = crypto.randomBytes(16).toString('hex');
+                      db.authenticate(name, pin);
+                      console.log(`🏦 Re-created ${name} account after restore`);
+                    }
+                  });
                   console.log('✅ Database restored');
                 }
                 this.retryCount[serverKey] = 0;

@@ -1,3 +1,4 @@
+
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -69,6 +70,7 @@ db.exec(`
   INSERT OR IGNORE INTO sync_seq (id, seq) VALUES (1, 0);
   INSERT OR IGNORE INTO pos_reward_pool (id, balance, total_fees, last_distribution_at) VALUES (1, 0, 0, datetime('now'));
 
+  -- Store CC send/receive history
   CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     from_username TEXT NOT NULL,
@@ -78,6 +80,7 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 
+  -- Add per-worker difficulty storage
   CREATE TABLE IF NOT EXISTS worker_difficulty (
     worker_name TEXT PRIMARY KEY,
     difficulty REAL NOT NULL DEFAULT 10,
@@ -86,6 +89,7 @@ db.exec(`
     timeout_at INTEGER DEFAULT 0
   );
 
+  -- Add the main blockchain table
   CREATE TABLE IF NOT EXISTS blocks (
     height INTEGER PRIMARY KEY,
     hash TEXT UNIQUE NOT NULL,
@@ -112,6 +116,7 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 
+  -- Add the mempool table
   CREATE TABLE IF NOT EXISTS mempool (
     id TEXT PRIMARY KEY,
     from_username TEXT NOT NULL,
@@ -125,6 +130,7 @@ db.exec(`
     block_height INTEGER DEFAULT NULL
   );
 
+  -- Add node_fees (balance and total collected fees)
   CREATE TABLE IF NOT EXISTS node_fees (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     balance REAL NOT NULL DEFAULT 0,
@@ -133,6 +139,7 @@ db.exec(`
   );
   INSERT OR IGNORE INTO node_fees (id, balance, total_collected) VALUES (1, 0, 0);
 
+  -- Add game_sessions (proof-of-play for Snake)
   CREATE TABLE IF NOT EXISTS game_sessions (
     id TEXT PRIMARY KEY,
     username TEXT NOT NULL,
@@ -141,6 +148,7 @@ db.exec(`
     used INTEGER DEFAULT 0
   );
 
+  -- Add mining_boosts (ad-click boost)
   CREATE TABLE IF NOT EXISTS mining_boosts (
     worker_name TEXT PRIMARY KEY,
     multiplier REAL NOT NULL DEFAULT 1.0,
@@ -149,6 +157,7 @@ db.exec(`
     last_activation_at INTEGER DEFAULT 0
   );
 
+  -- Create indexes for performance
   CREATE INDEX IF NOT EXISTS idx_mining_jobs_assigned_to_status ON mining_jobs(assigned_to, status);
   CREATE INDEX IF NOT EXISTS idx_blocks_height ON blocks(height DESC);
   CREATE INDEX IF NOT EXISTS idx_mempool_status ON mempool(status);
@@ -487,6 +496,7 @@ function setWorkerDifficulty(workerName, difficulty, lastSolveTime, deviceType) 
   `).run(workerName, difficulty, lastSolveTime, deviceType || 'unknown');
 }
 
+
 function setWorkerTimeout(workerName, timeoutTimestamp) {
   db.prepare(`
     UPDATE worker_difficulty SET timeout_at = ? WHERE worker_name = ?
@@ -777,6 +787,7 @@ function ensureBannedColumn() {
     db.prepare("ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0").run();
     console.log('✅ Banned column ensured');
   } catch (e) {
+    // Column already exists or another error occurred; ignore it
     if (!e.message.includes('duplicate column name')) {
       console.warn('Could not ensure banned column:', e.message);
     }
@@ -791,6 +802,7 @@ function deleteUser(username) {
   db.prepare('DELETE FROM transactions WHERE from_username = ? OR to_username = ?').run(username, username);
   db.prepare('DELETE FROM snake_claims WHERE username = ?').run(username);
   db.prepare('DELETE FROM mempool WHERE from_username = ? OR to_username = ?').run(username, username);
+  // Keep blocks_mined for statistics
   console.log(`🗑️ Deleted user ${username} and related data`);
 }
 
@@ -830,7 +842,7 @@ function ensureColumn(tableName, columnName, columnDef) {
 
 function getWorkerTier(workerName) {
   const row = db.prepare('SELECT tier FROM worker_difficulty WHERE worker_name = ?').get(workerName);
-  return row ? row.tier : 'cpu';
+  return row ? row.tier : 'cpu'; // default to cpu if not found
 }
 
 const TIER_INITIAL_DIFFICULTY = {
@@ -853,7 +865,7 @@ function setWorkerTier(workerName, tier) {
   
   if (existing && existing.tier_registered_at > 0) {
     const elapsed = now - existing.tier_registered_at;
-    const COOLDOWN = 24 * 3600;
+    const COOLDOWN = 24 * 3600; // 24 hours
     if (elapsed < COOLDOWN) {
       const remaining = Math.ceil((COOLDOWN - elapsed) / 3600);
       throw new Error(`Tier cooldown active. Wait ${remaining} hours before changing tier again.`);
@@ -878,6 +890,7 @@ function getWorkerFlags(workerName) {
   const row = db.prepare('SELECT * FROM worker_flags WHERE worker_name = ?').get(workerName);
   if (!row) return { warning_count: 0, suspended: false };
   
+  // Parse warnings JSON
   try {
     row.warnings = JSON.parse(row.warnings_json || '[]');
   } catch (e) {
@@ -889,12 +902,14 @@ function getWorkerFlags(workerName) {
 
 function addWorkerWarning(workerName, reason) {
   const now = Math.floor(Date.now() / 1000);
-  const WINDOW = 24 * 3600;
+  const WINDOW = 24 * 3600; // 24 hours
   const existing = getWorkerFlags(workerName);
   let warnings = existing.warnings || [];
   
+  // Remove warnings older than 24h
   warnings = warnings.filter(w => (now - w.timestamp) < WINDOW);
   
+  // Add new warning
   warnings.push({ timestamp: now, reason });
   const newCount = warnings.length;
   const shouldSuspend = newCount >= 3;
@@ -923,6 +938,7 @@ function addWorkerWarning(workerName, reason) {
     console.warn(`🚫 Worker ${workerName} suspended after 3 warnings`);
   }
 
+  // Also propagate to user-level flags
   const parentUser = workerName.includes(':') ? workerName.split(':')[0] : workerName;
   addUserWarning(parentUser, reason);
   
@@ -941,6 +957,7 @@ function suspendWorker(workerName, reason) {
   `).run(workerName, now, reason);
   console.log(`🚫 Worker ${workerName} manually suspended: ${reason}`);
 
+  // Also suspend at user level
   const parentUser = workerName.includes(':') ? workerName.split(':')[0] : workerName;
   suspendUser(parentUser, reason);
 }
@@ -958,6 +975,7 @@ function clearWorkerSuspension(workerName, adminUsername) {
   `).run(adminUsername, now, workerName);
   console.log(`✅ Worker ${workerName} suspension cleared by ${adminUsername}`);
 
+  // Also clear at user level
   const parentUser = workerName.includes(':') ? workerName.split(':')[0] : workerName;
   clearUserSuspension(parentUser, adminUsername);
 }
@@ -1075,6 +1093,7 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_worker_flags_suspended ON worker_flags(suspended);
 
+  -- 🆕 USER-LEVEL flags (blocks ALL workers of a user)
   CREATE TABLE IF NOT EXISTS user_flags (
     username TEXT PRIMARY KEY,
     warning_count INTEGER DEFAULT 0,
@@ -1088,6 +1107,7 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_user_flags_suspended ON user_flags(suspended);
 
+  -- 🆕 Mining Nodes table
   CREATE TABLE IF NOT EXISTS mining_nodes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -1143,12 +1163,14 @@ const MAX_MINING_NODES = 50;
 
 function registerMiningNode(name, url, owner, location) {
   const crypto = require('crypto');
+  // Input validation
   if (!name || typeof name !== 'string' || name.length > 100) {
     throw new Error('Invalid node name (1-100 chars)');
   }
   if (!url || typeof url !== 'string' || url.length > 500 || !/^https?:\/\/.+/i.test(url)) {
     throw new Error('Invalid node URL (must start with http:// or https://)');
   }
+  // Limit total nodes
   const count = db.prepare('SELECT COUNT(*) as c FROM mining_nodes').get().c;
   if (count >= MAX_MINING_NODES) {
     throw new Error(`Maximum node limit reached (${MAX_MINING_NODES})`);
@@ -1324,8 +1346,10 @@ module.exports = {
   addTransaction,
   getTransactions,
   cleanupOldBounties,
+  // Per-worker difficulty
   getWorkerDifficulty,
   setWorkerDifficulty,
+  // Blockchain helpers
   setWorkerTimeout,
   getWorkerTimeout,
   getWorkerInfo,
@@ -1344,6 +1368,7 @@ module.exports = {
   getBlockCount,
   getBlocks,
   getBlocksByMiner,
+  // Mempool
   addToMempool,
   getPendingMempool,
   getMempoolCount,
@@ -1352,18 +1377,22 @@ module.exports = {
   markMempoolRefunded,
   getMempoolTx,
   getExpiredMempool,
+  // Node fees
   getNodeFeesBalance,
   addNodeFees,
   deductNodeFees,
   setNodeFeesBalance,
   getTotalNodeFeesCollected,
+  // Game sessions
   createGameSession,
   getGameSession,
   consumeGameSession,
   cleanupExpiredGameSessions,
+  // Mining boosts
   getMiningBoost,
   activateMiningBoost,
   getMiningBoostMultiplier,
+  // Admin functions
   ensureBannedColumn,
   deleteUser,
   setUserBanned,
