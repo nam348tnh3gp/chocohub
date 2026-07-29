@@ -184,6 +184,7 @@
         #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
         #toast.success { border-color: var(--accent-green); color: var(--accent-green); }
         #toast.error { border-color: var(--accent-red); color: var(--accent-red); }
+        #toast.loading { border-color: var(--accent-orange); color: var(--accent-orange); }
 
         /* ---------- App shell ---------- */
         .dashboard-container {
@@ -469,7 +470,7 @@
         </div>
 
         <button class="btn-start" id="auth-btn">ENTER HUB</button>
-        <p class="login-hint">If the username doesn't exist, we'll create one for you.</p>
+        <p class="login-hint" id="login-hint-text">If the username doesn't exist, we'll create one for you.</p>
     </div>
 </div>
 
@@ -691,6 +692,7 @@
         let currentBalance = 0;
         let balanceAnimationId = null;
         let authToken = null;
+        let authRetryTimer = null;
 
         // Cache để tránh re-render không cần thiết
         let blocksHash = '';
@@ -743,6 +745,13 @@
                 const res = await fetch('/get_user/' + encodeURIComponent(user), {
                     headers: { 'Authorization': 'Bearer ' + token }
                 });
+                
+                // Nếu server đang restore (503), bỏ qua lần này
+                if (res.status === 503) {
+                    console.warn('Server is restoring, balance update skipped');
+                    return;
+                }
+                
                 if (!res.ok) throw new Error('Network error');
                 const data = await res.json();
                 if (data.status !== 'error' && typeof data.balance === 'number') {
@@ -760,6 +769,13 @@
         async function updateNetworkMonitor() {
             try {
                 const res = await fetch('/network_status');
+                
+                // Nếu server đang restore (503), bỏ qua lần này
+                if (res.status === 503) {
+                    console.warn('Server is restoring, network monitor skipped');
+                    return;
+                }
+                
                 if (!res.ok) throw new Error('Fetch failed');
                 const data = await res.json();
 
@@ -853,18 +869,48 @@
             if (username.length < 3 || pin.length < 4) {
                 return showToast('Name min 3, PIN min 4 chars', 'error');
             }
+            
             const btn = document.getElementById('auth-btn');
+            const hint = document.getElementById('login-hint-text');
+            
             if (btn) {
                 btn.disabled = true;
                 btn.textContent = 'AUTHENTICATING...';
             }
+            
             try {
                 const res = await fetch('/auth', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username, pin })
                 });
+                
+                // ─── XỬ LÝ LỖI 503: SERVER ĐANG RESTORE ───
+                if (res.status === 503) {
+                    showToast('⏳ Server is restoring from backup, please wait...', 'loading');
+                    if (hint) hint.textContent = '⏳ Server is restoring, retrying in 5 seconds...';
+                    if (btn) {
+                        btn.disabled = true;
+                        btn.textContent = 'WAITING FOR SERVER...';
+                    }
+                    // Thử lại sau 5 giây
+                    clearTimeout(authRetryTimer);
+                    authRetryTimer = setTimeout(() => {
+                        if (btn) {
+                            btn.disabled = false;
+                            btn.textContent = 'ENTER HUB';
+                        }
+                        if (hint) hint.textContent = 'If the username doesn\'t exist, we\'ll create one for you.';
+                        handleAuth();
+                    }, 5000);
+                    return;
+                }
+                
                 const data = await res.json();
+                
+                // Xóa timer retry nếu thành công
+                clearTimeout(authRetryTimer);
+                
                 if (data.status === 'success') {
                     localStorage.setItem('choco_user', username);
                     if (data.token) {
