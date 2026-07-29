@@ -537,7 +537,19 @@ class BackupClient {
               }
               if (msg.type === 'READY_ACK') {
                 console.log(`🔗 [${useDH ? 'DH' : 'TOKEN'}] Connected to ${serverKey} (main already has data)`);
-                this.restored = true;
+                // NOTE: READY_ACK only means the REMOTE server already has state
+                // and doesn't need a snapshot pushed to it right now. It says
+                // nothing about whether OUR local DB has data. Do NOT set
+                // this.restored = true unconditionally here — that previously
+                // caused a node booting with an empty DB to treat itself as
+                // "restored" the moment any backup replied READY_ACK, skipping
+                // real FULL_SNAPSHOT recovery from other backups and then
+                // pushing its empty state out, overwriting good backups.
+                if (db.getSeq() > 0) {
+                  // We already have local data (not a fresh/empty boot) — fine to
+                  // consider ourselves settled for this server.
+                  this.restored = true;
+                }
                 this.retryCount[serverKey] = 0;
                 this.heartbeatFailureCount[serverKey] = 0;
                 this.ensureHeartbeatAndSnapshot(server, serverKey, agent, session, useDH);
