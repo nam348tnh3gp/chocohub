@@ -46,13 +46,13 @@ const TIER_CONFIG = {
     description: 'ESP32, ESP32-S2, ESP32-C3 (~15 kH/s SHA-256)'
   },
   mobile: {
-    multiplier: 1.8,
+    multiplier: 3.6,
     maxDifficulty: 50000,
     maxHashrate: 200000,
     description: 'Android, iOS (~50-200 kH/s SHA-256)'
   },
   cpu: {
-    multiplier: 1.0,
+    multiplier: 3,
     maxDifficulty: 5000000,
     maxHashrate: 10000000,
     description: 'Desktop CPU, web miner (~500 kH/s-5 MH/s SHA-256)'
