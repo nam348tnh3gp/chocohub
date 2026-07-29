@@ -7,6 +7,7 @@ from typing import Optional, Tuple
 # ---------------------------------------------------------------------------
 def ensure_libraries(gpu=False):
     """Make sure requests, numpy, and pyopencl (if GPU) are available."""
+    global cl # Make cl accessible globally after dynamic import
     try:
         import requests
     except ImportError:
@@ -74,6 +75,7 @@ DEFAULT_GPU         = False
 DEFAULT_POLL        = 10
 DEFAULT_ARDUINO_PORT = None
 DEFAULT_ARDUINO_BAUD = 115200
+DEFAULT_INTENSITY    = 100  # Default runs at full 100% capacity
 
 # serial module: imported on demand
 _serial_available = False
@@ -84,7 +86,7 @@ except ImportError:
     pass
 
 # ===========================================================================
-# NEW OPENCL KERNEL – uses hex last_hash (64 bytes) + nonce + worker name
+# OPENCL KERNEL
 # ===========================================================================
 OPENCL_KERNEL_SHA256 = """
 #define UINT32_MAX 0xFFFFFFFF
@@ -108,7 +110,6 @@ __constant uint K[64] = {
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
 };
 
-// SHA-256 compression for a single 64-byte block
 void sha256_transform(uint *state, const uchar *data) {
     uint W[64];
     uint i, t1, t2;
@@ -136,7 +137,6 @@ void sha256_transform(uint *state, const uchar *data) {
     state[4] += e; state[5] += f; state[6] += g; state[7] += h;
 }
 
-// Compute SHA-256 of a message of arbitrary length (up to ~128 bytes)
 void sha256_hash(const uchar *msg, uint len, uchar *hash) {
     uint state[8] = {
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
@@ -146,7 +146,6 @@ void sha256_hash(const uchar *msg, uint len, uchar *hash) {
     uint block_len = 0;
     uint i;
 
-    // Process full blocks
     for (i = 0; i < len; i++) {
         block[block_len++] = msg[i];
         if (block_len == 64) {
@@ -155,7 +154,6 @@ void sha256_hash(const uchar *msg, uint len, uchar *hash) {
         }
     }
 
-    // Padding
     uint total_bits = len * 8;
     block[block_len++] = 0x80;
     if (block_len > 56) {
@@ -164,23 +162,21 @@ void sha256_hash(const uchar *msg, uint len, uchar *hash) {
         block_len = 0;
     }
     while (block_len < 56) block[block_len++] = 0;
-    // Append length as 64-bit big-endian
     for (i = 0; i < 8; i++) {
         block[56 + i] = (uchar)((total_bits >> (56 - i*8)) & 0xFF);
     }
     sha256_transform(state, block);
 
-    // Output hash
     for (i = 0; i < 32; i++) {
         hash[i] = (state[i/4] >> (24 - (i%4)*8)) & 0xFF;
     }
 }
 
 __kernel void sha256_gpu_miner(
-    __global const uchar *hex_last_hash,   // 64 bytes (ASCII hex)
-    __global const uchar *worker_name,     // bytes of worker name
+    __global const uchar *hex_last_hash,
+    __global const uchar *worker_name,
     uint worker_len,
-    __global const uchar *target_hex,      // 32 bytes (binary target)
+    __global const uchar *target_hex,
     uint start_nonce,
     uint work_items,
     __global uint *result_nonce,
@@ -190,13 +186,10 @@ __kernel void sha256_gpu_miner(
     if (gid >= work_items || *result_nonce != UINT32_MAX) return;
     
     uint nonce = start_nonce + gid;
-    
-    // Build message: hex_last_hash (64) + nonce (20-digit zero-padded) + worker_name
     uchar message[128];
     uint idx = 0;
     for (int i = 0; i < 64; i++) message[idx++] = hex_last_hash[i];
     
-    // Convert nonce to 20-digit string with leading zeros
     uchar nonce_str[20];
     uint tmp = nonce;
     for (int i = 19; i >= 0; i--) {
@@ -204,15 +197,11 @@ __kernel void sha256_gpu_miner(
         tmp /= 10;
     }
     for (int i = 0; i < 20; i++) message[idx++] = nonce_str[i];
-    
-    // Append worker name
     for (int i = 0; i < worker_len; i++) message[idx++] = worker_name[i];
     
-    // Compute SHA-256 hash of message
     uchar hash[32];
     sha256_hash(message, idx, hash);
     
-    // Compare with target (binary)
     bool match = true;
     for (int i = 0; i < 32; i++) {
         if (hash[i] != target_hex[i]) {
@@ -230,7 +219,7 @@ __kernel void sha256_gpu_miner(
 """
 
 # ---------------------------------------------------------------------------
-# GPU Miner Class (rewritten)
+# GPU Miner Class
 # ---------------------------------------------------------------------------
 class GPUMiner:
     def __init__(self, cl_mod):
@@ -282,26 +271,21 @@ class GPUMiner:
             return False
             
     def solve_job(self, last_hash_hex: str, target_hex: str, worker_name: str,
-                  gpu_load_percent: int = 25) -> Tuple[Optional[int], float, float]:
+                  gpu_load_percent: int = 100) -> Tuple[Optional[int], float, float]:
         np = self._import_numpy()
         
-        # Prepare buffers
-        hex_bytes = np.array(list(last_hash_hex.encode('ascii')), dtype=np.uint8)  # 64 bytes
+        hex_bytes = np.array(list(last_hash_hex.encode('ascii')), dtype=np.uint8)
         worker_bytes = np.array(list(worker_name.encode('utf-8')), dtype=np.uint8)
         worker_len = np.uint32(len(worker_bytes))
-        target_bytes = bytes.fromhex(target_hex)  # 32 bytes
+        target_bytes = bytes.fromhex(target_hex)
         target_np = np.array(list(target_bytes), dtype=np.uint8)
         
         chunk_items = max(64, int(self.max_work * gpu_load_percent / 100))
         max_nonce = 10000000
         
-        # Buffers
-        buf_hex = self.cl.Buffer(self.ctx, self.cl.mem_flags.READ_ONLY | self.cl.mem_flags.COPY_HOST_PTR,
-                                 hostbuf=hex_bytes)
-        buf_worker = self.cl.Buffer(self.ctx, self.cl.mem_flags.READ_ONLY | self.cl.mem_flags.COPY_HOST_PTR,
-                                    hostbuf=worker_bytes)
-        buf_target = self.cl.Buffer(self.ctx, self.cl.mem_flags.READ_ONLY | self.cl.mem_flags.COPY_HOST_PTR,
-                                    hostbuf=target_np)
+        buf_hex = self.cl.Buffer(self.ctx, self.cl.mem_flags.READ_ONLY | self.cl.mem_flags.COPY_HOST_PTR, hostbuf=hex_bytes)
+        buf_worker = self.cl.Buffer(self.ctx, self.cl.mem_flags.READ_ONLY | self.cl.mem_flags.COPY_HOST_PTR, hostbuf=worker_bytes)
+        buf_target = self.cl.Buffer(self.ctx, self.cl.mem_flags.READ_ONLY | self.cl.mem_flags.COPY_HOST_PTR, hostbuf=target_np)
         buf_result = self.cl.Buffer(self.ctx, self.cl.mem_flags.READ_WRITE, 4)
         buf_hash = self.cl.Buffer(self.ctx, self.cl.mem_flags.WRITE_ONLY, 32)
         
@@ -344,6 +328,10 @@ class GPUMiner:
                 
             start_nonce += current_items
             
+            # Control GPU rest time if intensity load is less than 100%
+            if gpu_load_percent < 100:
+                time.sleep(0.001 * (100 - gpu_load_percent))
+            
         elapsed = time.time() - start_time
         return None, 0.0, elapsed
         
@@ -352,7 +340,6 @@ class GPUMiner:
             if hasattr(self, attr) and getattr(self, attr):
                 delattr(self, attr)
 
-# GPU probing helpers
 _gpu_available = False
 try:
     import pyopencl as cl
@@ -388,20 +375,9 @@ def discover_gpus():
     return gpu_list
 
 # ---------------------------------------------------------------------------
-# Arduino bridge (serial co-miner)
+# Arduino bridge
 # ---------------------------------------------------------------------------
 class ArduinoBridge:
-    """Manages a serial connection to an Arduino running chocohub_avr_miner.ino.
-
-    Protocol (line-delimited JSON at 115200 baud):
-      Host → Arduino: {"cmd":"job","id":"...","last_hash":"<64 hex>",
-                       "target_hex":"<64 hex>","worker":"<name>"}
-      Arduino → Host: {"cmd":"found","job_id":"...","nonce":123,"hash":"<64 hex>"}
-                      {"cmd":"status","hashes":N,"hashrate":R,"uptime":U}
-                      {"cmd":"pong","model":"..."}
-                      {"cmd":"ack","msg":"..."}
-    """
-
     def __init__(self, port, baud=115200, timeout=2):
         self.port = port
         self.baud = baud
@@ -417,7 +393,6 @@ class ArduinoBridge:
         import serial
         self.ser = serial.Serial(self.port, self.baud, timeout=self.timeout)
         self.running = True
-        # Flush any stale data and wait for pong
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
         self.ser.write(b'{"cmd":"ping"}\n')
@@ -442,7 +417,6 @@ class ArduinoBridge:
         return True
 
     def send_job(self, job_id, last_hash, target_hex, worker_name):
-        """Send a mining job to the Arduino asynchronously."""
         msg = json.dumps({
             "cmd": "job",
             "id": job_id,
@@ -455,8 +429,6 @@ class ArduinoBridge:
                 self.ser.write(msg.encode('utf-8'))
 
     def _reader(self, found_event, solution_container, stats_lock, stats):
-        """Background thread: read serial lines and surface 'found' events."""
-        # Use a short read timeout so the reader is responsive
         if self.ser:
             self.ser.timeout = 0.1
         while self.running:
@@ -518,7 +490,6 @@ class ArduinoBridge:
                 self.ser = None
 
 def discover_ports():
-    """Return a list of serial port names."""
     ports = []
     if not _serial_available:
         return ports
@@ -530,7 +501,6 @@ def discover_ports():
         pass
     return ports
 
-# ANSI helpers
 class ANSI:
     RST = "\033[0m"; BOLD = "\033[1m"
     YEL = "\033[93m"; ORG = "\033[33m"; GRN = "\033[92m"; RED = "\033[91m"
@@ -572,6 +542,7 @@ class ChocoMiner:
     def __init__(self, args):
         self.args = args
         self.running = True
+        self.intensity = max(1, min(100, getattr(args, 'intensity', 100))) # Limit 1-100%
         self.stats = {
             "hashes": 0,
             "avr_hashes": 0,
@@ -587,18 +558,26 @@ class ChocoMiner:
         self.session.headers.update({"User-Agent": "ChocoHub-Miner/v2-GPU"})
         self.found_event = threading.Event()
         self.solution = None
-        self.token = None  # 🆕 JWT token
+        self.token = None
 
         self.gpu_miner = None
         if self.args.gpu and _gpu_available:
             self.gpu_miner = GPUMiner(cl)
 
         self.arduino = None
-        self.arduino_solution = [None]  # mutable container for reader thread
-        self._arduino_seen = set()      # (job_id, nonce) already submitted
-        # Per-instance identity for independent difficulty tracking
+        self.arduino_solution = [None]
+        self._arduino_seen = set()
         self.instance_id = os.urandom(4).hex()
         self.effective_worker = f"{self.args.worker}:{self.instance_id}"
+
+        # --- Auto-detect device_type ---
+        if self.args.gpu:
+            self.device_type = 'gpu'
+        elif self.arduino is not None or getattr(self.args, 'arduino_port', None):
+            self.device_type = 'embedded_avr'
+        else:
+            self.device_type = 'cpu'
+
         if getattr(self.args, 'arduino_port', None):
             self.arduino = ArduinoBridge(self.args.arduino_port, baud=getattr(self.args, 'arduino_baud', 115200))
 
@@ -620,7 +599,7 @@ class ChocoMiner:
   ╚═════╝╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═════╝{ANSI.RST}
 {ANSI.YEL}        ⚡ Python miner v2 (GPU ready) ⚡{ANSI.RST}
 {ANSI.GRY}    SHA256(hex_last_hash + 20-digit-nonce + worker){ANSI.RST}
-{ANSI.CYN}    Mode: {mode_str}{ANSI.RST}
+{ANSI.CYN}    Mode: {mode_str} | Intensity: {self.intensity}% | Device: {self.device_type}{ANSI.RST}
 """)
 
     def _log_fmt(self, level, msg):
@@ -699,7 +678,11 @@ class ChocoMiner:
         try:
             resp = self.session.post(
                 f"{self.args.server}/get_job",
-                json={"worker_name": self.args.worker, "instance_id": self.instance_id},
+                json={
+                    "worker_name": self.args.worker,
+                    "instance_id": self.instance_id,
+                    "device_type": self.device_type   # <-- gửi device_type
+                },
                 timeout=5
             )
             if resp.status_code != 200:
@@ -724,9 +707,12 @@ class ChocoMiner:
             return None
 
     def mine_cpu(self, tid, nthreads):
+        """CPU mining loop featuring structured hardware rate throttling."""
         sha256 = hashlib.sha256
         worker_b = self.effective_worker.encode()
-        batch_size = 2000
+        
+        # Slightly reduce batch size when low performance is enforced to achieve clean micro-sleep periods
+        batch_size = 1000 if self.intensity < 100 else 2000 
         local_jid = None
         nonce = tid
 
@@ -737,7 +723,7 @@ class ChocoMiner:
                 continue
 
             jid = job["id"]
-            lhb = job["last_hash"].encode()          # hex string → bytes (64)
+            lhb = job["last_hash"].encode()
             target_hex = job["target_hex"]
 
             if jid != local_jid:
@@ -745,9 +731,10 @@ class ChocoMiner:
                 local_jid = jid
 
             while self.running and not self.found_event.is_set() and self.stats["current_job"]["id"] == jid:
+                start_work = time.perf_counter()
+                
                 for _ in range(batch_size):
                     nonce_padded = str(nonce).zfill(20)
-                    # hash of (hex_last_hash + nonce + worker)
                     hash_hex = sha256(lhb + nonce_padded.encode() + worker_b).hexdigest()
                     if hash_hex < target_hex:
                         if not self.found_event.is_set() and self.stats["current_job"]["id"] == jid:
@@ -758,6 +745,14 @@ class ChocoMiner:
 
                 with self.stats_lock:
                     self.stats["hashes"] += batch_size
+
+                # --- CPU Throttling algorithm enforcing 1% to 100% capacity ---
+                if self.intensity < 100:
+                    work_duration = time.perf_counter() - start_work
+                    # Formula to calculate target wait state duration relative to performance percentage
+                    sleep_duration = (work_duration / (self.intensity / 100.0)) - work_duration
+                    if sleep_duration > 0:
+                        time.sleep(sleep_duration)
 
     def mine_gpu(self):
         if not self.gpu_miner:
@@ -777,14 +772,14 @@ class ChocoMiner:
             last_hash = job["last_hash"]
             target_hex = job["target_hex"]
 
+            # Map the miner intensity rate direct onto GPU performance logic
             nonce, hashrate, elapsed = self.gpu_miner.solve_job(
                 last_hash, target_hex, self.effective_worker,
-                gpu_load_percent=90
+                gpu_load_percent=self.intensity
             )
 
             if nonce is not None and not self.found_event.is_set():
                 if self.stats["current_job"] and self.stats["current_job"]["id"] == jid:
-                    # verify with CPU
                     nonce_padded = str(nonce).zfill(20)
                     sha256 = hashlib.sha256
                     worker_b = self.effective_worker.encode()
@@ -800,7 +795,6 @@ class ChocoMiner:
                 self.stats["hashes"] += int(hashrate * elapsed) if hashrate > 0 else 0
 
     def authenticate(self):
-        """Authenticate with server and store JWT token."""
         try:
             resp = self.session.post(
                 f"{self.args.server}/auth",
@@ -820,32 +814,9 @@ class ChocoMiner:
             self.log("ERR", f"Auth error: {e}", direct=True)
             return False
 
-    def register_tier(self):
-        """Register the worker's device tier once (with 24h cooldown on server side)."""
-        if not self.token:
-            return
-        tier = getattr(self.args, "tier", None) or "gpu"
-        try:
-            resp = self.session.post(
-                f"{self.args.server}/mining/register-tier",
-                json={"tier": tier, "instance_id": self.instance_id},
-                timeout=10
-            )
-            data = resp.json()
-            if resp.status_code == 200 and data.get("status") == "success":
-                self.log("OK", (
-                    f"Tier registered: {ANSI.YEL}{data.get('tier')}{ANSI.RST}  "
-                    f"multiplier={ANSI.GRN}{data.get('multiplier')}x{ANSI.RST}  "
-                    f"max_diff={data.get('max_difficulty')}"
-                ), direct=True)
-            else:
-                # Cooldown or same tier — not fatal
-                self.log("INFO", f"Tier: {data.get('message', tier)}", direct=True)
-        except Exception as e:
-            self.log("WARN", f"Tier registration skipped: {e}", direct=True)
+    # Hàm register_tier đã bị xóa (không cần dùng)
 
     def submit(self, bid, nonce, hashrate=0):
-        """Submit a solved nonce. Requires JWT (set in session headers)."""
         try:
             r = self.session.post(
                 f"{self.args.server}/submit_solution",
@@ -853,7 +824,8 @@ class ChocoMiner:
                     "bounty_id": bid,
                     "nonce": nonce,
                     "hashrate_reported": int(hashrate),
-                    "instance_id": self.instance_id
+                    "instance_id": self.instance_id,
+                    "device_type": self.device_type   # <-- gửi device_type
                 },
                 timeout=10
             )
@@ -871,15 +843,12 @@ class ChocoMiner:
             self.log("ERR", "Server unreachable", direct=True)
             return
 
-        # 🆕 Authenticate and get JWT
         if not self.authenticate():
             self.log("ERR", "Cannot mine without authentication. Check --pin.", direct=True)
             return
 
-        # 🆕 Register tier (ignored if cooldown active — server handles it)
-        self.register_tier()
+        # Không còn gọi register_tier()
 
-        # 🆕 Connect Arduino bridge (if configured)
         if self.arduino:
             try:
                 self.arduino.open()
@@ -892,8 +861,6 @@ class ChocoMiner:
         threading.Thread(target=self.display_loop, daemon=True).start()
         threading.Thread(target=self.periodic_report, daemon=True).start()
 
-        # In pure AVR mode (arduino present, threads == 0) skip CPU threads entirely
-        # so the Arduino doesn't race against the host CPU for the same found_event.
         cpu_threads = self.args.threads if self.args.threads else 0
         if self.arduino and cpu_threads == 0:
             self.log("AVR", "Pure AVR mode — CPU mining disabled", direct=True)
@@ -916,9 +883,7 @@ class ChocoMiner:
                 self.solution = None
                 self.stats["current_job"] = job
                 self.log("INFO", f"New job: diff={job['difficulty']}, reward={job['reward']} CC")
-                # Feed job to Arduino bridge immediately
                 if self.arduino:
-                    # Discard any stale solution from the previous job cycle
                     self.arduino_solution[0] = None
                     self._arduino_seen.clear()
                     self.arduino.send_job(job['id'], job['last_hash'], job['target_hex'], self.effective_worker)
@@ -926,14 +891,12 @@ class ChocoMiner:
             else:
                 self.found_event.wait(timeout=0.5)
 
-            # Check Arduino solution (bridge verifies hash on host side)
             if self.arduino and self.arduino_solution[0] is not None:
                 jid, nonce, hash_hex = self.arduino_solution[0]
                 self.arduino_solution[0] = None
                 if (jid, nonce) in self._arduino_seen:
                     continue
                 if self.stats["current_job"] and self.stats["current_job"]["id"] == jid:
-                    # Host-side SHA-256 verify
                     sha256 = hashlib.sha256
                     lhb = self.stats["current_job"]["last_hash"].encode()
                     worker_b = self.effective_worker.encode()
@@ -950,7 +913,6 @@ class ChocoMiner:
                 self.solution = None
                 self.found_event.clear()
 
-                # 🆕 Calculate hashrate to report
                 elapsed = time.time() - self.stats["start_time"]
                 total_hashes = self.stats["hashes"]
                 current_hashrate = int(total_hashes / elapsed) if elapsed > 0 else 0
@@ -967,7 +929,6 @@ class ChocoMiner:
                 else:
                     reason = resp.get('reason', resp.get('message', 'Unknown'))
                     self.log("WARN", f"Rejected: {reason}")
-                    # 🆕 Re-authenticate if token expired
                     if 'token' in str(reason).lower() or resp.get('message') == 'Missing or invalid token':
                         self.log("INFO", "Token expired — re-authenticating...", direct=True)
                         self.authenticate()
@@ -988,13 +949,12 @@ class ChocoMiner:
 # Interactive setup
 # ---------------------------------------------------------------------------
 def interactive_setup():
-    global DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL, DEFAULT_ARDUINO_PORT, DEFAULT_ARDUINO_BAUD
+    global DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL, DEFAULT_ARDUINO_PORT, DEFAULT_ARDUINO_BAUD, DEFAULT_INTENSITY
     os.system("clear" if os.name != "nt" else "cls")
     print(f"{ANSI.BOLD}{ANSI.CYN}╔══════════════════════════════════════════════════════════╗{ANSI.RST}")
     print(f"{ANSI.BOLD}{ANSI.CYN}║           CHOCOHUB MINER - INTERACTIVE SETUP             ║{ANSI.RST}")
     print(f"{ANSI.BOLD}{ANSI.CYN}╚══════════════════════════════════════════════════════════╝{ANSI.RST}\n")
 
-    # Show loaded config values if they exist
     has_config = os.path.exists(CONFIG_FILE)
     if has_config:
         print(f"  {ANSI.GRY}[Loaded config.txt — press Enter to keep current value]{ANSI.RST}\n")
@@ -1006,30 +966,52 @@ def interactive_setup():
             DEFAULT_WORKER = wrk
             break
         if DEFAULT_WORKER:
-            break  # keep loaded value
+            break
         print(f"  {ANSI.RED}Please enter worker name!{ANSI.RST}")
 
-    # PIN for JWT auth
     pin_input = input(f"  {ANSI.YEL}➤ Account PIN{ANSI.RST}: ").strip()
     if not pin_input:
         print(f"  {ANSI.RED}PIN is required for authentication!{ANSI.RST}")
         sys.exit(1)
 
-    print(f"\n  {ANSI.CYN}[?] Select device type (for tier registration):{ANSI.RST}")
-    print(f"     1) {ANSI.BLU}Mobile (Android/iOS){ANSI.RST}                  — 1.8x  multiplier")
-    print(f"     2) {ANSI.GRN}CPU (desktop/laptop){ANSI.RST}                  — 1.0x  multiplier")
-    print(f"     3) {ANSI.MAG}GPU (Nvidia/AMD){ANSI.RST}                      — 1.0x  multiplier")
-    print(f"     4) {ANSI.GRN}AVR (Arduino via COM){ANSI.RST}                 — 3.5x  multiplier")
-    tier_hint = {"mobile": "1", "cpu": "2", "gpu": "3", "embedded_avr": "4"}.get(DEFAULT_GPU and "gpu" or "cpu", "")
-    hint_str = f" [{tier_hint}]" if tier_hint else ""
-    dev_choice = input(f"  {ANSI.YEL}➤ Choice (1/2/3/4){ANSI.RST}{hint_str}: ").strip()
-    tier_map = {"1": "mobile", "2": "cpu", "3": "gpu", "4": "embedded_avr"}
-    selected_tier = tier_map.get(dev_choice, "gpu")
-    is_mobile = (dev_choice == "1")
-    is_avr = (dev_choice == "4")
+    # Intensity rating input configured in clear English
+    intensity_hint = f" [{DEFAULT_INTENSITY}]" if DEFAULT_INTENSITY else " [100]"
+    while True:
+        intensity_input = input(f"  {ANSI.YEL}➤ Intensity performance tier (1-100%){ANSI.RST}{intensity_hint}: ").strip()
+        if not intensity_input:
+            break
+        try:
+            val = int(intensity_input)
+            if 1 <= val <= 100:
+                DEFAULT_INTENSITY = val
+                break
+        except ValueError:
+            pass
+        print(f"  {ANSI.RED}Please enter an integer value between 1 and 100!{ANSI.RST}")
+
+    # Chỉ giữ 2 lựa chọn: 1 và 2
+    print(f"\n  {ANSI.CYN}[?] Select device type:{ANSI.RST}")
+    print(f"     1) {ANSI.GRN}CPU / GPU / Termux{ANSI.RST}                  — multiplier up to 2.0x (GPU)")
+    print(f"     2) {ANSI.GRN}AVR (Arduino via COM){ANSI.RST}               — 3.5x multiplier")
+    # Mặc định chọn option 1 nếu không có config
+    default_choice = "1"
+    hint_str = " [1]"
+    dev_choice = input(f"  {ANSI.YEL}➤ Choice (1/2){ANSI.RST}{hint_str}: ").strip()
+    if not dev_choice:
+        dev_choice = default_choice
+    # Map choice → selected_tier và cờ
+    if dev_choice == "2":
+        selected_tier = "embedded_avr"
+        is_avr = True
+        is_mobile = False
+        default_gpu = False
+    else:
+        selected_tier = "cpu"  # sẽ được server auto-detect dựa trên device_type
+        is_avr = False
+        is_mobile = False
+        default_gpu = DEFAULT_GPU  # giữ nguyên từ config
 
     if is_avr:
-        # COM port selection
         ports = discover_ports()
         if ports:
             print(f"\n  {ANSI.CYN}Available serial ports:{ANSI.RST}")
@@ -1049,22 +1031,20 @@ def interactive_setup():
             except ValueError:
                 pass
         DEFAULT_GPU = False
-        DEFAULT_THREADS = 0  # no CPU threads in pure AVR mode
+        DEFAULT_THREADS = 0
     else:
-        use_gpu = False
-        if not is_mobile:
-            print(f"\n  {ANSI.CYN}[?] Use GPU for mining?{ANSI.RST}")
-            print(f"     1) {ANSI.GRN}CPU only{ANSI.RST}")
-            print(f"     2) {ANSI.MAG}CPU + GPU{ANSI.RST}")
-            gpu_hint = " [2]" if DEFAULT_GPU else " [1]"
-            gpu_choice = input(f"  {ANSI.YEL}➤ Choice (1/2){ANSI.RST}{gpu_hint}: ").strip()
-            if not gpu_choice:
-                use_gpu = DEFAULT_GPU
-            else:
-                use_gpu = (gpu_choice == "2")
-            DEFAULT_GPU = use_gpu
+        # Option 1: CPU/GPU/Termux
+        use_gpu = default_gpu
+        print(f"\n  {ANSI.CYN}[?] Enable GPU mining? (if available){ANSI.RST}")
+        gpu_choice = input(f"  {ANSI.YEL}➤ y/n{ANSI.RST} [{'y' if use_gpu else 'n'}]: ").strip().lower()
+        if gpu_choice in ('y', 'yes'):
+            use_gpu = True
+        elif gpu_choice in ('n', 'no'):
+            use_gpu = False
+        # else giữ nguyên
+        DEFAULT_GPU = use_gpu
 
-        suggested = suggest_threads("mobile" if is_mobile else "pc", use_gpu)
+        suggested = suggest_threads("pc", use_gpu)
         thr_hint = f" [{DEFAULT_THREADS}]" if DEFAULT_THREADS is not None else ""
         thr_input = input(f"\n  {ANSI.YEL}➤ CPU threads{ANSI.RST} (suggested: {suggested}){thr_hint}: ").strip()
         if thr_input:
@@ -1093,8 +1073,8 @@ def parse_arguments():
     parser.add_argument("--server", default=DEFAULT_SERVER, help=f"Server URL (default: {DEFAULT_SERVER})")
     parser.add_argument("--worker", default=DEFAULT_WORKER, help="Worker name (login username)")
     parser.add_argument("--pin", default=None, help="Account PIN for JWT authentication (required)")
-    parser.add_argument("--tier", default="gpu", help="Device tier: embedded_avr, embedded_arm, embedded_esp, embedded_esp32, mobile, cpu, gpu (default: gpu)")
     parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="Number of CPU threads")
+    parser.add_argument("--intensity", type=int, default=DEFAULT_INTENSITY, help="Performance mining intensity from 1-100%% (default: 100)")
     parser.add_argument("--gpu", action="store_true", default=DEFAULT_GPU, help="Enable GPU mining (requires OpenCL)")
     parser.add_argument("--no-gpu", action="store_true", default=False, help="Explicitly disable GPU mining (overrides saved config)")
     parser.add_argument("--arduino-port", default=DEFAULT_ARDUINO_PORT, help="Serial port for Arduino (e.g. COM3 or /dev/ttyACM0)")
@@ -1108,9 +1088,8 @@ def parse_arguments():
 # Main entry point
 # ---------------------------------------------------------------------------
 def main():
-    global DEFAULT_SERVER, DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL, DEFAULT_ARDUINO_PORT, DEFAULT_ARDUINO_BAUD
+    global DEFAULT_SERVER, DEFAULT_WORKER, DEFAULT_THREADS, DEFAULT_GPU, DEFAULT_POLL, DEFAULT_ARDUINO_PORT, DEFAULT_ARDUINO_BAUD, DEFAULT_INTENSITY
 
-    # Handle --reset: delete config and force fresh setup
     if '--reset' in sys.argv[1:]:
         if os.path.exists(CONFIG_FILE):
             os.remove(CONFIG_FILE)
@@ -1125,16 +1104,16 @@ def main():
     DEFAULT_POLL          = config.get("poll", DEFAULT_POLL)
     DEFAULT_ARDUINO_PORT  = config.get("arduino_port", DEFAULT_ARDUINO_PORT)
     DEFAULT_ARDUINO_BAUD  = config.get("arduino_baud", DEFAULT_ARDUINO_BAUD)
+    DEFAULT_INTENSITY     = config.get("intensity", DEFAULT_INTENSITY)
 
     args_passed = sys.argv[1:]
-    # Include all meaningful flags so passing them skips interactive setup
     has_essential = any(x in args_passed for x in [
         '--worker', '--threads', '--gpu', '--no-gpu', '--poll',
-        '--pin', '--tier', '--arduino-port', '--server'
+        '--pin', '--arduino-port', '--server', '--intensity'
     ])
 
     pin_from_setup = None
-    tier_from_setup = "embedded_avr" if '--arduino-port' in args_passed else "gpu"
+    tier_from_setup = "embedded_avr" if '--arduino-port' in args_passed else "cpu"
 
     if not has_essential and sys.stdin.isatty():
         pin_from_setup, tier_from_setup = interactive_setup()
@@ -1149,7 +1128,6 @@ def main():
 
     args = parse_arguments()
 
-    # Handle --no-gpu: override any saved/config GPU value
     if args.no_gpu:
         args.gpu = False
 
@@ -1157,7 +1135,6 @@ def main():
         print(f"{ANSI.RED}Error: No worker name. Use --worker or run without parameters.{ANSI.RST}")
         sys.exit(1)
 
-    # 🆕 Resolve PIN: CLI > interactive > prompt
     if args.pin is None:
         if pin_from_setup:
             args.pin = pin_from_setup
@@ -1168,12 +1145,12 @@ def main():
             print(f"{ANSI.RED}Error: --pin is required for authentication{ANSI.RST}")
             sys.exit(1)
 
-    # 🆕 Resolve tier: auto-detect AVR when arduino port given & no explicit --tier
+    # Không còn --tier, nhưng vẫn giữ trong config để tương thích
     if '--tier' not in args_passed:
+        # Chỉ lưu để hiển thị, nhưng server sẽ dùng device_type
         args.tier = tier_from_setup
 
     if args.threads is None:
-        # Pure AVR mode: no CPU threads; otherwise pick a sensible default
         if args.arduino_port and not args.gpu:
             args.threads = 0
         else:
@@ -1183,16 +1160,17 @@ def main():
     if args.arduino_port:
         ensure_serial()
 
+    # Lưu config (không cần lưu tier nữa, nhưng vẫn giữ cho tương thích)
     save_config({
         "server": args.server,
         "worker": args.worker,
         "threads": args.threads,
         "gpu": args.gpu,
         "poll": args.poll,
-        "tier": args.tier,
+        "tier": args.tier if hasattr(args, 'tier') else "cpu",
         "arduino_port": args.arduino_port,
-        "arduino_baud": args.arduino_baud
-        # Note: PIN is intentionally NOT saved to config for security
+        "arduino_baud": args.arduino_baud,
+        "intensity": args.intensity
     })
 
     os.system("clear" if os.name != "nt" else "cls")
