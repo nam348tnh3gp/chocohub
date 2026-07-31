@@ -389,12 +389,41 @@
             padding: 10px 12px; margin-bottom: 4px; border-radius: var(--radius-sm);
             background: var(--glass-bg-strong);
             font-family: 'Space Mono', monospace; font-size: 0.8rem;
+            cursor: pointer;
+            transition: background 0.15s;
         }
+        .miner-entry:hover { background: rgba(255,159,10,0.12); }
         .miner-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-green); box-shadow: 0 0 8px rgba(50,215,75,0.4); flex-shrink: 0; animation: pulseDot 2s ease-in-out infinite; }
         .miner-name { color: var(--accent-orange); font-weight: 700; }
         .miner-device { color: var(--text-tertiary); font-size: 0.7rem; margin-left: auto; }
 
         .empty-state { color: var(--text-tertiary); text-align: center; padding: 24px 0; font-style: italic; font-size: 0.82rem; }
+
+        /* ---------- Miner Dashboard specific ---------- */
+        .miner-fetch-row {
+            display: flex; gap: 10px; margin-bottom: 14px; align-items: center;
+        }
+        .miner-fetch-row input {
+            flex: 1; padding: 10px 14px; background: var(--field-bg); border: 1px solid var(--field-border);
+            border-radius: var(--radius-sm); color: var(--accent-orange);
+            font-family: 'Space Mono', monospace; font-size: 0.85rem; outline: none;
+        }
+        .miner-fetch-row input:focus { border-color: var(--accent-orange); box-shadow: 0 0 0 2px rgba(255,159,10,0.15); }
+        .miner-fetch-row button {
+            padding: 10px 18px; border-radius: var(--radius-pill); font-weight: 700; font-size: 0.8rem;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-pink));
+            color: #fff; border: none; cursor: pointer; transition: filter 0.2s, transform 0.2s;
+        }
+        .miner-fetch-row button:hover { filter: brightness(1.07); transform: translateY(-1px); }
+        .miner-fetch-row button:active { transform: scale(0.96); }
+
+        .worker-detail-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px;
+            font-family: 'Space Mono', monospace; font-size: 0.75rem;
+            padding: 8px 0;
+        }
+        .worker-detail-grid .label { color: var(--text-tertiary); }
+        .worker-detail-grid .value { color: var(--text-primary); font-weight: 600; }
 
         /* ---------- Login overlay ---------- */
         #login-overlay {
@@ -428,6 +457,8 @@
             .account-meta { justify-content: center; }
             .dashboard-header { flex-direction: column; align-items: flex-start; }
             .topbar-widgets { width: 100%; justify-content: space-between; }
+            .monitor-grid { grid-template-columns: 1fr; }
+            .miner-fetch-row { flex-direction: column; align-items: stretch; }
         }
         @media (max-width: 420px) {
             .main-card { padding: 22px 18px; }
@@ -634,14 +665,67 @@
             </div>
         </div>
     </div>
-</div>
+
+    <!-- ═══════════ MINER DASHBOARD ═══════════ -->
+    <div class="miner-dashboard" style="margin-top: 30px;">
+        <h3 class="section-title">
+            <svg class="ttl-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M14.5 3.5L20.5 9.5M6 13L3 21L11 18L19.5 9.5C20.5 8.5 20.5 7.5 19.5 6.5L17.5 4.5C16.5 3.5 15.5 3.5 14.5 4.5L6 13Z" stroke="#FF9F0A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M12 9L15 12" stroke="#FF9F0A" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Miner Dashboard
+        </h3>
+        <div class="monitor-grid">
+            <!-- Worker Overview + List -->
+            <div class="panel-dark glass">
+                <h4>
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2C12 2 14 4 14 7C14 10 12 12 12 12C12 12 10 10 10 7C10 4 12 2 12 2Z" stroke="#FFD60A" stroke-width="2"/>
+                        <path d="M12 12V22" stroke="#FFD60A" stroke-width="2" stroke-linecap="round"/>
+                        <path d="M6 16L12 12L18 16" stroke="#FFD60A" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    Worker Overview
+                </h4>
+                <div class="miner-fetch-row">
+                    <input type="text" id="miner-username-input" placeholder="Enter username..." value="">
+                    <button id="fetch-miner-btn">Fetch Data</button>
+                </div>
+                <div id="miner-summary" style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 12px;">
+                    <div><span style="color: var(--text-tertiary); font-size: 0.7rem;">Active Workers</span><br><strong id="m-active-workers" style="font-size: 1.2rem;">—</strong></div>
+                    <div><span style="color: var(--text-tertiary); font-size: 0.7rem;">Boost</span><br><strong id="m-boost" style="font-size: 1.2rem; color: var(--accent-green);">1.0x</strong></div>
+                    <div><span style="color: var(--text-tertiary); font-size: 0.7rem;">Reward (10m)</span><br><strong id="m-total-reward" style="font-size: 1.2rem; color: var(--accent-orange);">0 CC</strong></div>
+                </div>
+                <div id="miner-worker-list">
+                    <div class="empty-state">Enter a username and click Fetch</div>
+                </div>
+            </div>
+
+            <!-- Worker Details -->
+            <div class="panel-dark glass">
+                <h4>
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="3" y="3" width="7" height="7" rx="1" stroke="#0A84FF" stroke-width="2"/>
+                        <rect x="14" y="3" width="7" height="7" rx="1" stroke="#0A84FF" stroke-width="2"/>
+                        <rect x="3" y="14" width="7" height="7" rx="1" stroke="#0A84FF" stroke-width="2"/>
+                        <rect x="14" y="14" width="7" height="7" rx="1" stroke="#0A84FF" stroke-width="2"/>
+                    </svg>
+                    Worker Details
+                </h4>
+                <div id="miner-worker-details" style="max-height: 260px; overflow-y: auto;">
+                    <div class="empty-state">Select a worker from the list</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- ═══ END MINER DASHBOARD ═══ -->
+
+</div><!-- end .dashboard-container -->
 
 <!-- Toast container -->
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script>
     // ---------- UI-only enhancements: clock, date, theme toggle ----------
-    // Isolated in its own IIFE; does not touch or rely on the dashboard script below.
     (function () {
         const root = document.documentElement;
         const themeToggle = document.getElementById('themeToggle');
@@ -686,7 +770,7 @@
 
 <script>
         // ══════════════════════════════════════════════════════
-        // SECURITY-FIXED DASHBOARD SCRIPT (Case-Sensitive Username)
+        // SECURITY-FIXED DASHBOARD SCRIPT + MINER INFO
         // ══════════════════════════════════════════════════════
 
         let currentBalance = 0;
@@ -698,6 +782,7 @@
         let blocksHash = '';
         let validatorsHash = '';
 
+        // ─── Animations ──────────────────────────────────────────
         function animateValue(id, start, end, duration) {
             const obj = document.getElementById(id);
             if (!obj) return;
@@ -737,6 +822,7 @@
             balanceAnimationId = requestAnimationFrame(step);
         }
 
+        // ─── Balance ────────────────────────────────────────────
         async function updateBalanceAction() {
             const user = localStorage.getItem('choco_user');
             const token = localStorage.getItem('choco_token');
@@ -745,13 +831,10 @@
                 const res = await fetch('/get_user/' + encodeURIComponent(user), {
                     headers: { 'Authorization': 'Bearer ' + token }
                 });
-                
-                // Nếu server đang restore (503), bỏ qua lần này
                 if (res.status === 503) {
                     console.warn('Server is restoring, balance update skipped');
                     return;
                 }
-                
                 if (!res.ok) throw new Error('Network error');
                 const data = await res.json();
                 if (data.status !== 'error' && typeof data.balance === 'number') {
@@ -765,21 +848,17 @@
             }
         }
 
-        // Cập nhật network monitor với caching và xử lý linh hoạt
+        // ─── Network Monitor ────────────────────────────────────
         async function updateNetworkMonitor() {
             try {
                 const res = await fetch('/network_status');
-                
-                // Nếu server đang restore (503), bỏ qua lần này
                 if (res.status === 503) {
                     console.warn('Server is restoring, network monitor skipped');
                     return;
                 }
-                
                 if (!res.ok) throw new Error('Fetch failed');
                 const data = await res.json();
 
-                // Xử lý blocks – hỗ trợ cả dữ liệu mới (height, miner) và cũ (id, username)
                 const blocks = data.recent_blocks || [];
                 const newBlocksHash = blocks.map(b => {
                     const id = b.id || b.bounty_id || b.hash || (b.height !== undefined ? '#' + b.height : '?');
@@ -794,7 +873,6 @@
                         const frag = document.createDocumentFragment();
                         blocks.forEach(b => {
                             const li = document.createElement('li');
-                            // Hiển thị ID – ưu tiên height, id, hash
                             let blockId = b.id || b.bounty_id || b.hash;
                             if (b.height !== undefined) blockId = '#' + b.height;
                             if (!blockId) blockId = '?';
@@ -802,7 +880,6 @@
                             spanId.className = 'block-id';
                             spanId.textContent = blockId.length > 10 ? blockId.substring(0,10) + '…' : blockId;
                             li.appendChild(spanId);
-                            // Tên miner – ưu tiên username, miner, solver_username
                             const miner = b.username || b.miner || b.solver_username || 'unknown';
                             li.appendChild(document.createTextNode(' - ' + miner + ' - '));
                             const spanReward = document.createElement('span');
@@ -818,7 +895,6 @@
                     }
                 }
 
-                // Xử lý validators
                 const validators = data.active_validators || [];
                 const newValidatorsHash = validators.map(v => (v.username || v.miner || '?') + (v.stake || 0)).join('|');
                 if (newValidatorsHash !== validatorsHash) {
@@ -854,6 +930,122 @@
             }
         }
 
+        // ─── Miner Info (public) ──────────────────────────────────
+        let currentMinerData = null;
+        let selectedWorkerIndex = 0;
+
+        async function fetchMinerInfo(username) {
+            if (!username) {
+                showToast('Please enter a username', 'error');
+                return;
+            }
+            const btn = document.getElementById('fetch-miner-btn');
+            if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
+
+            try {
+                const token = localStorage.getItem('choco_token');
+                const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+                const res = await fetch('/api/miner-info?username=' + encodeURIComponent(username), { headers });
+                if (res.status === 503) {
+                    showToast('⏳ Server is restoring, please try again later.', 'loading');
+                    if (btn) { btn.disabled = false; btn.textContent = 'Fetch Data'; }
+                    return;
+                }
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                if (data.status !== 'success') {
+                    showToast(data.message || 'Failed to fetch miner info', 'error');
+                    if (btn) { btn.disabled = false; btn.textContent = 'Fetch Data'; }
+                    return;
+                }
+                currentMinerData = data;
+                renderMinerInfo(data);
+                showToast('Data loaded for ' + username, 'success');
+            } catch (e) {
+                showToast('Error: ' + e.message, 'error');
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = 'Fetch Data'; }
+            }
+        }
+
+        function renderMinerInfo(data) {
+            const active = data.active_workers || 0;
+            document.getElementById('m-active-workers').textContent = active;
+            const boost = (data.workers && data.workers.length > 0) ? data.workers[0].boost_multiplier : 1.0;
+            document.getElementById('m-boost').textContent = boost.toFixed(1) + 'x';
+            document.getElementById('m-total-reward').textContent = (data.total_reward_10m || 0).toFixed(4) + ' CC';
+
+            const listContainer = document.getElementById('miner-worker-list');
+            const workers = data.workers || [];
+            if (workers.length === 0) {
+                listContainer.innerHTML = '<div class="empty-state">No active workers</div>';
+                document.getElementById('miner-worker-details').innerHTML = '<div class="empty-state">No workers to show</div>';
+                return;
+            }
+
+            const frag = document.createDocumentFragment();
+            workers.forEach((w, idx) => {
+                const div = document.createElement('div');
+                div.className = 'miner-entry';
+                div.dataset.index = idx;
+                const dot = document.createElement('span');
+                dot.className = 'miner-dot';
+                dot.style.background = w.suspended ? 'var(--accent-red)' : 'var(--accent-green)';
+                div.appendChild(dot);
+                const name = document.createElement('span');
+                name.className = 'miner-name';
+                name.textContent = w.name.length > 22 ? w.name.substring(0,20) + '…' : w.name;
+                div.appendChild(name);
+                const info = document.createElement('span');
+                info.className = 'miner-device';
+                info.textContent = w.tier + ' · ' + w.difficulty.toFixed(1) + ' diff';
+                div.appendChild(info);
+                div.addEventListener('click', () => showWorkerDetail(w, idx));
+                frag.appendChild(div);
+            });
+            listContainer.textContent = '';
+            listContainer.appendChild(frag);
+
+            // Select first worker by default
+            if (workers.length > 0) {
+                showWorkerDetail(workers[0], 0);
+            }
+        }
+
+        function showWorkerDetail(w, idx) {
+            const container = document.getElementById('miner-worker-details');
+            if (!container) return;
+            const ago = w.last_share_ago !== null && w.last_share_ago !== undefined
+                ? (w.last_share_ago < 60 ? w.last_share_ago + 's' : Math.floor(w.last_share_ago/60) + 'm')
+                : '—';
+            const status = w.suspended ? '🚫 Suspended' : (w.warning_count > 0 ? '⚠️ Warned ('+w.warning_count+')' : '✅ Active');
+            const uptime = w.uptime_seconds ? Math.floor(w.uptime_seconds/60) + 'm' : '—';
+
+            const html = `
+                <div style="padding: 8px 0; border-bottom: 1px solid var(--glass-border);">
+                    <div><strong style="color: var(--accent-orange);">${w.name}</strong></div>
+                    <div class="worker-detail-grid">
+                        <span class="label">Tier</span><span class="value">${w.tier}</span>
+                        <span class="label">Difficulty</span><span class="value">${w.difficulty.toFixed(1)}</span>
+                        <span class="label">Last Share</span><span class="value">${ago}</span>
+                        <span class="label">Reward (10m)</span><span class="value" style="color: var(--accent-green);">${w.reward_10m.toFixed(4)} CC</span>
+                        <span class="label">Uptime</span><span class="value">${uptime}</span>
+                        <span class="label">Status</span><span class="value">${status}</span>
+                        <span class="label">Boost</span><span class="value">${(w.boost_multiplier||1).toFixed(1)}x</span>
+                        ${w.tier_changes > 0 ? `<span class="label">Tier changes</span><span class="value">${w.tier_changes}</span>` : ''}
+                    </div>
+                </div>
+            `;
+            container.innerHTML = html;
+            // Highlight selected in list
+            document.querySelectorAll('#miner-worker-list .miner-entry').forEach(el => {
+                el.style.background = 'var(--glass-bg-strong)';
+            });
+            const items = document.querySelectorAll('#miner-worker-list .miner-entry');
+            if (items[idx]) items[idx].style.background = 'rgba(255,159,10,0.15)';
+        }
+
+        // ─── Greeting ────────────────────────────────────────────
         function setHumaneGreeting(name) {
             const hour = new Date().getHours();
             let greet = 'Good night';
@@ -863,54 +1055,36 @@
             if (el) el.textContent = greet + ', ' + name + '!';
         }
 
+        // ─── Auth ────────────────────────────────────────────────
         async function handleAuth() {
             const username = document.getElementById('user-name').value.trim();
             const pin = document.getElementById('user-pin').value.trim();
             if (username.length < 3 || pin.length < 4) {
                 return showToast('Name min 3, PIN min 4 chars', 'error');
             }
-            
             const btn = document.getElementById('auth-btn');
             const hint = document.getElementById('login-hint-text');
-            
-            if (btn) {
-                btn.disabled = true;
-                btn.textContent = 'AUTHENTICATING...';
-            }
-            
+            if (btn) { btn.disabled = true; btn.textContent = 'AUTHENTICATING...'; }
             try {
                 const res = await fetch('/auth', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username, pin })
                 });
-                
-                // ─── XỬ LÝ LỖI 503: SERVER ĐANG RESTORE ───
                 if (res.status === 503) {
                     showToast('⏳ Server is restoring from backup, please wait...', 'loading');
                     if (hint) hint.textContent = '⏳ Server is restoring, retrying in 5 seconds...';
-                    if (btn) {
-                        btn.disabled = true;
-                        btn.textContent = 'WAITING FOR SERVER...';
-                    }
-                    // Thử lại sau 5 giây
+                    if (btn) { btn.disabled = true; btn.textContent = 'WAITING FOR SERVER...'; }
                     clearTimeout(authRetryTimer);
                     authRetryTimer = setTimeout(() => {
-                        if (btn) {
-                            btn.disabled = false;
-                            btn.textContent = 'ENTER HUB';
-                        }
+                        if (btn) { btn.disabled = false; btn.textContent = 'ENTER HUB'; }
                         if (hint) hint.textContent = 'If the username doesn\'t exist, we\'ll create one for you.';
                         handleAuth();
                     }, 5000);
                     return;
                 }
-                
                 const data = await res.json();
-                
-                // Xóa timer retry nếu thành công
                 clearTimeout(authRetryTimer);
-                
                 if (data.status === 'success') {
                     localStorage.setItem('choco_user', username);
                     if (data.token) {
@@ -945,10 +1119,15 @@
             }, 350);
         }
 
+        // ─── Init ────────────────────────────────────────────────
         async function init() {
             const user = localStorage.getItem('choco_user');
             const token = localStorage.getItem('choco_token');
-            
+
+            // Set default username in miner input
+            const minerInput = document.getElementById('miner-username-input');
+            if (minerInput && user) minerInput.value = user;
+
             if (user && token) {
                 authToken = token;
                 const overlay = document.getElementById('login-overlay');
@@ -961,27 +1140,44 @@
                     setTimeout(() => { dashUI.classList.add('loaded'); }, 150);
                 }
                 setHumaneGreeting(user.charAt(0).toUpperCase() + user.slice(1));
-                // Load dữ liệu lần đầu
                 await Promise.allSettled([updateBalanceAction(), updateNetworkMonitor()]);
-                // Thiết lập interval với thời gian dài hơn để giảm tải
                 setInterval(updateBalanceAction, 5000);
                 setInterval(updateNetworkMonitor, 15000);
+
+                // Tự động fetch miner info cho user hiện tại
+                if (minerInput) {
+                    await fetchMinerInfo(user);
+                }
             }
 
+            // Auth events
             const authBtn = document.getElementById('auth-btn');
-            if (authBtn) {
-                authBtn.addEventListener('click', handleAuth);
-            }
-            
+            if (authBtn) authBtn.addEventListener('click', handleAuth);
             const logoutBtn = document.getElementById('logout-btn');
-            if (logoutBtn) {
-                logoutBtn.addEventListener('click', logout);
-            }
-
+            if (logoutBtn) logoutBtn.addEventListener('click', logout);
             const pinInput = document.getElementById('user-pin');
             if (pinInput) {
-                pinInput.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter') handleAuth();
+                pinInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleAuth(); });
+            }
+
+            // Miner fetch button
+            const fetchBtn = document.getElementById('fetch-miner-btn');
+            if (fetchBtn) {
+                fetchBtn.addEventListener('click', () => {
+                    const username = document.getElementById('miner-username-input').value.trim();
+                    if (!username) { showToast('Please enter a username', 'error'); return; }
+                    fetchMinerInfo(username);
+                });
+            }
+            // Allow enter key on miner input
+            const minerInput2 = document.getElementById('miner-username-input');
+            if (minerInput2) {
+                minerInput2.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        const username = e.target.value.trim();
+                        if (!username) { showToast('Please enter a username', 'error'); return; }
+                        fetchMinerInfo(username);
+                    }
                 });
             }
         }
