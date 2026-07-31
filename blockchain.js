@@ -71,16 +71,16 @@ const DEVICE_REWARD_MULTIPLIERS = {
   'arduino': 3.5,
   'rp2040': 3.5,
   'pico': 3.5,
-  'mobile': 2.0,
-  'android': 2.0,
-  'ios': 2.0,
-  'web_miner': 1.0,
-  'cpu': 1.0,
-  'cpu_miner': 1.0,
-  'gpu': 1.0, // Changed from 0.5 to 1.0
-  'gpu_miner': 1.0,
-  'nvidia': 1.0,
-  'amd': 1.0,
+  'mobile': 3.6,
+  'android': 3.6,
+  'ios': 3.6,
+  'web_miner': 3.0,
+  'cpu': 3.0,
+  'cpu_miner': 3.0,
+  'gpu': 2.0, // Changed from 0.5 to 1.0
+  'gpu_miner': 2.0,
+  'nvidia': 2.0,
+  'amd': 2.0,
   'default': 1.0
 };
 
