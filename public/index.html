@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&icon_names=memory,language,mobile_2,computer" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
 
     <style>
         :root {
@@ -453,6 +453,7 @@
             word-wrap: normal;
             direction: ltr;
             font-feature-settings: 'liga';
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
             -webkit-font-smoothing: antialiased;
         }
         .worker-device-icon .material-symbols-outlined {
@@ -738,7 +739,7 @@
                 </h4>
                 <div class="miner-fetch-row">
                     <input type="text" id="miner-username-input" placeholder="Enter username..." value="">
-                    <button id="fetch-miner-btn">Check</button>
+                    <button id="fetch-miner-btn">Fetch Data</button>
                 </div>
                 <div id="miner-summary" style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 12px;">
                     <div><span style="color: var(--text-tertiary); font-size: 0.7rem;">Active Workers</span><br><strong id="m-active-workers" style="font-size: 1.2rem;">—</strong></div>
