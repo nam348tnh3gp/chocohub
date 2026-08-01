@@ -81,6 +81,7 @@ const DEVICE_REWARD_MULTIPLIERS = {
   'gpu_miner': 2.0,
   'nvidia': 2.0,
   'amd': 2.0,
+  'intel': 2.0,
   'default': 1.0
 };
 
