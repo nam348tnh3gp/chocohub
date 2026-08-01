@@ -197,6 +197,17 @@ function getJobForWorker(workerName, instanceId, deviceType) {
       tier = 'cpu';
     }
   }
+  // GPU vendor device (e.g. an Intel Arc) → classify as the gpu tier and
+  // persist it on the instance row so miner-info reports the real device.
+  // This is management/classification only (the frontend renders the vendor
+  // icon from device_type + gpu tier); it is not a reward override.
+  const gpuDevice = ['intel', 'nvidia', 'amd'].includes((deviceType || '').toLowerCase());
+  if (gpuDevice) {
+    tier = 'gpu';
+    if (db.getWorkerTier(diffKey) !== 'gpu') {
+      try { db.setWorkerTier(diffKey, 'gpu'); } catch (e) { }
+    }
+  }
   const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cpu;
 
   let diff = db.getWorkerDifficulty(diffKey);

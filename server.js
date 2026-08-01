@@ -1409,6 +1409,10 @@ app.get('/api/miner-info', (req, res) => {
     const workers = db.getWorkersByUsername(username);
     const result = workers
       .filter(w => {
+        // Skip internal sentinel rows (tier-change / timeout bookkeeping) so
+        // they never surface as fake workers in the miner info UI.
+        const n = w.worker_name || '';
+        if (n.endsWith('_tierchange') || n.endsWith('_timeout')) return false;
         if (w.last_solve_time && w.last_solve_time > 0) {
           return (now - Math.floor(w.last_solve_time / 1000)) < ACTIVE_THRESHOLD;
         }
