@@ -1398,7 +1398,12 @@ app.get('/api/miner-info', (req, res) => {
       return res.status(404).json({ status: 'error', message: 'User not found' });
     }
 
-    const ACTIVE_THRESHOLD = 86400;
+    // Only report workers that are currently responsive. A worker refreshes
+    // `updated_at` on every job poll (and `last_solve_time` on each solved
+    // share), so 5 minutes without activity means the miner is offline. They
+    // are excluded from miner-info but still exist in the DB until expiry, and
+    // reappear automatically once they poll/solve again.
+    const ACTIVE_THRESHOLD = 300;
     const now = Math.floor(Date.now() / 1000);
 
     const workers = db.getWorkersByUsername(username);

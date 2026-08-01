@@ -106,9 +106,16 @@ class BackupClient {
             for (const url of urls) {
               const parsedUrl = new URL(url);
               const host = parsedUrl.hostname;
-              if (!this.knownHosts.has(host) && !this.failedNodes.has(host)) {
+              // Re-admit a previously-failed (discarded) node if it re-registers,
+              // otherwise only admit brand-new hosts. Healthy known hosts are
+              // skipped so we don't create duplicate connections.
+              if (!this.knownHosts.has(host) || this.failedNodes.has(host)) {
                 const isStatic = this.staticServers.some(s => s.host === host);
                 if (isStatic) continue;
+
+                // Clear the permanent-dead marker so a re-registered node can
+                // reconnect without requiring a server restart.
+                this.failedNodes.delete(host);
 
                 const newServer = {
                   token: BACKUP_TOKEN,
