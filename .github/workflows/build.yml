@@ -12,41 +12,38 @@ jobs:
       - name: Checkout Node.js source
         run: |
           git clone --branch v21.7.3 --depth 1 https://github.com/nodejs/node.git
-          cd node
 
       - name: Setup Android NDK
         run: |
           wget https://dl.google.com/android/repository/android-ndk-r26c-linux.zip
           unzip android-ndk-r26c-linux.zip
           echo "ANDROID_NDK_HOME=$PWD/android-ndk-r26c" >> $GITHUB_ENV
+          echo "$PWD/android-ndk-r26c/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
 
       - name: Configure for Android aarch64
+        working-directory: node
         run: |
-          export PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
           export CC=aarch64-linux-android21-clang
           export CXX=aarch64-linux-android21-clang++
-          export AR=aarch64-linux-android-ar
-          export RANLIB=aarch64-linux-android-ranlib
+          export AR=llvm-ar
+          export RANLIB=llvm-ranlib
           export GYP_DEFINES="android_ndk_path=$ANDROID_NDK_HOME target_arch=arm64 host_os=linux"
-          cd node
           ./configure \
             --dest-cpu=arm64 \
             --dest-os=android \
             --cross-compiling \
             --without-inspector \
             --without-npm \
-            --shared \
             --prefix=/usr/local \
             --with-intl=system-icu
 
       - name: Build
-        run: |
-          cd node
-          make -j$(nproc)
+        working-directory: node
+        run: make -j$(nproc)
 
       - name: Package binary
+        working-directory: node/out/Release
         run: |
-          cd node/out/Release
           sudo apt-get install -y patchelf
           patchelf --set-interpreter /system/bin/linker64 node
           tar -czf node-v21-android-arm64.tar.gz node
