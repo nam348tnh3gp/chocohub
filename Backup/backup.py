@@ -1,5 +1,5 @@
 # backup.py – Backup Server (Flask) với canonical JSON, DH + RSA, history, chống ghi đè
-# ✅ FIX: Không gửi token trong body của /api/backup/sync
+# ✅ FIX: Không gửi token trong body của /api/backup/sync (cả request và response)
 # ✅ FIX: Token chỉ gửi trong DH exchange (1 lần)
 
 import os
@@ -342,6 +342,7 @@ def dh_exchange():
             'generator': server_dh_keys['generator'],
             'group': server_dh_keys['group'],
             'serverSignature': server_signature
+            # ❌ KHÔNG GỬI TOKEN TRONG RESPONSE NÀY
         })
     except Exception as e:
         print(f'❌ DH exchange error: {e}')
@@ -349,7 +350,7 @@ def dh_exchange():
         return jsonify({'status': 'error', 'message': 'Key exchange failed'}), 500
 
 # ------------------------------------------------------------
-# 9. Đồng bộ snapshot – KHÔNG CẦN TOKEN TRONG BODY
+# 9. Đồng bộ snapshot – KHÔNG CẦN TOKEN TRONG BODY (request và response)
 # ------------------------------------------------------------
 @app.route('/api/backup/sync', methods=['POST'])
 def sync():
@@ -381,10 +382,10 @@ def sync():
             snap = get_snapshot()
             if snap and snap.get('users'):
                 print(f'📤 Sending full snapshot ({len(snap["users"])} users)')
-                # ✅ Vẫn gửi token trong response (cần thiết cho client)
+                # ✅ KHÔNG GỬI TOKEN TRONG RESPONSE!
                 return jsonify({
                     'type': 'FULL_SNAPSHOT',
-                    'token': BACKUP_TOKEN,
+                    # ❌ XÓA 'token': BACKUP_TOKEN,
                     'state': snap
                 })
             else:
@@ -623,6 +624,7 @@ if __name__ == '__main__':
     print('║  Outgoing DH: FRESH SESSION + RETRY ║')
     print('║  Incoming: auto-clear invalid sess  ║')
     print('║  Token in body: ❌ REMOVED          ║')
+    print('║  Token in response: ❌ REMOVED      ║')
     print('╚══════════════════════════════════════╝')
     print('')
 
