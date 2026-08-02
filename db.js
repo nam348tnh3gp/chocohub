@@ -1,4 +1,3 @@
-
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -1317,6 +1316,114 @@ function getWorkerRewardsLast10Min(username) {
   `).get(username, tenMinAgo);
 }
 
+// ──────────────────────────────────────────────────────────────
+// 🆕 BACKUP NODES (chỉ áp dụng cho backup, timeout 3 lần -> xóa)
+// ──────────────────────────────────────────────────────────────
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS backup_nodes (
+    url TEXT PRIMARY KEY,
+    name TEXT,
+    description TEXT,
+    owner TEXT,
+    platform TEXT,
+    status TEXT DEFAULT 'active',
+    last_heartbeat TEXT DEFAULT (datetime('now')),
+    timeout_count INTEGER DEFAULT 0,
+    users INTEGER DEFAULT 0,
+    blocks INTEGER DEFAULT 0,
+    total_items INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_backup_nodes_heartbeat ON backup_nodes(last_heartbeat);
+`);
+
+function registerBackupNode(url, name, description, owner, platform, users, blocks, total_items) {
+  const existing = db.prepare('SELECT * FROM backup_nodes WHERE url = ?').get(url);
+  if (existing) {
+    if (existing.timeout_count >= 3) {
+      db.prepare('DELETE FROM backup_nodes WHERE url = ?').run(url);
+      console.log(`🗑️ Backup node ${url} deleted (timeout_count >= 3), re-registering as new.`);
+    } else {
+      db.prepare(`
+        UPDATE backup_nodes
+        SET name = ?, description = ?, owner = ?, platform = ?,
+            users = ?, blocks = ?, total_items = ?,
+            last_heartbeat = datetime('now'),
+            timeout_count = 0,
+            status = 'active'
+        WHERE url = ?
+      `).run(
+        name || 'Unknown',
+        description || '',
+        owner || '',
+        platform || 'Unknown',
+        parseInt(users) || 0,
+        parseInt(blocks) || 0,
+        parseInt(total_items) || 0,
+        url
+      );
+      return db.prepare('SELECT * FROM backup_nodes WHERE url = ?').get(url);
+    }
+  }
+  // Tạo mới
+  db.prepare(`
+    INSERT INTO backup_nodes (url, name, description, owner, platform, users, blocks, total_items, last_heartbeat)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+  `).run(
+    url,
+    name || 'Unknown',
+    description || '',
+    owner || '',
+    platform || 'Unknown',
+    parseInt(users) || 0,
+    parseInt(blocks) || 0,
+    parseInt(total_items) || 0
+  );
+  return db.prepare('SELECT * FROM backup_nodes WHERE url = ?').get(url);
+}
+
+function updateBackupNodeHeartbeat(url, users, blocks, total_items) {
+  db.prepare(`
+    UPDATE backup_nodes
+    SET last_heartbeat = datetime('now'),
+        timeout_count = 0,
+        status = 'active',
+        users = ?,
+        blocks = ?,
+        total_items = ?
+    WHERE url = ?
+  `).run(
+    parseInt(users) || 0,
+    parseInt(blocks) || 0,
+    parseInt(total_items) || 0,
+    url
+  );
+}
+
+function getBackupNodes() {
+  return db.prepare('SELECT * FROM backup_nodes ORDER BY last_heartbeat DESC').all();
+}
+
+function pruneBackupNodes() {
+  const cutoff = new Date(Date.now() - 30 * 1000).toISOString();
+  // Sửa: dùng nháy đơn 'active' thay vì "active"
+  const stale = db.prepare("SELECT url, timeout_count FROM backup_nodes WHERE status = 'active' AND last_heartbeat < ?").all(cutoff);
+  for (const node of stale) {
+    const newCount = (node.timeout_count || 0) + 1;
+    if (newCount >= 3) {
+      db.prepare('DELETE FROM backup_nodes WHERE url = ?').run(node.url);
+      console.log(`🗑️ Backup node ${node.url} deleted after 3 timeouts.`);
+    } else {
+      // Sửa: dùng nháy đơn 'timeout'
+      db.prepare("UPDATE backup_nodes SET timeout_count = ?, status = 'timeout' WHERE url = ?").run(newCount, node.url);
+      console.log(`⏳ Backup node ${node.url} timeout count ${newCount}/3`);
+    }
+  }
+}
+
+// ─── Export ────────────────────────────────────────────────
+
 module.exports = {
   _db: db,
   prepare: (sql) => db.prepare(sql),
@@ -1426,5 +1533,10 @@ module.exports = {
   getWorkerRewardsLast10Min,
   upsertTrustedBlocks,
   getTrustedBlocks,
-  getTrustedTip
+  getTrustedTip,
+  // ─── Backup nodes ─────────────────────────
+  registerBackupNode,
+  updateBackupNodeHeartbeat,
+  getBackupNodes,
+  pruneBackupNodes
 };
