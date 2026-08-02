@@ -1,5 +1,5 @@
 // backup.js – Backup Server (Node.js) với DH + canonical JSON + REQUEST_SNAPSHOT
-// ✅ FIX: Không gửi token trong body của /api/backup/sync
+// ✅ FIX: Không gửi token trong body của /api/backup/sync (cả request và response)
 // ✅ FIX: Token chỉ gửi trong DH exchange (1 lần)
 require('dotenv').config();
 const express = require('express');
@@ -10,7 +10,7 @@ const crypto = require('crypto');
 const sqlite3 = require('better-sqlite3');
 const DHExchange = require('./dh');
 
-// ─── Helper: canonical JSON (sắp xếp key alphabet) ─────────────
+// ─── Helper: canonical JSON ─────────────────────────────
 function canonicalStringify(obj) {
   if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
   if (Array.isArray(obj)) return '[' + obj.map(canonicalStringify).join(',') + ']';
@@ -263,6 +263,7 @@ app.post('/api/dh/exchange', (req, res) => {
       generator: serverDHKeys.generator,
       group: serverDHKeys.group,
       serverSignature: signature
+      // ❌ KHÔNG GỬI TOKEN TRONG RESPONSE NÀY
     });
   } catch (e) {
     console.error('❌ DH exchange error:', e);
@@ -271,7 +272,7 @@ app.post('/api/dh/exchange', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════
-// BACKUP SYNC – KHÔNG CẦN TOKEN TRONG BODY (dùng HMAC)
+// BACKUP SYNC – KHÔNG CẦN TOKEN TRONG BODY (request và response)
 // ═══════════════════════════════════════════════════
 app.post('/api/backup/sync', (req, res) => {
   const data = req.body;
@@ -304,8 +305,12 @@ app.post('/api/backup/sync', (req, res) => {
       const snap = getSnapshot();
       if (snap && snap.users && snap.users.length > 0) {
         console.log(`📤 Sending full snapshot (${snap.users.length} users)`);
-        // ✅ Vẫn gửi token trong response (cần thiết cho client)
-        return res.json({ type: 'FULL_SNAPSHOT', token: BACKUP_TOKEN, state: snap });
+        // ✅ KHÔNG GỬI TOKEN TRONG RESPONSE!
+        return res.json({ 
+          type: 'FULL_SNAPSHOT', 
+          // ❌ XÓA token: BACKUP_TOKEN,
+          state: snap 
+        });
       } else {
         console.log('ℹ️ Both empty, sending READY_ACK');
         return res.json({ type: 'READY_ACK', status: 'success', message: 'ready but empty' });
@@ -522,6 +527,7 @@ app.listen(BACKUP_PORT, () => {
   console.log('║  REQUEST_SNAPSHOT: ON               ║');
   console.log('║  Anti-overwrite: HASH-BASED         ║');
   console.log('║  Token in body: ❌ REMOVED          ║');
+  console.log('║  Token in response: ❌ REMOVED      ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
 
