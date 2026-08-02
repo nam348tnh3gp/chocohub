@@ -1,73 +1,53 @@
-name: Build Backup EXE
+name: Build Node.js 21 for Android aarch64
 
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: windows-latest
-
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
-      - name: Install dependencies in Backup folder
-        working-directory: ./Backup
+      - name: Checkout Node.js source
         run: |
-          npm install
-          npm rebuild better-sqlite3
+          git clone --branch v21.7.3 --depth 1 https://github.com/nodejs/node.git
+          cd node
 
-      - name: Install pkg globally
-        run: npm install -g pkg
-
-      - name: Build Windows executable
-        working-directory: ./Backup
-        run: pkg backup.js --targets node18-win-x64 --options expose-gc --output chocohub-backup.exe
-
-      - name: Prepare release package
+      - name: Setup Android NDK
         run: |
-          # Tạo thư mục release
-          New-Item -ItemType Directory -Force -Path release-package
-          
-          # Copy file exe từ Backup folder
-          Copy-Item -Path "Backup/chocohub-backup.exe" -Destination "release-package/" -Force
-          
-          # Copy .env (kiểm tra kỹ hơn)
-          $envPath = "Backup/.env"
-          if (Test-Path $envPath) {
-            # Hiển thị thông tin file để debug
-            Get-ChildItem $envPath | Format-List
-            Copy-Item -Path $envPath -Destination "release-package/.env" -Force -Verbose
-            Write-Host "✅ Copied .env file"
-          } else {
-            Write-Host "⚠️ Backup/.env not found"
-            # Liệt kê các file trong thư mục Backup để debug
-            Get-ChildItem Backup/
-          }
-          
-          # Copy .env.example
-          $envExamplePath = "Backup/.env.example"
-          if (Test-Path $envExamplePath) {
-            Copy-Item -Path $envExamplePath -Destination "release-package/.env.example" -Force -Verbose
-            Write-Host "✅ Copied .env.example file"
-          } else {
-            Write-Host "⚠️ Backup/.env.example not found"
-          }
-          
+          wget https://dl.google.com/android/repository/android-ndk-r26c-linux.zip
+          unzip android-ndk-r26c-linux.zip
+          export ANDROID_NDK_HOME=$PWD/android-ndk-r26c
 
+      - name: Configure for Android aarch64
+        run: |
+          export PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+          cd node
+          ./configure \
+            --dest-cpu=arm64 \
+            --dest-os=android \
+            --cross-compiling \
+            --with-intl=system-icu \
+            --without-snapshot \
+            --prefix=/usr/local \
+            --without-npm \
+            --without-inspector \
+            --disable-dtrace
 
-          # Liệt kê nội dung thư mục release để kiểm tra
-          Write-Host "Contents of release-package:"
-          Get-ChildItem release-package/
+      - name: Build
+        run: |
+          cd node
+          make -j$(nproc)
+
+      - name: Package binary
+        run: |
+          cd node/out/Release
+          patchelf --set-interpreter /system/bin/linker64 node
+          tar -czf node-v21-android-arm64.tar.gz node
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: chocohub-backup-windows
-          path: release-package/
-          retention-days: 7
+          name: node-v21-android-arm64
+          path: node/out/Release/node-v21-android-arm64.tar.gz
