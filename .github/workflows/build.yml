@@ -27,8 +27,8 @@ jobs:
           export CXX=aarch64-linux-android21-clang++
           export AR=aarch64-linux-android-ar
           export RANLIB=aarch64-linux-android-ranlib
-          # Tạo file config.gypi để truyền android_ndk_path
-          echo "{ 'variables': { 'android_ndk_path': '$ANDROID_NDK_HOME' } }" > config.gypi
+          # Truyền biến vào GYP
+          export GYP_DEFINES="android_ndk_path=$ANDROID_NDK_HOME target_arch=arm64"
           cd node
           ./configure \
             --dest-cpu=arm64 \
