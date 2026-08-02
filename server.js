@@ -157,13 +157,20 @@ const ALLOWED_BACKUP_HOSTS = (process.env.BACKUP_SERVERS || '')
     try { return new URL(s.trim()).hostname; } catch { return ''; }
   }).filter(Boolean);
 
+// ─── SỬA HÀM isAllowedBackupHost: cho phép tất cả nếu không có danh sách ──
 function isAllowedBackupHost(url) {
-  if (!ALLOWED_BACKUP_HOSTS.length) return false;
+  // Nếu không có danh sách host được cấu hình, cho phép tất cả (chỉ cần token)
+  if (!ALLOWED_BACKUP_HOSTS.length) return true;
   try {
     return ALLOWED_BACKUP_HOSTS.includes(new URL(url).hostname);
   } catch { return false; }
 }
-console.log(`🔒 Allowed backup hosts: ${ALLOWED_BACKUP_HOSTS.join(', ') || '(none — all blocked)'}`);
+
+// Cập nhật log để hiển thị rõ chế độ
+const modeMsg = ALLOWED_BACKUP_HOSTS.length
+  ? `Allowed hosts: ${ALLOWED_BACKUP_HOSTS.join(', ')}`
+  : 'ALLOW ALL (no host restriction)';
+console.log(`🔒 Backup hosts: ${modeMsg}`);
 
 function getDbHash() {
   try {
@@ -178,7 +185,8 @@ function getDbHash() {
   }
 }
 
-const registeredBackupNodes = {};
+// ─── ĐÃ XÓA: const registeredBackupNodes = {};
+// ─── ĐÃ XÓA: let bestSnapshotMetrics = { users: 0, blocks: 0, total_items: 0 };
 
 const app = express();
 app.set('trust proxy', 1);
@@ -1122,6 +1130,8 @@ app.get('/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString(), dbHash: getDbHash() });
 });
 
+// ─── ROUTE BACKUP (đã sửa) ──────────────────────────────
+
 app.post('/api/backup/register', (req, res) => {
   const { url, token, name, description, owner, platform, clientId, users, blocks, total_items } = req.body;
   if (!url || !token) return res.status(400).json({ status: 'error', message: 'Missing url or token' });
@@ -1132,29 +1142,17 @@ app.post('/api/backup/register', (req, res) => {
   const isTokenValid = providedToken === (process.env.BACKUP_TOKEN || 'chocohub-default-token');
   const session = clientId ? dhSessions.get(clientId) : null;
   if (!isTokenValid && !session) return res.status(401).json({ status: 'error', message: 'Invalid token or no valid session' });
-  registeredBackupNodes[url] = {
-    name: name || 'Unknown',
-    description: description || '',
-    owner: owner || '',
-    platform: platform || 'Unknown',
-    last_seen: new Date().toISOString(),
-    users: parseInt(users) || 0,
-    blocks: parseInt(blocks) || 0,
-    total_items: parseInt(total_items) || 0
-  };
-  console.log(`📡 Backup node registered: ${name || url} (${url}) — ${registeredBackupNodes[url].users} users, ${registeredBackupNodes[url].blocks} blocks`);
-  res.json({ status: 'success', message: 'Node registered' });
+
+  // ─── Lưu vào DB thay vì in-memory ──────────────────────
+  const node = db.registerBackupNode(url, name, description, owner, platform, users, blocks, total_items);
+  console.log(`📡 Backup node registered: ${node.name} (${url})`);
+  res.json({ status: 'success', message: 'Node registered', node });
 });
 
 app.get('/api/backup/nodes', (req, res) => {
-  const now = Date.now();
-  for (const [url, info] of Object.entries(registeredBackupNodes)) {
-    if (now - new Date(info.last_seen).getTime() > 600000) delete registeredBackupNodes[url];
-  }
-  res.json({ status: 'success', nodes: registeredBackupNodes });
+  const nodes = db.getBackupNodes();
+  res.json({ status: 'success', nodes });
 });
-
-let bestSnapshotMetrics = { users: 0, blocks: 0, total_items: 0 };
 
 app.post('/api/backup/sync', (req, res) => {
   try {
@@ -1162,55 +1160,32 @@ app.post('/api/backup/sync', (req, res) => {
     const clientId = data.clientId || req.headers['x-client-id'] || '';
     const session = clientId ? dhSessions.get(clientId) : null;
     if (!session) return res.status(401).json({ status: 'error', message: 'DH session required (no token fallback)' });
+
+    // ─── Heartbeat: cập nhật thời gian cuối ──────────────
+    const url = req.headers['x-origin'] || req.headers['origin'] || data.url || 'unknown';
+    const users = data.state?.users?.length || 0;
+    const blocks = data.state?.blocks?.length || 0;
+    const totalItems = data.state ? Object.keys(data.state).reduce((sum, k) => sum + (data.state[k]?.length || 0), 0) : 0;
+    db.updateBackupNodeHeartbeat(url, users, blocks, totalItems);
+
     console.log(`📥 Received from backup: type=${data.type}, empty=${data.empty}`);
+
+    // ─── Xử lý FULL_SNAPSHOT ───────────────────────────────
     if (data.type === 'FULL_SNAPSHOT' && data.state) {
       const incomingUsers = (data.state.users || []).length;
       const incomingBlockCount = (data.state.blocks || []).length;
-
-      const now = Date.now();
-      let bestKnownUsers = 0, bestKnownBlocks = 0;
-      for (const info of Object.values(registeredBackupNodes)) {
-        if (now - new Date(info.last_seen).getTime() > 600000) continue;
-        if (info.users > bestKnownUsers) bestKnownUsers = info.users;
-        if (info.blocks > bestKnownBlocks) bestKnownBlocks = info.blocks;
-      }
-
-      if (bestSnapshotMetrics.users > bestKnownUsers) bestKnownUsers = bestSnapshotMetrics.users;
-      if (bestSnapshotMetrics.blocks > bestKnownBlocks) bestKnownBlocks = bestSnapshotMetrics.blocks;
-
-      if (bestKnownUsers > 0 && incomingUsers < bestKnownUsers * 0.8) {
-        console.warn(`🚫 Rejected FULL_SNAPSHOT: incoming has ${incomingUsers} users, best known is ${bestKnownUsers}. Refusing downgrade.`);
-        return res.json({ type: 'SNAPSHOT_REJECTED', status: 'error', message: `Best backup node has ${bestKnownUsers} users but this snapshot has only ${incomingUsers}. Refusing restore.` });
-      }
-      if (bestKnownBlocks > 0 && incomingBlockCount < bestKnownBlocks * 0.8) {
-        console.warn(`🚫 Rejected FULL_SNAPSHOT: incoming has ${incomingBlockCount} blocks, best known is ${bestKnownBlocks}. Refusing downgrade.`);
-        return res.json({ type: 'SNAPSHOT_REJECTED', status: 'error', message: `Best backup node has ${bestKnownBlocks} blocks but this snapshot has only ${incomingBlockCount}. Refusing restore.` });
-      }
-
       const ABSOLUTE_MIN_USERS = 5;
       const ABSOLUTE_MIN_BLOCKS = 5;
-      if ((bestKnownUsers === 0 && bestKnownBlocks === 0) && (incomingUsers < ABSOLUTE_MIN_USERS || incomingBlockCount < ABSOLUTE_MIN_BLOCKS)) {
-        console.warn(`🚫 Rejected FULL_SNAPSHOT: too few data (${incomingUsers} users, ${incomingBlockCount} blocks) and no peers to compare against. Minimum floor: ${ABSOLUTE_MIN_USERS} users, ${ABSOLUTE_MIN_BLOCKS} blocks.`);
-        return res.json({ type: 'SNAPSHOT_REJECTED', status: 'error', message: `Snapshot has only ${incomingUsers} users and ${incomingBlockCount} blocks. Refusing restore.` });
+      if (incomingUsers < ABSOLUTE_MIN_USERS || incomingBlockCount < ABSOLUTE_MIN_BLOCKS) {
+        console.warn(`🚫 Rejected FULL_SNAPSHOT: too few data (${incomingUsers} users, ${incomingBlockCount} blocks). Minimum: ${ABSOLUTE_MIN_USERS} users, ${ABSOLUTE_MIN_BLOCKS} blocks.`);
+        return res.json({ type: 'SNAPSHOT_REJECTED', status: 'error', message: 'Snapshot data too small. Refusing restore.' });
       }
 
       console.log(`📥 Receiving full DB snapshot from backup client (${incomingUsers} users, ${incomingBlockCount} blocks)...`);
-
-      // ─── BẮT ĐẦU RESTORE: CHẶN MỌI REQUEST ────────────────
       isRestoring = true;
-
       try {
         db.importFullState(data.state);
         console.log('✅ Full database restored from backup client');
-
-        // Update best known snapshot metrics
-        const incomingTotal = incomingUsers + incomingBlockCount
-          + (data.state.stakes || []).length
-          + (data.state.snake_claims || []).length
-          + (data.state.bounties || []).length;
-        if (incomingUsers > bestSnapshotMetrics.users) bestSnapshotMetrics.users = incomingUsers;
-        if (incomingBlockCount > bestSnapshotMetrics.blocks) bestSnapshotMetrics.blocks = incomingBlockCount;
-
         // Tạo lại các tài khoản hệ thống
         NodeFeesRouter.ensureHoldingAccount();
         NodeFeesRouter.ensureNodeFeesAccount();
@@ -1226,18 +1201,16 @@ app.post('/api/backup/sync', (req, res) => {
           db.authenticate('swap_liquidity', randomPin);
           console.log('🏊 Re-created swap_liquidity account after restore');
         }
-
-        // ─── KẾT THÚC RESTORE ────────────────────────────────
         isRestoring = false;
-
         return res.json({ type: 'SNAPSHOT_ACK', status: 'success' });
       } catch (restoreErr) {
-        // Nếu có lỗi, vẫn tắt cờ để server tiếp tục phục vụ
         isRestoring = false;
         console.error('❌ Restore failed:', restoreErr.message);
         throw restoreErr;
       }
     }
+
+    // ─── Xử lý READY ────────────────────────────────────────
     if (data.type === 'READY') {
       const serverHasData = db.getSeq() > 0;
       const clientHasData = data.empty === false;
@@ -1253,6 +1226,8 @@ app.post('/api/backup/sync', (req, res) => {
         return res.json({ type: 'READY_ACK', status: 'ok' });
       }
     }
+
+    // ─── PING ──────────────────────────────────────────────
     if (data.type === 'PING') return res.json({ type: 'PONG' });
     res.json({ type: 'ACK', status: 'received' });
   } catch (e) {
@@ -1849,6 +1824,9 @@ app.listen(PORT, () => {
 
   // Prune dead mining nodes every 60 seconds
   setInterval(() => db.pruneMiningNodes(), 60000);
+
+  // ─── 🆕 Prune backup nodes every 30 seconds ──────────
+  setInterval(() => db.pruneBackupNodes(), 30000);
 });
 
 const http2Server = http2.createSecureServer({ key: tlsKey, cert: tlsCert, allowHTTP1: true, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.3' }, app);
