@@ -1,7 +1,7 @@
 // backupSync.js – Client đồng bộ full-snapshot + TLS 1.3 + DH (có fallback token)
-// 🆕 Fix: Xử lý REQUEST_SNAPSHOT + canonical JSON cho HMAC
-// 🔁 Retry và xóa node (cả static & dynamic) sau MAX_RETRIES lần thất bại
-// 💓 Heartbeat failure cũng được tính vào retry (3 failures liên tiếp)
+// ✅ FIX: KHÔNG gửi token trong body khi dùng DH mode
+// ✅ FIX: Xóa bodyObj.token trong sendWithDH
+
 const net = require('net');
 const https = require('https');
 const http = require('http');
@@ -20,9 +20,9 @@ const READY_TIMEOUT = 60000;
 const RETRY_INTERVAL = 30000;
 const NODE_SYNC_INTERVAL = 300000;
 const MAX_RETRIES = 5;
-const MAX_HEARTBEAT_FAILURES = 3;  // Số lần heartbeat thất bại liên tiếp trước khi coi node là chết
+const MAX_HEARTBEAT_FAILURES = 3;
 
-// ─── Helper: canonical JSON (sắp xếp key alphabet) ─────
+// ─── Helper: canonical JSON ─────────────────────────────
 function canonicalStringify(obj) {
   if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
   if (Array.isArray(obj)) return '[' + obj.map(canonicalStringify).join(',') + ']';
@@ -31,7 +31,7 @@ function canonicalStringify(obj) {
   return '{' + pairs.join(',') + '}';
 }
 
-// ─── TLS Agent (cho phép self-signed khi fallback) ─────────────
+// ─── TLS Agent ────────────────────────────────────────────
 function makeSecureHttpsAgent(hostname, allowUnauthorized = false) {
   return new https.Agent({
     rejectUnauthorized: !allowUnauthorized,
@@ -69,7 +69,7 @@ class BackupClient {
     this.restored = false;
     this.activeServers = new Set();
     this.heartbeatLogCounter = {};
-    this.heartbeatFailureCount = {};  // Đếm số lần heartbeat thất bại liên tiếp
+    this.heartbeatFailureCount = {};
     this.knownHosts = new Set(this.servers.map(s => s.host));
     this.retryCount = {};
     this.failedNodes = new Set();
@@ -91,7 +91,6 @@ class BackupClient {
     this.syncNodesFromServer();
   }
 
-  // ==================== FIX: Xử lý cả object và array từ API ====================
   syncNodesFromServer() {
     const port = process.env.PORT || 3000;
     console.log('🔍 Scanning for dynamic backup nodes...');
@@ -106,25 +105,20 @@ class BackupClient {
             return;
           }
 
-          // ─── Lấy danh sách URL từ nodes ──────────────────────────
           let nodeUrls = [];
           if (Array.isArray(parsed.nodes)) {
-            // Trường hợp nodes là mảng: lấy field 'url' từ mỗi object
             nodeUrls = parsed.nodes
               .filter(item => item && typeof item.url === 'string')
               .map(item => item.url);
           } else if (typeof parsed.nodes === 'object') {
-            // Trường hợp nodes là object: lấy keys
             nodeUrls = Object.keys(parsed.nodes).filter(key => typeof key === 'string');
           } else {
             console.log('ℹ️ Invalid nodes format from /api/backup/nodes');
             return;
           }
 
-          // ─── Xử lý từng URL ──────────────────────────────────────
           let found = 0;
           for (const rawUrl of nodeUrls) {
-            // Chuẩn hóa URL
             let urlStr = rawUrl.trim();
             if (!urlStr.startsWith('http://') && !urlStr.startsWith('https://')) {
               urlStr = 'https://' + urlStr;
@@ -139,12 +133,10 @@ class BackupClient {
             }
 
             const host = parsedUrl.hostname;
-            // Cho phép node bị fail trước đó kết nối lại
             if (!this.knownHosts.has(host) || this.failedNodes.has(host)) {
               const isStatic = this.staticServers.some(s => s.host === host);
               if (isStatic) continue;
 
-              // Xóa marker permanent-dead để node có thể reconnect
               this.failedNodes.delete(host);
 
               const newServer = {
@@ -230,7 +222,6 @@ class BackupClient {
             console.log(`📥 [TCP] Restoring from backup (${users} users)...`);
             db.importFullState(msg.state);
             this.restored = true;
-            // Re-create system accounts after restore
             ['swap_holding', 'swap_liquidity', 'mempool_holding', 'node_fees'].forEach(name => {
               if (!db.getUser(name)) {
                 const pin = crypto.randomBytes(16).toString('hex');
@@ -274,7 +265,7 @@ class BackupClient {
     if (this.snapshotTimers[serverKey]) { clearInterval(this.snapshotTimers[serverKey]); delete this.snapshotTimers[serverKey]; }
   }
 
-  // ==================== Lấy public key dài hạn của server ====================
+  // ==================== Lấy public key ====================
   async fetchServerPublicKey(server, agent) {
     const httpModule = server.protocol === 'https' ? https : http;
     const serverKey = `${server.host}:${server.port}`;
@@ -307,7 +298,7 @@ class BackupClient {
     });
   }
 
-  // ==================== DH Exchange (có fallback) ====================
+  // ==================== DH Exchange ====================
   async performSecureDHExchange(server, serverKey, agent) {
     let serverPubKey = this.serverPublicKeys.get(serverKey);
     if (!serverPubKey) {
@@ -326,7 +317,7 @@ class BackupClient {
     const payload = canonicalStringify({
       clientId,
       clientPublicKey: clientDHKeys.publicKey,
-      token: server.token
+      token: server.token  // ✅ CHỈ GỬI TOKEN TRONG DH EXCHANGE
     });
 
     return new Promise((resolve) => {
@@ -403,6 +394,7 @@ class BackupClient {
     });
   }
 
+  // ─── sendWithToken (giữ nguyên) ──────────────────────────
   sendWithToken(method, path, bodyObj, server, agent, isEmpty) {
     bodyObj.token = server.token;
     if (isEmpty !== undefined) { bodyObj.empty = isEmpty; }
@@ -417,15 +409,21 @@ class BackupClient {
     return { payload, headers };
   }
 
+  // ✅ FIX: sendWithDH - KHÔNG gửi token trong body
   sendWithDH(method, path, bodyObj, session, isEmpty) {
-    bodyObj.token = BACKUP_TOKEN;
-    if (isEmpty !== undefined) { bodyObj.empty = isEmpty; }
-    const payload = canonicalStringify(bodyObj);
+    // ✅ Tạo bản sao KHÔNG có token
+    const cleanBody = { ...bodyObj };
+    delete cleanBody.token;  // ✅ XÓA token khỏi body!
+    
+    if (isEmpty !== undefined) { cleanBody.empty = isEmpty; }
+    
+    const payload = canonicalStringify(cleanBody);
     const headers = {
       'Content-Type': 'application/json',
       'User-Agent': 'ChocoHub-BackupClient/1.0',
       'ngrok-skip-browser-warning': '1'
     };
+    
     if (session) {
       const timestamp = Date.now().toString();
       const bodyStr = method === 'POST' ? payload : '';
@@ -434,12 +432,19 @@ class BackupClient {
       headers['x-client-id'] = session.clientId;
       headers['x-timestamp'] = timestamp;
       headers['x-signature'] = signature;
+      
+      // Debug log
+      console.log(`🔐 [DH] Signed ${method} ${path} with clientId ${session.clientId.substring(0, 30)}...`);
+      console.log(`🔍 Payload: ${payload.substring(0, 100)}...`);
+      console.log(`🔍 Has token? ${payload.includes('"token"') ? '⚠️ YES' : '✅ NO'}`);
     }
+    
     return { payload, headers };
   }
 
   sendSnapshotNow(server, serverKey, agent, session, useDH) {
     const httpModule = server.protocol === 'https' ? https : http;
+    // ✅ SNAPSHOT payload sẽ được xử lý bởi sendWithDH (xóa token)
     const snapshotPayload = { type: 'FULL_SNAPSHOT', token: server.token, state: db.exportFullState() };
     let payload, headers;
     if (useDH && session) {
@@ -473,6 +478,7 @@ class BackupClient {
           this.ensureHeartbeatAndSnapshot(server, serverKey, agent, session, useDH);
         } else {
           console.error(`❌ Failed to send snapshot to ${serverKey}: ${res.statusCode}`);
+          console.error(`📥 Response: ${body.substring(0, 200)}`);
           this.handleConnectionFailure(server, () => this.sendSnapshotNow(server, serverKey, agent, session, useDH));
         }
       });
@@ -505,6 +511,7 @@ class BackupClient {
     });
   }
 
+  // ✅ FIX: launchReadyProtocol - KHÔNG gửi token trong body
   launchReadyProtocol(server, serverKey, httpModule, agent, session, useDH) {
     const tryReady = () => {
       if (this.restored) {
@@ -512,7 +519,8 @@ class BackupClient {
         return;
       }
 
-      const readyPayload = { type: 'READY', token: server.token };
+      // ✅ KHÔNG có token trong payload!
+      const readyPayload = { type: 'READY' };
       const isEmpty = db.getSeq() === 0;
 
       let payload, headers;
@@ -521,10 +529,15 @@ class BackupClient {
         payload = result.payload;
         headers = result.headers;
       } else {
-        const result = this.sendWithToken('POST', '/api/backup/sync', readyPayload, server, agent, isEmpty);
+        // ⚠️ Fallback token mode - vẫn gửi token (kém an toàn)
+        const result = this.sendWithToken('POST', '/api/backup/sync', { type: 'READY' }, server, agent, isEmpty);
         payload = result.payload;
         headers = result.headers;
       }
+
+      console.log(`📤 [${useDH ? 'DH' : 'TOKEN'}] Sending READY to ${serverKey}`);
+      console.log(`🔍 Payload: ${payload.substring(0, 150)}...`);
+      console.log(`🔍 Has token? ${payload.includes('"token"') ? '⚠️ YES' : '✅ NO'}`);
 
       const req = httpModule.request({
         hostname: server.host,
@@ -543,6 +556,9 @@ class BackupClient {
             return;
           }
 
+          console.log(`📥 Response from ${serverKey}: status ${res.statusCode}`);
+          console.log(`📥 Body: ${body.substring(0, 200)}`);
+
           if (res.statusCode === 200 && body.trim()) {
             try {
               const msg = JSON.parse(body);
@@ -557,7 +573,6 @@ class BackupClient {
                   console.log(`📥 [${useDH ? 'DH' : 'TOKEN'}] Restoring from ${serverKey} (${users} users)...`);
                   db.importFullState(msg.state);
                   this.restored = true;
-                  // Re-create system accounts after restore
                   ['swap_holding', 'swap_liquidity', 'mempool_holding', 'node_fees'].forEach(name => {
                     if (!db.getUser(name)) {
                       const pin = crypto.randomBytes(16).toString('hex');
@@ -574,17 +589,7 @@ class BackupClient {
               }
               if (msg.type === 'READY_ACK') {
                 console.log(`🔗 [${useDH ? 'DH' : 'TOKEN'}] Connected to ${serverKey} (main already has data)`);
-                // NOTE: READY_ACK only means the REMOTE server already has state
-                // and doesn't need a snapshot pushed to it right now. It says
-                // nothing about whether OUR local DB has data. Do NOT set
-                // this.restored = true unconditionally here — that previously
-                // caused a node booting with an empty DB to treat itself as
-                // "restored" the moment any backup replied READY_ACK, skipping
-                // real FULL_SNAPSHOT recovery from other backups and then
-                // pushing its empty state out, overwriting good backups.
                 if (db.getSeq() > 0) {
-                  // We already have local data (not a fresh/empty boot) — fine to
-                  // consider ourselves settled for this server.
                   this.restored = true;
                 }
                 this.retryCount[serverKey] = 0;
@@ -642,7 +647,6 @@ class BackupClient {
     }
   }
 
-  // 🔁 Xử lý thất bại kết nối – áp dụng cho tất cả node (static & dynamic)
   handleConnectionFailure(server, retryFn) {
     const serverKey = `${server.host}:${server.port}`;
     this.retryCount[serverKey] = (this.retryCount[serverKey] || 0) + 1;
@@ -794,7 +798,8 @@ class BackupClient {
     if (this.heartbeatFailureCount[serverKey] === undefined) this.heartbeatFailureCount[serverKey] = 0;
 
     const heartbeat = () => {
-      const pingPayload = { type: 'PING', token: server.token };
+      // ✅ PING KHÔNG có token trong body
+      const pingPayload = { type: 'PING' };
       const { payload, headers } = this.sendWithDH('POST', '/api/backup/sync', pingPayload, session);
 
       const req = httpModule.request({
@@ -849,13 +854,15 @@ class BackupClient {
     heartbeat();
   }
 
+  // ✅ FIX: startHttpSnapshotDH - KHÔNG gửi token trong body
   startHttpSnapshotDH(server, serverKey, agent, session) {
     const httpModule = server.protocol === 'https' ? https : http;
     let lastSnapshotHash = null;
 
     const sendSnapshot = () => {
       const state = db.exportFullState();
-      const snapshotPayload = { type: 'FULL_SNAPSHOT', token: server.token, state };
+      // ✅ SNAPSHOT payload sẽ được xử lý bởi sendWithDH (xóa token)
+      const snapshotPayload = { type: 'FULL_SNAPSHOT', state };
       const { payload, headers } = this.sendWithDH('POST', '/api/backup/sync', snapshotPayload, session);
       const hash = crypto.createHash('sha256').update(payload).digest('hex').substring(0, 16);
 
