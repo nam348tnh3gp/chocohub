@@ -38,8 +38,7 @@ jobs:
             --without-npm \
             --shared \
             --prefix=/usr/local \
-            --with-intl=system-icu \
-            --with-arm64-fpu=neon
+            --with-intl=system-icu
 
       - name: Build
         run: |
