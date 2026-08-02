@@ -1,6 +1,6 @@
 # backup.py – Backup Server (Flask) với canonical JSON, DH + RSA, history, chống ghi đè
-# ✅ FIX: Không gửi token trong body của /api/backup/sync (cả request và response)
-# ✅ FIX: Token chỉ gửi trong DH exchange (1 lần)
+# ✅ FIX: Loại bỏ token khỏi body trước khi tính HMAC
+# ✅ FIX: Không gửi token trong response
 
 import os
 import sys
@@ -198,15 +198,21 @@ def verify_dh_signature():
     if not session:
         return
     timestamp = request.headers.get('X-Timestamp', '')
+    
+    # ✅ FIX: Loại bỏ token khỏi body trước khi canonicalize
+    body_json = request.get_json(silent=True)
+    if body_json and isinstance(body_json, dict) and 'token' in body_json:
+        body_copy = body_json.copy()
+        del body_copy['token']
+    else:
+        body_copy = body_json
+    
     body_str = ''
-    if request.method == 'POST':
-        try:
-            body_json = request.get_json()
-            if body_json:
-                body_str = canonical_stringify(body_json)
-        except:
-            body_str = request.get_data(as_text=True)
+    if request.method == 'POST' and body_copy is not None:
+        body_str = canonical_stringify(body_copy)
+    
     message = f"{request.method}{request.path}{timestamp}{body_str}"
+    
     if not DHExchange.verify(message, signature, session['session_key']):
         # Xoá session cũ để client phải tạo lại
         del dh_sessions[client_id]
@@ -216,7 +222,7 @@ def verify_dh_signature():
         return response
 
 # ------------------------------------------------------------
-# 7. Routes public (giữ nguyên)
+# 7. Routes public
 # ------------------------------------------------------------
 @app.route('/api/backup/health', methods=['GET'])
 def health():
@@ -342,7 +348,6 @@ def dh_exchange():
             'generator': server_dh_keys['generator'],
             'group': server_dh_keys['group'],
             'serverSignature': server_signature
-            # ❌ KHÔNG GỬI TOKEN TRONG RESPONSE NÀY
         })
     except Exception as e:
         print(f'❌ DH exchange error: {e}')
@@ -350,7 +355,7 @@ def dh_exchange():
         return jsonify({'status': 'error', 'message': 'Key exchange failed'}), 500
 
 # ------------------------------------------------------------
-# 9. Đồng bộ snapshot – KHÔNG CẦN TOKEN TRONG BODY (request và response)
+# 9. Đồng bộ snapshot – giữ nguyên logic kiểm tra token fallback
 # ------------------------------------------------------------
 @app.route('/api/backup/sync', methods=['POST'])
 def sync():
@@ -358,20 +363,15 @@ def sync():
         return jsonify({'status': 'error', 'message': 'JSON required'}), 400
     data = request.get_json()
     msg_type = data.get('type')
+    token = data.get('token', '')
     client_id = request.headers.get('X-Client-Id')
 
-    # ✅ Kiểm tra session (không cần token trong body)
     session = dh_sessions.get(client_id) if client_id else None
-    
-    # ✅ Nếu không có session → từ chối (client phải DH exchange trước)
-    if not session:
-        return jsonify({
-            'status': 'error', 
-            'message': 'No DH session. Please perform DH exchange first'
-        }), 401
-
-    # ✅ Không cần kiểm tra token trong body nữa!
-    # Token đã được xác thực qua DH exchange + HMAC middleware
+    # ✅ Cho phép token fallback khi không có session
+    if not session and token != BACKUP_TOKEN:
+        if client_id and client_id in dh_sessions:
+            del dh_sessions[client_id]
+        return jsonify({'status': 'error', 'message': 'Invalid token or no session'}), 401
 
     if msg_type == 'READY':
         client_empty = data.get('empty', False)
@@ -382,10 +382,9 @@ def sync():
             snap = get_snapshot()
             if snap and snap.get('users'):
                 print(f'📤 Sending full snapshot ({len(snap["users"])} users)')
-                # ✅ KHÔNG GỬI TOKEN TRONG RESPONSE!
+                # ✅ FIX: KHÔNG gửi token trong response!
                 return jsonify({
                     'type': 'FULL_SNAPSHOT',
-                    # ❌ XÓA 'token': BACKUP_TOKEN,
                     'state': snap
                 })
             else:
@@ -426,7 +425,7 @@ def sync():
         return jsonify({'status': 'error', 'message': f'Unknown type: {msg_type}'}), 400
 
 # ------------------------------------------------------------
-# 10. Gửi snapshot lên main server – KHÔNG GỬI TOKEN TRONG BODY
+# 10. Gửi snapshot lên main server – retry khi gặp 401
 # ------------------------------------------------------------
 main_server_public_key = None
 
@@ -443,7 +442,6 @@ def fetch_main_server_public_key():
     return False
 
 def send_snapshot_to_main_server(retry_count=0):
-    """Gửi snapshot lên main server, KHÔNG gửi token trong body"""
     snap = get_snapshot()
     if not snap or not snap.get('users'):
         print('⚠️ No snapshot data to send')
@@ -457,16 +455,13 @@ def send_snapshot_to_main_server(retry_count=0):
     client_id = f'backup-{socket.gethostname()}-{os.getpid()}'
 
     try:
-        # 1. Tạo cặp DH tạm thời
         client_dh = DHExchange.generate_standard_keypair('modp2048')
-
-        # 2. DH exchange với main server (gửi token 1 lần)
         dh_resp = requests.post(
             f'{MAIN_SERVER_URL}/api/dh/exchange',
             json={
                 'clientId': client_id,
                 'clientPublicKey': client_dh['public_key'],
-                'token': BACKUP_TOKEN  # ✅ CHỈ GỬI TOKEN TRONG DH EXCHANGE
+                'token': BACKUP_TOKEN
             },
             timeout=10,
             verify=True
@@ -480,7 +475,6 @@ def send_snapshot_to_main_server(retry_count=0):
             print('❌ Invalid DH response from main server')
             return
 
-        # 3. Xác thực chữ ký main server
         server_pub_data = canonical_stringify({
             'publicKey': dh_data['serverPublicKey'],
             'prime': dh_data['prime'],
@@ -491,7 +485,6 @@ def send_snapshot_to_main_server(retry_count=0):
             print('❌ Main server signature verification failed!')
             return
 
-        # 4. Tính session key
         shared = DHExchange.compute_shared_secret(
             client_dh['private_key'],
             dh_data['serverPublicKey'],
@@ -501,20 +494,12 @@ def send_snapshot_to_main_server(retry_count=0):
         session_key = DHExchange.derive_session_key(shared)
         print('🔐 Created new DH session with main server')
 
-        # 5. Tạo payload KHÔNG CÓ TOKEN
         payload = {
             'type': 'FULL_SNAPSHOT',
-            # ❌ XÓA 'token': BACKUP_TOKEN,
+            'token': BACKUP_TOKEN,
             'state': snap
         }
         body_str = canonical_stringify(payload)
-        
-        # Debug: kiểm tra token trong body
-        if 'token' in body_str.lower():
-            print('⚠️ WARNING: Token found in body!')
-        else:
-            print('✅ No token in body')
-        
         timestamp = str(int(time.time()))
         message = f'POST/api/backup/sync{timestamp}{body_str}'
         signature = DHExchange.sign(message, session_key)
@@ -527,7 +512,6 @@ def send_snapshot_to_main_server(retry_count=0):
             'X-Signature': signature
         }
 
-        # 6. Gửi snapshot
         print(f'📤 Sending snapshot to main server ({len(snap["users"])} users, {len(body_str)/1024:.1f} KB)...')
         resp = requests.post(
             f'{MAIN_SERVER_URL}/api/backup/sync',
@@ -539,7 +523,6 @@ def send_snapshot_to_main_server(retry_count=0):
         if resp.status_code == 200:
             print('✅ Snapshot sent to main server')
         elif resp.status_code == 401 and retry_count == 0:
-            # Lỗi xác thực, thử lại một lần nữa (session mới)
             print('⚠️ Received 401, retrying with fresh session...')
             send_snapshot_to_main_server(retry_count=1)
         else:
@@ -623,8 +606,8 @@ if __name__ == '__main__':
     print('║  Anti-overwrite: HASH-BASED         ║')
     print('║  Outgoing DH: FRESH SESSION + RETRY ║')
     print('║  Incoming: auto-clear invalid sess  ║')
-    print('║  Token in body: ❌ REMOVED          ║')
     print('║  Token in response: ❌ REMOVED      ║')
+    print('║  HMAC ignores token in body         ║')
     print('╚══════════════════════════════════════╝')
     print('')
 
