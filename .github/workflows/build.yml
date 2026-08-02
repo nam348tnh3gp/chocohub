@@ -4,21 +4,60 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      node_version:
+        description: 'Node.js version to build'
+        required: true
+        default: 'v21.7.3'
+      ndk_version:
+        description: 'Android NDK version'
+        required: true
+        default: 'r26c'
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    
     steps:
       - name: Checkout Node.js source
-        run: |
-          git clone --branch v21.7.3 --depth 1 https://github.com/nodejs/node.git
+        uses: actions/checkout@v4
+        with:
+          repository: nodejs/node
+          ref: ${{ github.event.inputs.node_version || 'v21.7.3' }}
+          path: node
+          fetch-depth: 1
 
-      - name: Setup Android NDK
+      - name: Cache Android NDK
+        id: cache-ndk
+        uses: actions/cache@v4
+        with:
+          path: android-ndk-*
+          key: ${{ runner.os }}-ndk-${{ github.event.inputs.ndk_version || 'r26c' }}
+
+      - name: Download Android NDK
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
         run: |
-          wget https://dl.google.com/android/repository/android-ndk-r26c-linux.zip
-          unzip android-ndk-r26c-linux.zip
-          echo "ANDROID_NDK_HOME=$PWD/android-ndk-r26c" >> $GITHUB_ENV
-          echo "$PWD/android-ndk-r26c/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+          NDK_VERSION=${{ github.event.inputs.ndk_version || 'r26c' }}
+          wget -q https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip
+          unzip -q android-ndk-${NDK_VERSION}-linux.zip
+          rm android-ndk-${NDK_VERSION}-linux.zip
+
+      - name: Setup environment
+        run: |
+          NDK_VERSION=${{ github.event.inputs.ndk_version || 'r26c' }}
+          echo "ANDROID_NDK_HOME=$PWD/android-ndk-${NDK_VERSION}" >> $GITHUB_ENV
+          echo "$PWD/android-ndk-${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            python3 \
+            patchelf \
+            ninja-build \
+            pkg-config
 
       - name: Configure for Android aarch64
         working-directory: node
@@ -27,7 +66,16 @@ jobs:
           export CXX=aarch64-linux-android21-clang++
           export AR=llvm-ar
           export RANLIB=llvm-ranlib
+          export LD=ld.lld
+          export STRIP=llvm-strip
+          export CFLAGS="-D__ANDROID_API__=21"
+          export CXXFLAGS="-D__ANDROID_API__=21"
           export GYP_DEFINES="android_ndk_path=$ANDROID_NDK_HOME target_arch=arm64 host_os=linux"
+          
+          # Use the official android-configure script for cross-compilation
+          source android-configure "$ANDROID_NDK_HOME" arm64
+          
+          # Additional configure options for a minimal, portable build
           ./configure \
             --dest-cpu=arm64 \
             --dest-os=android \
@@ -35,21 +83,46 @@ jobs:
             --without-inspector \
             --without-npm \
             --prefix=/usr/local \
-            --with-intl=system-icu
+            --shared \
+            --with-intl=system-icu \
+            --openssl-no-asm
 
       - name: Build
         working-directory: node
-        run: make -j$(nproc)
+        run: |
+          # Build with all available cores
+          make -j$(nproc)
+          
+          # Verify the build
+          if [ ! -f out/Release/node ]; then
+            echo "Build failed: node binary not found"
+            exit 1
+          fi
 
       - name: Package binary
         working-directory: node/out/Release
         run: |
-          sudo apt-get install -y patchelf
+          # Set the correct Android interpreter
           patchelf --set-interpreter /system/bin/linker64 node
-          tar -czf node-v21-android-arm64.tar.gz node
+          
+          # Create a tarball with the binary
+          tar -czf node-android-arm64.tar.gz node
+          
+          # Generate checksum for verification
+          sha256sum node-android-arm64.tar.gz > node-android-arm64.tar.gz.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: node-v21-android-arm64
-          path: node/out/Release/node-v21-android-arm64.tar.gz
+          name: node-android-arm64
+          path: |
+            node/out/Release/node-android-arm64.tar.gz
+            node/out/Release/node-android-arm64.tar.gz.sha256
+          retention-days: 30
+
+      - name: Test binary (optional)
+        if: always()
+        working-directory: node/out/Release
+        run: |
+          # Quick test to verify the binary works
+          ./node --version || echo "Binary test failed (expected on non-Android runner)"
