@@ -27,11 +27,13 @@ jobs:
           export CXX=aarch64-linux-android21-clang++
           export AR=aarch64-linux-android-ar
           export RANLIB=aarch64-linux-android-ranlib
+          export android_ndk_path=$ANDROID_NDK_HOME
           cd node
           ./configure \
             --dest-cpu=arm64 \
             --dest-os=android \
             --cross-compiling \
+            --android-ndk=$ANDROID_NDK_HOME \
             --without-inspector \
             --without-npm \
             --shared \
