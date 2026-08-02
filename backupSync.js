@@ -91,6 +91,7 @@ class BackupClient {
     this.syncNodesFromServer();
   }
 
+  // ==================== FIX: Xử lý cả object và array từ API ====================
   syncNodesFromServer() {
     const port = process.env.PORT || 3000;
     console.log('🔍 Scanning for dynamic backup nodes...');
@@ -100,51 +101,80 @@ class BackupClient {
       res.on('end', () => {
         try {
           const parsed = JSON.parse(data);
-          if (parsed.status === 'success' && parsed.nodes) {
-            const urls = Object.keys(parsed.nodes);
-            let found = 0;
-            for (const url of urls) {
-              const parsedUrl = new URL(url);
-              const host = parsedUrl.hostname;
-              // Re-admit a previously-failed (discarded) node if it re-registers,
-              // otherwise only admit brand-new hosts. Healthy known hosts are
-              // skipped so we don't create duplicate connections.
-              if (!this.knownHosts.has(host) || this.failedNodes.has(host)) {
-                const isStatic = this.staticServers.some(s => s.host === host);
-                if (isStatic) continue;
+          if (parsed.status !== 'success' || !parsed.nodes) {
+            console.log('ℹ️ No nodes data from /api/backup/nodes');
+            return;
+          }
 
-                // Clear the permanent-dead marker so a re-registered node can
-                // reconnect without requiring a server restart.
-                this.failedNodes.delete(host);
+          // ─── Lấy danh sách URL từ nodes ──────────────────────────
+          let nodeUrls = [];
+          if (Array.isArray(parsed.nodes)) {
+            // Trường hợp nodes là mảng: lấy field 'url' từ mỗi object
+            nodeUrls = parsed.nodes
+              .filter(item => item && typeof item.url === 'string')
+              .map(item => item.url);
+          } else if (typeof parsed.nodes === 'object') {
+            // Trường hợp nodes là object: lấy keys
+            nodeUrls = Object.keys(parsed.nodes).filter(key => typeof key === 'string');
+          } else {
+            console.log('ℹ️ Invalid nodes format from /api/backup/nodes');
+            return;
+          }
 
-                const newServer = {
-                  token: BACKUP_TOKEN,
-                  protocol: parsedUrl.protocol.replace(':', ''),
-                  host: host,
-                  port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
-                  path: parsedUrl.pathname || '/',
-                  isDynamic: true,
-                  dhSupported: true
-                };
-                console.log(`🆕 New backup node discovered: ${host} (from dynamic registration)`);
-                this.servers.push(newServer);
-                this.knownHosts.add(host);
-                this.connect(newServer);
-                found++;
-              }
+          // ─── Xử lý từng URL ──────────────────────────────────────
+          let found = 0;
+          for (const rawUrl of nodeUrls) {
+            // Chuẩn hóa URL
+            let urlStr = rawUrl.trim();
+            if (!urlStr.startsWith('http://') && !urlStr.startsWith('https://')) {
+              urlStr = 'https://' + urlStr;
             }
-            if (found === 0) {
-              console.log('ℹ️ No new dynamic nodes found.');
-            } else {
-              console.log(`✅ Added ${found} new dynamic node(s).`);
+
+            let parsedUrl;
+            try {
+              parsedUrl = new URL(urlStr);
+            } catch (e) {
+              console.warn(`⚠️ Skipping invalid node URL: ${rawUrl} (${e.message})`);
+              continue;
             }
+
+            const host = parsedUrl.hostname;
+            // Cho phép node bị fail trước đó kết nối lại
+            if (!this.knownHosts.has(host) || this.failedNodes.has(host)) {
+              const isStatic = this.staticServers.some(s => s.host === host);
+              if (isStatic) continue;
+
+              // Xóa marker permanent-dead để node có thể reconnect
+              this.failedNodes.delete(host);
+
+              const newServer = {
+                token: BACKUP_TOKEN,
+                protocol: parsedUrl.protocol.replace(':', ''),
+                host: host,
+                port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+                path: parsedUrl.pathname || '/',
+                isDynamic: true,
+                dhSupported: true
+              };
+              console.log(`🆕 New backup node discovered: ${host} (from dynamic registration)`);
+              this.servers.push(newServer);
+              this.knownHosts.add(host);
+              this.connect(newServer);
+              found++;
+            }
+          }
+
+          if (found === 0) {
+            console.log('ℹ️ No new dynamic nodes found.');
+          } else {
+            console.log(`✅ Added ${found} new dynamic node(s).`);
           }
         } catch (e) {
           console.error('❌ Failed to parse dynamic nodes:', e.message);
         }
       });
     });
-    req.on('error', () => {});
+    req.on('error', (err) => console.warn('⚠️ Node sync request error:', err.message));
     req.setTimeout(5000);
   }
 
