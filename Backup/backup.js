@@ -1,6 +1,6 @@
 // backup.js – Backup Server (Node.js) với DH + canonical JSON + REQUEST_SNAPSHOT
-// ✅ FIX: Không gửi token trong body của /api/backup/sync (cả request và response)
-// ✅ FIX: Token chỉ gửi trong DH exchange (1 lần)
+// ✅ FIX: Loại bỏ token khỏi body trước khi tính HMAC
+// ✅ FIX: Không gửi token trong response
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -156,10 +156,23 @@ app.use((req, res, next) => {
   if (!session) return next();
 
   const timestamp = req.headers['x-timestamp'] || '';
-  const bodyStr = req.method === 'POST' ? canonicalStringify(req.body) : '';
+  
+  // ✅ FIX: Loại bỏ token khỏi body trước khi canonicalize
+  let bodyForSign = req.body;
+  if (bodyForSign && typeof bodyForSign === 'object' && bodyForSign.token !== undefined) {
+    // Tạo bản sao và xóa token
+    const cleanBody = { ...bodyForSign };
+    delete cleanBody.token;
+    bodyForSign = cleanBody;
+  }
+  
+  const bodyStr = req.method === 'POST' ? canonicalStringify(bodyForSign) : '';
   const message = `${req.method}${req.path}${timestamp}${bodyStr}`;
 
   if (!DHExchange.verify(message, signature, session.sessionKey)) {
+    // Xóa session để client tạo lại
+    dhSessions.delete(clientId);
+    console.log(`⚠️ Invalid HMAC signature from ${clientId}, session cleared`);
     return res.status(401).json({ status: 'error', message: 'Invalid HMAC signature' });
   }
   next();
@@ -263,7 +276,6 @@ app.post('/api/dh/exchange', (req, res) => {
       generator: serverDHKeys.generator,
       group: serverDHKeys.group,
       serverSignature: signature
-      // ❌ KHÔNG GỬI TOKEN TRONG RESPONSE NÀY
     });
   } catch (e) {
     console.error('❌ DH exchange error:', e);
@@ -272,28 +284,21 @@ app.post('/api/dh/exchange', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════
-// BACKUP SYNC – KHÔNG CẦN TOKEN TRONG BODY (request và response)
+// BACKUP SYNC – Giữ nguyên logic kiểm tra token fallback
 // ═══════════════════════════════════════════════════
 app.post('/api/backup/sync', (req, res) => {
   const data = req.body;
   if (!data || !data.type) return res.status(400).json({ status: 'error', message: 'Invalid request' });
 
   const msgType = data.type;
+  const token = data.token || '';
   const clientId = req.headers['x-client-id'] || '';
 
-  // ✅ Kiểm tra session (không cần token trong body)
   const session = clientId ? dhSessions.get(clientId) : null;
-  
-  // ✅ Nếu không có session → từ chối (client phải DH exchange trước)
-  if (!session) {
-    return res.status(401).json({ 
-      status: 'error', 
-      message: 'No DH session. Please perform DH exchange first' 
-    });
+  // ✅ Cho phép token fallback khi không có session
+  if (!session && token !== BACKUP_TOKEN) {
+    return res.status(401).json({ status: 'error', message: 'Invalid token or no session' });
   }
-
-  // ✅ Không cần kiểm tra token trong body nữa!
-  // Token đã được xác thực qua DH exchange + HMAC middleware
 
   if (msgType === 'READY') {
     const clientEmpty = data.empty === true;
@@ -305,12 +310,8 @@ app.post('/api/backup/sync', (req, res) => {
       const snap = getSnapshot();
       if (snap && snap.users && snap.users.length > 0) {
         console.log(`📤 Sending full snapshot (${snap.users.length} users)`);
-        // ✅ KHÔNG GỬI TOKEN TRONG RESPONSE!
-        return res.json({ 
-          type: 'FULL_SNAPSHOT', 
-          // ❌ XÓA token: BACKUP_TOKEN,
-          state: snap 
-        });
+        // ✅ FIX: KHÔNG gửi token trong response!
+        return res.json({ type: 'FULL_SNAPSHOT', state: snap });
       } else {
         console.log('ℹ️ Both empty, sending READY_ACK');
         return res.json({ type: 'READY_ACK', status: 'success', message: 'ready but empty' });
@@ -335,19 +336,14 @@ app.post('/api/backup/sync', (req, res) => {
     const newSize = countSnapshotSize(state);
     const current = getSnapshot();
 
-    // Tính hash của snapshot mới
     const newHash = crypto.createHash('sha256').update(canonicalStringify(state)).digest('hex');
 
     if (current && current.users && current.users.length > 0) {
       const currentHash = crypto.createHash('sha256').update(canonicalStringify(current)).digest('hex');
-
-      // Nếu hash giống hệt -> bỏ qua
       if (newHash === currentHash) {
         console.log('⏭ Snapshot identical (same hash), skipping');
         return res.json({ type: 'SNAPSHOT_ACK', status: 'skipped', message: 'Identical' });
       }
-
-      // Chống ghi đè lùi: nếu dữ liệu mới ít hơn 50% -> cảnh báo và bỏ qua
       const currentSize = countSnapshotSize(current);
       if (newSize.total < currentSize.total * 0.5) {
         console.log(`⚠️ SKIP snapshot: ${newSize.total} items < 50% of current ${currentSize.total} items (possible regression)`);
@@ -364,7 +360,7 @@ app.post('/api/backup/sync', (req, res) => {
   }
 });
 
-// ─── Gửi snapshot đến main server (KHÔNG GỬI TOKEN TRONG BODY) ──
+// ─── Gửi snapshot đến main server ────────────────
 let mainServerPublicKey = null;
 
 async function fetchMainServerPublicKey() {
@@ -402,7 +398,7 @@ async function sendSnapshotToMainServer() {
         body: canonicalStringify({
           clientId,
           clientPublicKey: clientDH.publicKey,
-          token: BACKUP_TOKEN  // ✅ CHỈ GỬI TOKEN TRONG DH EXCHANGE
+          token: BACKUP_TOKEN
         })
       });
       if (resp.ok) {
@@ -432,12 +428,7 @@ async function sendSnapshotToMainServer() {
     }
   }
 
-  // ✅ KHÔNG GỬI TOKEN TRONG BODY!
-  const payload = { 
-    type: 'FULL_SNAPSHOT', 
-    // ❌ XÓA token: BACKUP_TOKEN,
-    state: snap 
-  };
+  const payload = { type: 'FULL_SNAPSHOT', token: BACKUP_TOKEN, state: snap };
   const bodyString = canonicalStringify(payload);
   const headers = {
     'Content-Type': 'application/json',
@@ -453,8 +444,6 @@ async function sendSnapshotToMainServer() {
   }
 
   console.log(`📤 Sending snapshot to main server (${snap.users.length} users, ${(snapSize / 1024).toFixed(1)} KB)...`);
-  console.log('🔍 Body contains token?', bodyString.includes('"token"') ? 'YES' : 'NO');
-  
   try {
     const resp = await fetch(`${MAIN_SERVER_URL}/api/backup/sync`, {
       method: 'POST',
@@ -526,8 +515,8 @@ app.listen(BACKUP_PORT, () => {
   console.log('║  Canonical JSON: ON                 ║');
   console.log('║  REQUEST_SNAPSHOT: ON               ║');
   console.log('║  Anti-overwrite: HASH-BASED         ║');
-  console.log('║  Token in body: ❌ REMOVED          ║');
   console.log('║  Token in response: ❌ REMOVED      ║');
+  console.log('║  HMAC ignores token in body         ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
 
