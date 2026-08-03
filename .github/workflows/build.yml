@@ -48,23 +48,33 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential python3 patchelf ninja-build pkg-config
 
-      - name: Fix c-ares config for Android (Community approach)
+      - name: Fix c-ares config for Android
         working-directory: node
         run: |
-          # Sửa lỗi getifaddrs/freeifaddrs bằng sed (phương pháp từ cộng đồng)
+          # Vô hiệu hóa getifaddrs/freeifaddrs để tránh lỗi trên Android
           sed -i 's/#define HAVE_GETIFADDRS 1/#undef HAVE_GETIFADDRS/g' deps/cares/config/android/ares_config.h
           sed -i 's/#define HAVE_FREEIFADDRS 1/#undef HAVE_FREEIFADDRS/g' deps/cares/config/android/ares_config.h
-          
-          # Sửa lỗi timeval bằng cách định nghĩa HAVE_STRUCT_TIMEVAL (nếu cần)
+          # Đảm bảo định nghĩa HAVE_STRUCT_TIMEVAL để tránh lỗi timeval
           sed -i 's/#undef HAVE_STRUCT_TIMEVAL/#define HAVE_STRUCT_TIMEVAL 1/g' deps/cares/config/android/ares_config.h
 
       - name: Configure for Android aarch64
         working-directory: node
+        shell: bash
         run: |
-          # Sử dụng script android-configure chính thống (cách được khuyến nghị)
-          source android-configure "$ANDROID_NDK_HOME" arm64
-          
-          # Chạy configure với các tùy chọn bổ sung
+          # Thiết lập biến môi trường cho cross‑compilation (thủ công)
+          export ANDROID_NDK_HOME="${{ env.ANDROID_NDK_HOME }}"
+          export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          export CC=aarch64-linux-android21-clang
+          export CXX=aarch64-linux-android21-clang++
+          export AR=llvm-ar
+          export RANLIB=llvm-ranlib
+          export CFLAGS="-D__ANDROID_API__=21"
+          export CXXFLAGS="-D__ANDROID_API__=21"
+          export GYP_DEFINES="android_ndk_path=$ANDROID_NDK_HOME target_arch=arm64 host_os=linux OS=android"
+
+          # Nếu bạn muốn thử dùng script android-configure, hãy bỏ comment dòng sau và comment các export ở trên
+          # . android-configure "$ANDROID_NDK_HOME" arm64
+
           ./configure \
             --dest-cpu=arm64 \
             --dest-os=android \
