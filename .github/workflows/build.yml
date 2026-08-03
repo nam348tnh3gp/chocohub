@@ -51,10 +51,18 @@ jobs:
       - name: Configure for Android aarch64
         working-directory: node
         run: |
-          # Source the official android-configure script
-          source android-configure "$ANDROID_NDK_HOME" arm64
-          
-          # Additional configure options
+          # Thiết lập các biến môi trường cho cross‑compilation (thay thế cho android-configure)
+          export ANDROID_NDK_HOME="${{ env.ANDROID_NDK_HOME }}"
+          export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          export CC=aarch64-linux-android21-clang
+          export CXX=aarch64-linux-android21-clang++
+          export AR=llvm-ar
+          export RANLIB=llvm-ranlib
+          export GYP_DEFINES="android_ndk_path=$ANDROID_NDK_HOME target_arch=arm64 host_os=linux OS=android"
+          export CFLAGS="-D__ANDROID_API__=21"
+          export CXXFLAGS="-D__ANDROID_API__=21"
+
+          # Chạy configure
           ./configure \
             --dest-cpu=arm64 \
             --dest-os=android \
@@ -70,16 +78,12 @@ jobs:
         working-directory: node
         run: |
           make -j$(nproc)
-          # Verify build succeeded
           test -f out/Release/node || (echo "Build failed" && exit 1)
 
       - name: Package binary
         working-directory: node/out/Release
         run: |
-          # Set Android interpreter
           patchelf --set-interpreter /system/bin/linker64 node
-          # Optional: 16KB alignment for Android 15+ compatibility
-          # patchelf --set-page-size 16384 node
           tar -czf node-android-arm64.tar.gz node
           sha256sum node-android-arm64.tar.gz > node-android-arm64.tar.gz.sha256
 
