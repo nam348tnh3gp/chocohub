@@ -57,11 +57,10 @@ jobs:
           export CXX=aarch64-linux-android21-clang++
           export AR=llvm-ar
           export RANLIB=llvm-ranlib
+          export CFLAGS="-D__ANDROID_API__=21 -DHAVE_GETIFADDRS=0"
+          export CXXFLAGS="-D__ANDROID_API__=21 -DHAVE_GETIFADDRS=0"
           export GYP_DEFINES="android_ndk_path=$ANDROID_NDK_HOME target_arch=arm64 host_os=linux OS=android"
-          export CFLAGS="-D__ANDROID_API__=21"
-          export CXXFLAGS="-D__ANDROID_API__=21"
 
-          # Sửa: bỏ system-icu, dùng small-icu để tránh lỗi phiên bản ICU
           ./configure \
             --dest-cpu=arm64 \
             --dest-os=android \
