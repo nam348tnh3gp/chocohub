@@ -51,33 +51,14 @@ jobs:
       - name: Patch c-ares to remove getifaddrs usage
         working-directory: node
         run: |
-          # Tạo file patch
-          cat > deps/cares/src/lib/ares__iface_ips.c.patch << 'EOF'
-          --- a/deps/cares/src/lib/ares__iface_ips.c
-          +++ b/deps/cares/src/lib/ares__iface_ips.c
-          @@ -441,7 +441,7 @@
-               return ARES_ENOTIMP;
-             }
-           #else
-          -  if (getifaddrs(&ifap) != 0) {
-          +  if (1) { // Disable getifaddrs for Android
-               return ARES_ENOTIMP;
-             }
-           #endif
-          @@ -502,7 +502,7 @@
-           #if defined(HAVE_GETIFADDRS) && !defined(_WIN32) && !defined(ANDROID)
-             freeifaddrs(ifap);
-           #else
-          -  (void)ifap;
-          +  (void)ifap; // freeifaddrs not available on Android
-           #endif
-             return status;
-           }
-          EOF
-          # Áp dụng patch
-          patch -p1 < deps/cares/src/lib/ares__iface_ips.c.patch || true
-          # Xóa file patch sau khi áp dụng
-          rm deps/cares/src/lib/ares__iface_ips.c.patch
+          # Tắt getifaddrs trong ares_config.h
+          sed -i 's/#define HAVE_GETIFADDRS 1/#undef HAVE_GETIFADDRS/g' deps/cares/config/android/ares_config.h
+          sed -i 's/#define HAVE_FREEIFADDRS 1/#undef HAVE_FREEIFADDRS/g' deps/cares/config/android/ares_config.h
+
+          # Trực tiếp sửa file nguồn: thay lời gọi getifaddrs thành lệnh trả về lỗi (bỏ qua)
+          sed -i 's/if (getifaddrs(&ifap) != 0) {/if (1) { \/\/ Disable getifaddrs for Android/g' deps/cares/src/lib/ares__iface_ips.c
+          # Vô hiệu hóa freeifaddrs
+          sed -i 's/freeifaddrs(ifap);/\/\/ freeifaddrs not available on Android/g' deps/cares/src/lib/ares__iface_ips.c
 
       - name: Configure for Android aarch64
         working-directory: node
