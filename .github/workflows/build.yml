@@ -48,20 +48,41 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential python3 patchelf ninja-build pkg-config
 
-      - name: Fix c-ares config for Android
+      - name: Patch c-ares to remove getifaddrs usage
         working-directory: node
         run: |
-          # Vô hiệu hóa getifaddrs/freeifaddrs để tránh lỗi trên Android
-          sed -i 's/#define HAVE_GETIFADDRS 1/#undef HAVE_GETIFADDRS/g' deps/cares/config/android/ares_config.h
-          sed -i 's/#define HAVE_FREEIFADDRS 1/#undef HAVE_FREEIFADDRS/g' deps/cares/config/android/ares_config.h
-          # Đảm bảo định nghĩa HAVE_STRUCT_TIMEVAL để tránh lỗi timeval
-          sed -i 's/#undef HAVE_STRUCT_TIMEVAL/#define HAVE_STRUCT_TIMEVAL 1/g' deps/cares/config/android/ares_config.h
+          # Tạo file patch
+          cat > deps/cares/src/lib/ares__iface_ips.c.patch << 'EOF'
+          --- a/deps/cares/src/lib/ares__iface_ips.c
+          +++ b/deps/cares/src/lib/ares__iface_ips.c
+          @@ -441,7 +441,7 @@
+               return ARES_ENOTIMP;
+             }
+           #else
+          -  if (getifaddrs(&ifap) != 0) {
+          +  if (1) { // Disable getifaddrs for Android
+               return ARES_ENOTIMP;
+             }
+           #endif
+          @@ -502,7 +502,7 @@
+           #if defined(HAVE_GETIFADDRS) && !defined(_WIN32) && !defined(ANDROID)
+             freeifaddrs(ifap);
+           #else
+          -  (void)ifap;
+          +  (void)ifap; // freeifaddrs not available on Android
+           #endif
+             return status;
+           }
+          EOF
+          # Áp dụng patch
+          patch -p1 < deps/cares/src/lib/ares__iface_ips.c.patch || true
+          # Xóa file patch sau khi áp dụng
+          rm deps/cares/src/lib/ares__iface_ips.c.patch
 
       - name: Configure for Android aarch64
         working-directory: node
         shell: bash
         run: |
-          # Thiết lập biến môi trường cho cross‑compilation (thủ công)
           export ANDROID_NDK_HOME="${{ env.ANDROID_NDK_HOME }}"
           export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           export CC=aarch64-linux-android21-clang
@@ -71,9 +92,6 @@ jobs:
           export CFLAGS="-D__ANDROID_API__=21"
           export CXXFLAGS="-D__ANDROID_API__=21"
           export GYP_DEFINES="android_ndk_path=$ANDROID_NDK_HOME target_arch=arm64 host_os=linux OS=android"
-
-          # Nếu bạn muốn thử dùng script android-configure, hãy bỏ comment dòng sau và comment các export ở trên
-          # . android-configure "$ANDROID_NDK_HOME" arm64
 
           ./configure \
             --dest-cpu=arm64 \
