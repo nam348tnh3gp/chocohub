@@ -48,15 +48,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential python3 patchelf ninja-build pkg-config
 
-      - name: Patch c-ares to remove getifaddrs usage
+      - name: Patch c-ares and V8 for Android compatibility
         working-directory: node
         run: |
-          # Tắt getifaddrs trong ares_config.h
+          # --- c-ares patches ---
+          # Tắt getifaddrs/freeifaddrs trong config
           sed -i 's/#define HAVE_GETIFADDRS 1/#undef HAVE_GETIFADDRS/g' deps/cares/config/android/ares_config.h
           sed -i 's/#define HAVE_FREEIFADDRS 1/#undef HAVE_FREEIFADDRS/g' deps/cares/config/android/ares_config.h
           # Sửa file nguồn để bỏ qua getifaddrs
           sed -i 's/if (getifaddrs(&ifap) != 0) {/if (1) { \/\/ Disable getifaddrs for Android/g' deps/cares/src/lib/ares__iface_ips.c
           sed -i 's/freeifaddrs(ifap);/\/\/ freeifaddrs not available on Android/g' deps/cares/src/lib/ares__iface_ips.c
+
+          # --- V8 backtrace patch ---
+          # Thêm định nghĩa NO_BACKTRACE vào đầu file stack_trace_posix.cc khi build cho Android
+          sed -i '1i#ifdef ANDROID\n#define NO_BACKTRACE\n#endif' deps/v8/src/base/debug/stack_trace_posix.cc
 
       - name: Configure for Android aarch64
         working-directory: node
@@ -68,10 +73,9 @@ jobs:
           export CXX=aarch64-linux-android21-clang++
           export AR=llvm-ar
           export RANLIB=llvm-ranlib
-          # Thêm các định nghĩa cho Android và vô hiệu hóa backtrace
           export CFLAGS="-D__ANDROID_API__=21 -DANDROID -D__ANDROID__"
           export CXXFLAGS="-D__ANDROID_API__=21 -DANDROID -D__ANDROID__ -DNO_BACKTRACE"
-          export GYP_DEFINES="android_ndk_path=$ANDROID_NDK_HOME target_arch=arm64 host_os=linux OS=android"
+          export GYP_DEFINES="android_ndk_path=$ANDROID_NDK_HOME target_arch=arm64 host_os=linux OS=android v8_no_backtrace=1"
 
           ./configure \
             --dest-cpu=arm64 \
