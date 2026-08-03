@@ -54,10 +54,8 @@ jobs:
           # Tắt getifaddrs trong ares_config.h
           sed -i 's/#define HAVE_GETIFADDRS 1/#undef HAVE_GETIFADDRS/g' deps/cares/config/android/ares_config.h
           sed -i 's/#define HAVE_FREEIFADDRS 1/#undef HAVE_FREEIFADDRS/g' deps/cares/config/android/ares_config.h
-
-          # Trực tiếp sửa file nguồn: thay lời gọi getifaddrs thành lệnh trả về lỗi (bỏ qua)
+          # Sửa file nguồn để bỏ qua getifaddrs
           sed -i 's/if (getifaddrs(&ifap) != 0) {/if (1) { \/\/ Disable getifaddrs for Android/g' deps/cares/src/lib/ares__iface_ips.c
-          # Vô hiệu hóa freeifaddrs
           sed -i 's/freeifaddrs(ifap);/\/\/ freeifaddrs not available on Android/g' deps/cares/src/lib/ares__iface_ips.c
 
       - name: Configure for Android aarch64
@@ -70,8 +68,9 @@ jobs:
           export CXX=aarch64-linux-android21-clang++
           export AR=llvm-ar
           export RANLIB=llvm-ranlib
-          export CFLAGS="-D__ANDROID_API__=21"
-          export CXXFLAGS="-D__ANDROID_API__=21"
+          # Thêm các định nghĩa cho Android và vô hiệu hóa backtrace
+          export CFLAGS="-D__ANDROID_API__=21 -DANDROID -D__ANDROID__"
+          export CXXFLAGS="-D__ANDROID_API__=21 -DANDROID -D__ANDROID__ -DNO_BACKTRACE"
           export GYP_DEFINES="android_ndk_path=$ANDROID_NDK_HOME target_arch=arm64 host_os=linux OS=android"
 
           ./configure \
