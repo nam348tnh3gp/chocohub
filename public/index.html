@@ -283,13 +283,30 @@
             position: relative; z-index: 1;
             display: flex; align-items: center; gap: 14px;
         }
-        .session-chip {
+        .status-chip {
             display: flex; align-items: center; gap: 7px;
             padding: 9px 16px; border-radius: var(--radius-pill);
             background: rgba(50,215,75,0.1); border: 1px solid rgba(50,215,75,0.25);
             color: var(--accent-green); font-size: 0.74rem; font-weight: 700;
+            transition: background-color .3s var(--ease-liquid), border-color .3s var(--ease-liquid), color .3s var(--ease-liquid);
         }
-        .session-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-green); animation: pulseDot 2s ease-in-out infinite; }
+        .status-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-green); animation: pulseDot 2s ease-in-out infinite; }
+
+        /* Account status variants */
+        .status-chip.status-active {
+            background: rgba(50,215,75,0.1); border-color: rgba(50,215,75,0.25); color: var(--accent-green);
+        }
+        .status-chip.status-active .dot { background: var(--accent-green); box-shadow: 0 0 4px rgba(50,215,75,0.4); }
+
+        .status-chip.status-suspended {
+            background: rgba(255,159,10,0.1); border-color: rgba(255,159,10,0.3); color: var(--accent-orange);
+        }
+        .status-chip.status-suspended .dot { background: var(--accent-orange); animation: none; box-shadow: 0 0 4px rgba(255,159,10,0.4); }
+
+        .status-chip.status-banned {
+            background: rgba(255,55,95,0.1); border-color: rgba(255,55,95,0.3); color: var(--accent-pink);
+        }
+        .status-chip.status-banned .dot { background: var(--accent-pink); animation: none; box-shadow: 0 0 4px rgba(255,55,95,0.4); }
 
         .btn-logout {
             background: rgba(255,55,95,0.1); color: var(--accent-pink);
@@ -501,6 +518,12 @@
         .login-box .login-sub { color: var(--text-secondary); margin-bottom: 26px; font-size: 0.86rem; }
         .login-hint { font-size: 0.72rem; color: var(--text-tertiary); margin-top: 18px; line-height: 1.5; }
 
+        /* Honeypot: off-screen, not display:none, so basic bot scanners still "see" and fill it */
+        .hp-field {
+            position: absolute; left: -9999px; top: -9999px;
+            width: 1px; height: 1px; overflow: hidden;
+        }
+
         /* ---------- Responsive ---------- */
         @media (max-width: 768px) {
             .main-card { flex-direction: column; text-align: center; padding: 28px 24px; gap: 20px; }
@@ -540,6 +563,12 @@
         <span class="login-icon" aria-hidden="true">🍫</span>
         <h2>CHOCO HUB</h2>
         <p class="login-sub">Enter your credentials to access the vault.</p>
+
+        <!-- Honeypot: hidden from real users via CSS, only bots that auto-fill every field trip it -->
+        <div class="hp-field" aria-hidden="true">
+            <label for="hp-website">Website</label>
+            <input type="text" id="hp-website" name="website" tabindex="-1" autocomplete="off">
+        </div>
 
         <div style="text-align: left; margin-bottom: 18px;">
             <label class="field-lbl">Username</label>
@@ -598,7 +627,7 @@
             <div class="rate-hint">Reference rate · 10 CC ≈ 1 DUCO</div>
         </div>
         <div class="account-meta">
-            <div class="session-chip"><span class="dot"></span> Session Active</div>
+            <div class="status-chip status-active" id="account-status-chip"><span class="dot"></span> <span id="account-status-label">Active</span></div>
             <button class="btn-logout" id="logout-btn">LOGOUT</button>
         </div>
     </section>
@@ -894,6 +923,9 @@
                         currentBalance = data.balance;
                     }
                 }
+                if (data.status !== 'error') {
+                    setAccountStatus(data.account_status);
+                }
             } catch (e) {
                 console.warn('Balance update failed:', e.message);
             }
@@ -1176,6 +1208,23 @@
             if (el) el.textContent = greet + ', ' + name + '!';
         }
 
+        // ─── Account status ─────────────────────────────────────
+        function setAccountStatus(status) {
+            const chip = document.getElementById('account-status-chip');
+            const label = document.getElementById('account-status-label');
+            if (!chip || !label) return;
+            const normalized = (status || 'active').toLowerCase();
+            const map = {
+                active: 'Active',
+                suspended: 'Suspended',
+                banned: 'Banned'
+            };
+            const validKey = map[normalized] ? normalized : 'active';
+            chip.classList.remove('status-active', 'status-suspended', 'status-banned');
+            chip.classList.add('status-' + validKey);
+            label.textContent = map[validKey];
+        }
+
         // ─── Auth ────────────────────────────────────────────────
         async function handleAuth() {
             const username = document.getElementById('user-name').value.trim();
@@ -1183,6 +1232,16 @@
             if (username.length < 3 || pin.length < 4) {
                 return showToast('Name min 3, PIN min 4 chars', 'error');
             }
+
+            // Honeypot check: real users never fill this hidden field
+            const hpField = document.getElementById('hp-website');
+            const honeypot = hpField ? hpField.value.trim() : '';
+            if (honeypot) {
+                // Silently pretend it worked so bots don't learn they were caught
+                showToast('Something went wrong, try again', 'error');
+                return;
+            }
+
             const btn = document.getElementById('auth-btn');
             const hint = document.getElementById('login-hint-text');
             if (btn) { btn.disabled = true; btn.textContent = 'AUTHENTICATING...'; }
@@ -1190,7 +1249,7 @@
                 const res = await fetch('/auth', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, pin })
+                    body: JSON.stringify({ username, pin, website: honeypot })
                 });
                 if (res.status === 503) {
                     showToast('⏳ Server is restoring from backup, please wait...', 'loading');
@@ -1261,6 +1320,7 @@
                     setTimeout(() => { dashUI.classList.add('loaded'); }, 150);
                 }
                 setHumaneGreeting(user.charAt(0).toUpperCase() + user.slice(1));
+                setAccountStatus('active');
                 await Promise.allSettled([updateBalanceAction(), updateNetworkMonitor()]);
                 setInterval(updateBalanceAction, 5000);
                 setInterval(updateNetworkMonitor, 15000);
