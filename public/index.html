@@ -557,6 +557,26 @@
             .blob { animation: none !important; }
             * { transition-duration: 0.01ms !important; }
         }
+
+        /* ---------- Footer ---------- */
+        .site-footer {
+            display: flex; justify-content: center; align-items: center;
+            gap: 24px; flex-wrap: wrap;
+            margin: 40px 0 24px; padding-top: 24px;
+            border-top: 1px solid var(--border-color, rgba(255,255,255,0.08));
+        }
+        .site-footer .footer-link {
+            display: inline-flex; align-items: center; gap: 8px;
+            font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);
+            text-decoration: none; padding: 8px 14px; border-radius: var(--radius-pill, 999px);
+            transition: color .2s ease, background-color .2s ease;
+        }
+        .site-footer .footer-link:hover {
+            color: var(--text-primary); background: rgba(255,255,255,0.06);
+        }
+        .site-footer .footer-link img {
+            width: 18px; height: 18px; object-fit: contain;
+        }
     </style>
 </head>
 <body>
@@ -639,6 +659,7 @@
             <div class="rate-hint conversions">
                 <span class="conversion-item"><img src="https://github.com/revoxhere/duino-coin/raw/master/Resources/duco.png" alt="DUCO"> <span class="conv-value" id="conv-duco">0.0000</span></span>
                 <span class="conversion-item"><img src="https://cdn.simpleicons.org/nano/209CE9" alt="XNO"> <span class="conv-value" id="conv-xno">0.0000</span></span>
+                <span class="conversion-item"><img src="https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/svg/color/usdt.svg" alt="USDT"> <span class="conv-value" id="conv-usdt">$0.00</span></span>
             </div>
         </div>
         <div class="account-meta">
@@ -814,6 +835,15 @@
     </div>
     <!-- ═══ END MINER DASHBOARD ═══ -->
 
+    <footer class="site-footer">
+        <a href="https://discord.gg/xpX6euKKJx" target="_blank" rel="noopener noreferrer" class="footer-link">
+            <img src="https://cdn.simpleicons.org/discord/5865F2" alt="Discord"> Discord
+        </a>
+        <a href="https://github.com/nam348tnh3gp/chocohub" target="_blank" rel="noopener noreferrer" class="footer-link">
+            <img src="https://cdn.simpleicons.org/github/181717" alt="GitHub"> GitHub
+        </a>
+    </footer>
+
 </div><!-- end .dashboard-container -->
 
 <!-- Toast container -->
@@ -877,13 +907,40 @@
         let blocksHash = '';
         let validatorsHash = '';
 
-        // ─── Conversions (DUCO / XNO) ───────────────────────────
+        // ─── Conversions (DUCO / XNO / USDT) ────────────────────
+        let xnoUsdPrice = null;
+        let lastBalanceForConversions = 0;
+
         function updateConversions(balance) {
+            lastBalanceForConversions = balance;
             const ducoEl = document.getElementById('conv-duco');
             const xnoEl = document.getElementById('conv-xno');
+            const usdtEl = document.getElementById('conv-usdt');
+            const xnoAmount = balance / 500000;
             if (ducoEl) ducoEl.textContent = (balance / 10).toFixed(4);
-            if (xnoEl) xnoEl.textContent = (balance / 500000).toFixed(6);
+            if (xnoEl) xnoEl.textContent = xnoAmount.toFixed(6);
+            if (usdtEl) {
+                usdtEl.textContent = (xnoUsdPrice !== null)
+                    ? '$' + (xnoAmount * xnoUsdPrice).toFixed(2)
+                    : '...';
+            }
         }
+
+        async function fetchXnoUsdPrice() {
+            try {
+                const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=nano&vs_currencies=usd');
+                if (!res.ok) throw new Error('CoinGecko request failed');
+                const data = await res.json();
+                if (data && data.nano && typeof data.nano.usd === 'number') {
+                    xnoUsdPrice = data.nano.usd;
+                    updateConversions(lastBalanceForConversions);
+                }
+            } catch (e) {
+                console.warn('XNO/USD price fetch failed:', e.message);
+            }
+        }
+        fetchXnoUsdPrice();
+        setInterval(fetchXnoUsdPrice, 60000);
 
         // ─── Animations ──────────────────────────────────────────
         function animateValue(id, start, end, duration) {
