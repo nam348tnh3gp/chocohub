@@ -278,6 +278,18 @@
             margin-top: 12px; font-size: 0.72rem; color: var(--text-tertiary);
             font-family: 'Space Mono', monospace;
         }
+        .balance-info .conversions {
+            display: flex; gap: 16px; flex-wrap: wrap;
+        }
+        .balance-info .conversion-item {
+            display: inline-flex; align-items: center; gap: 6px;
+        }
+        .balance-info .conversion-item img {
+            width: 14px; height: 14px; object-fit: contain; flex-shrink: 0;
+        }
+        .balance-info .conversion-item .conv-value {
+            color: var(--text-primary); font-weight: 700;
+        }
 
         .account-meta {
             position: relative; z-index: 1;
@@ -624,7 +636,10 @@
         <div class="balance-info">
             <div class="label">Total Vault Balance</div>
             <div class="amount" id="balance-val">0000 <span class="currency">CC</span></div>
-            <div class="rate-hint">Reference rate · 10 CC ≈ 1 DUCO</div>
+            <div class="rate-hint conversions">
+                <span class="conversion-item"><img src="https://github.com/revoxhere/duino-coin/raw/master/Resources/duco.png" alt="DUCO"> <span class="conv-value" id="conv-duco">0.0000</span></span>
+                <span class="conversion-item"><img src="https://cdn.simpleicons.org/nano/209CE9" alt="XNO"> <span class="conv-value" id="conv-xno">0.0000</span></span>
+            </div>
         </div>
         <div class="account-meta">
             <div class="status-chip status-active" id="account-status-chip"><span class="dot"></span> <span id="account-status-label">Active</span></div>
@@ -862,6 +877,14 @@
         let blocksHash = '';
         let validatorsHash = '';
 
+        // ─── Conversions (DUCO / XNO) ───────────────────────────
+        function updateConversions(balance) {
+            const ducoEl = document.getElementById('conv-duco');
+            const xnoEl = document.getElementById('conv-xno');
+            if (ducoEl) ducoEl.textContent = (balance / 10).toFixed(4);
+            if (xnoEl) xnoEl.textContent = (balance / 500000).toFixed(6);
+        }
+
         // ─── Animations ──────────────────────────────────────────
         function animateValue(id, start, end, duration) {
             const obj = document.getElementById(id);
@@ -885,6 +908,7 @@
                 span.className = 'currency';
                 span.textContent = 'CC';
                 obj.appendChild(span);
+                updateConversions(current);
                 if (progress < 1) {
                     balanceAnimationId = requestAnimationFrame(step);
                 } else {
@@ -896,6 +920,7 @@
                     span2.className = 'currency';
                     span2.textContent = 'CC';
                     obj.appendChild(span2);
+                    updateConversions(end);
                     balanceAnimationId = null;
                 }
             };
