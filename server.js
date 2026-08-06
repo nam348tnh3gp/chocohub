@@ -636,12 +636,17 @@ app.get('/network_status', (req, res) => {
     const blocks = db.getBlocks(10);
     const validators = db.getValidators(10).map(v => ({ username: v.username, stake: v.amount }));
     const posRewardPool = db.getPosRewardPool ? db.getPosRewardPool() : { balance: 0, total_fees: 0 };
+    const liquidity_pool_user = db.getUser('swap_liquidity');
+    const CC_liquidity_locked = liquidity_pool_user.balance || 0;
+    const mempool_pending = db.getMempoolCount();
     res.json({
       recent_blocks: blocks,
       last_block: lastBlock,
       active_validators: validators,
       pos_reward_pool: posRewardPool,
-      total_blocks: db.getBlockCount ? db.getBlockCount() : 0
+      total_blocks: db.getBlockCount ? db.getBlockCount() : 0,
+      total_liquidity_locked: CC_liquidity_locked,
+      mempool_pending: mempool_pending
     });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
