@@ -798,9 +798,12 @@ class BackupClient {
     if (this.heartbeatFailureCount[serverKey] === undefined) this.heartbeatFailureCount[serverKey] = 0;
 
     const heartbeat = () => {
+      // ✅ FIX: sempre busca a sessão ATUAL no mapa, nunca a capturada no closure —
+      // evita assinar com uma chave DH desatualizada depois de um re-handshake.
+      const currentSession = this.dhSessions.get(serverKey) || session;
       // ✅ PING KHÔNG có token trong body
       const pingPayload = { type: 'PING' };
-      const { payload, headers } = this.sendWithDH('POST', '/api/backup/sync', pingPayload, session);
+      const { payload, headers } = this.sendWithDH('POST', '/api/backup/sync', pingPayload, currentSession);
 
       const req = httpModule.request({
         hostname: server.host,
@@ -860,10 +863,13 @@ class BackupClient {
     let lastSnapshotHash = null;
 
     const sendSnapshot = () => {
+      // ✅ FIX: sempre busca a sessão ATUAL no mapa, nunca a capturada no closure —
+      // evita assinar com uma chave DH desatualizada depois de um re-handshake.
+      const currentSession = this.dhSessions.get(serverKey) || session;
       const state = db.exportFullState();
       // ✅ SNAPSHOT payload sẽ được xử lý bởi sendWithDH (xóa token)
       const snapshotPayload = { type: 'FULL_SNAPSHOT', state };
-      const { payload, headers } = this.sendWithDH('POST', '/api/backup/sync', snapshotPayload, session);
+      const { payload, headers } = this.sendWithDH('POST', '/api/backup/sync', snapshotPayload, currentSession);
       const hash = crypto.createHash('sha256').update(payload).digest('hex').substring(0, 16);
 
       if (hash === lastSnapshotHash) {
