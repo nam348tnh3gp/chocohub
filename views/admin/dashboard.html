@@ -244,6 +244,72 @@
                 .tab-btn { padding: 0.5rem 0.9rem; font-size: 0.8rem; }
                 .drawer { width: 100%; }
             }
+
+            /* ─── New: health dot, last-updated, toggles, sort, filters, copy ─── */
+            .health-pill { font-size: 0.78rem; color: var(--text-dim); background: var(--card); border: 1px solid var(--border); padding: 0.45rem 0.9rem; border-radius: 40px; display: flex; align-items: center; gap: 0.4rem; }
+            .health-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+            .health-pill.down .dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
+            .health-pill.unknown .dot { background: var(--text-faint); box-shadow: none; }
+
+            .last-updated { font-size: 0.7rem; color: var(--text-faint); margin-top: 4px; }
+            .card-head-controls { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; }
+
+            .auto-refresh-toggle { display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem; color: var(--text-dim); user-select: none; }
+            .switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
+            .switch input { opacity: 0; width: 0; height: 0; }
+            .switch-track { position: absolute; cursor: pointer; inset: 0; background: rgba(255,255,255,0.12); border-radius: 20px; transition: 0.2s; }
+            .switch-track::before { content: ""; position: absolute; height: 14px; width: 14px; left: 3px; bottom: 3px; background: var(--text-dim); border-radius: 50%; transition: 0.2s; }
+            .switch input:checked + .switch-track { background: var(--gold-dim); }
+            .switch input:checked + .switch-track::before { transform: translateX(16px); background: var(--gold-bright); }
+
+            th.sortable { cursor: pointer; user-select: none; }
+            th.sortable:hover { color: var(--text-dim); }
+            th.sortable .arrow { opacity: 0.4; margin-left: 3px; }
+            th.sortable.sort-active .arrow { opacity: 1; color: var(--gold-bright); }
+
+            .filter-select {
+                padding: 9px 12px; background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+                border-radius: var(--radius-sm); color: var(--text); font-size: 0.82rem; outline: none; font-family: inherit; cursor: pointer;
+            }
+            .filter-select:focus { border-color: var(--gold); }
+
+            .copy-btn { background: none; border: none; color: var(--text-faint); cursor: pointer; padding: 2px 5px; font-size: 0.8rem; border-radius: 6px; transition: 0.15s; }
+            .copy-btn:hover { color: var(--gold-bright); background: rgba(255,255,255,0.06); }
+
+            .count-chip { font-size: 0.72rem; color: var(--text-faint); background: rgba(255,255,255,0.05); padding: 2px 9px; border-radius: 20px; font-weight: 600; }
+
+            .validator-current { color: var(--green) !important; font-weight: 700; }
+            .skeleton-row td { padding: 14px 12px; }
+            .skeleton-bar { height: 12px; border-radius: 6px; background: linear-gradient(90deg, rgba(255,255,255,0.04), rgba(255,255,255,0.09), rgba(255,255,255,0.04)); background-size: 200% 100%; animation: shimmer 1.3s infinite; }
+            @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+            kbd { background: rgba(255,255,255,0.08); border: 1px solid var(--border-strong); border-radius: 4px; padding: 1px 6px; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: var(--text-dim); }
+
+            /* ─── Live node fleet cards ─────────────────────────────── */
+            .nodes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
+            .node-card {
+                background: linear-gradient(160deg, rgba(255,255,255,0.035), rgba(255,255,255,0));
+                border: 1px solid var(--border); border-radius: 16px; padding: 1.1rem 1.2rem; transition: 0.2s;
+            }
+            .node-card:hover { border-color: var(--border-strong); }
+            .node-card.offline { opacity: 0.68; }
+            .node-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.7rem; }
+            .node-title { display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--cream); font-size: 0.95rem; }
+            .node-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; background: var(--text-faint); }
+            .node-dot.online { background: var(--green); box-shadow: 0 0 8px var(--green); }
+            .node-dot.offline { background: var(--red); box-shadow: 0 0 8px var(--red); }
+            .node-dot.checking { background: var(--gold-bright); box-shadow: 0 0 8px var(--gold-bright); animation: pulseDot 1s infinite; }
+            @keyframes pulseDot { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+            .node-location { font-size: 0.76rem; color: var(--text-dim); font-weight: 500; }
+            .node-type-badge { font-size: 0.66rem; font-weight: 700; padding: 3px 9px; border-radius: 20px; white-space: nowrap; }
+            .node-type-badge.merged { background: rgba(91,157,255,0.16); color: var(--blue); }
+            .node-type-badge.mining { background: rgba(245,166,35,0.16); color: var(--gold-bright); }
+            .node-type-badge.unknown { background: rgba(255,255,255,0.06); color: var(--text-faint); }
+            .node-meta { font-size: 0.72rem; color: var(--text-faint); margin-bottom: 0.7rem; display: flex; gap: 10px; flex-wrap: wrap; }
+            .node-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; font-size: 0.78rem; color: var(--text-dim); }
+            .node-stats .full { grid-column: 1 / -1; }
+            .node-stats b { color: var(--text); font-weight: 600; }
+            .node-card-footer { display: flex; justify-content: flex-end; margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid var(--border); }
         </style>
     </head>
     <body>
@@ -257,7 +323,15 @@
                     </div>
                 </div>
                 <div class="header-right">
-                    <div class="session-pill"><span class="dot"></span> ${req.session.adminUsername}</div>
+                    <div class="health-pill unknown" id="healthPill" title="Backend health"><span class="dot"></span> <span id="healthLabel">Checking…</span></div>
+                    <div class="auto-refresh-toggle" title="Auto-refresh the active tab every 30s">
+                        <label class="switch">
+                            <input type="checkbox" id="autoRefreshToggle" checked onchange="onAutoRefreshToggle()">
+                            <span class="switch-track"></span>
+                        </label>
+                        Auto-refresh
+                    </div>
+                    <div class="session-pill"><span class="dot"></span> <span id="adminUsernameLabel">…</span></div>
                     <a href="/admin/logout" class="logout-btn">Logout</a>
                 </div>
             </div>
@@ -267,14 +341,25 @@
                 <button class="tab-btn" data-tab="users">👥 Users</button>
                 <button class="tab-btn" data-tab="miners">⛏️ Miners</button>
                 <button class="tab-btn" data-tab="nodes">🌐 Nodes</button>
+                <button class="tab-btn" data-tab="network">⛓️ Network</button>
                 <button class="tab-btn" data-tab="stats">📊 Statistics</button>
             </div>
 
             <div id="swaps-tab" class="tab-content active">
                 <div class="card">
                     <div class="card-head">
-                        <h2>⏳ Pending Swaps</h2>
-                        <span class="refresh-btn" onclick="loadAllSwaps(this)">🔄 Refresh</span>
+                        <h2>⏳ Pending Swaps <span class="count-chip" id="pendingCount">0</span></h2>
+                        <div class="card-head-controls">
+                            <select class="filter-select" id="pendingTypeFilter" onchange="loadAllSwaps()">
+                                <option value="">All types</option>
+                                <option value="duco">💰 DUCO</option>
+                                <option value="duco_to_cc">🔄 DUCO→CC</option>
+                                <option value="xno_to_cc">🟦 XNO→CC</option>
+                                <option value="cc_to_xno">➡️ CC→XNO</option>
+                                <option value="ccpoc">🍫 CC PoC</option>
+                            </select>
+                            <span class="refresh-btn" onclick="loadAllSwaps(this)">🔄 Refresh</span>
+                        </div>
                     </div>
                     <div style="overflow-x: auto;">
                         <table id="pendingTable">
@@ -282,9 +367,13 @@
                             <tbody id="pendingBody"><tr class="empty-row"><td colspan="8">Loading…</td></tr></tbody>
                         </table>
                     </div>
+                    <div class="last-updated" id="pendingUpdated"></div>
                 </div>
                 <div class="card">
-                    <div class="card-head"><h2>✅ Completed Swaps</h2></div>
+                    <div class="card-head">
+                        <h2>✅ Completed Swaps <span class="count-chip" id="completedCount">0</span></h2>
+                        <input type="text" class="filter-select" id="completedSearch" placeholder="Search user or txid…" oninput="renderCompleted()" style="min-width:200px;">
+                    </div>
                     <div style="overflow-x: auto;">
                         <table id="completedTable">
                             <thead><tr><th>ID</th><th>From</th><th>Amount</th><th>Type</th><th>Receiver</th><th>XNO TxID</th><th>Status</th><th>Completed At</th></tr></thead>
@@ -292,42 +381,57 @@
                         </table>
                     </div>
                     <div class="pagination" id="completedPagination"></div>
+                    <div class="last-updated" id="completedUpdated"></div>
                 </div>
             </div>
 
             <div id="users-tab" class="tab-content">
                 <div class="card">
                     <div class="card-head">
-                        <h2>👥 User Management</h2>
+                        <h2>👥 User Management <span class="count-chip" id="usersCount">0</span></h2>
                         <div style="display:flex;gap:0.6rem;">
                             <button class="btn btn-ghost" onclick="exportUsers()">⬇️ Export CSV</button>
                             <button class="btn btn-primary" onclick="openAddUserModal()">➕ Add User</button>
                         </div>
                     </div>
                     <div class="search-box" style="margin-bottom:1rem;">
-                        <input type="text" id="userSearch" placeholder="Search by username…" oninput="searchUsers()">
+                        <input type="text" id="userSearch" placeholder="Search by username… (press / to focus)" oninput="searchUsers()">
+                        <select class="filter-select" id="userStatusFilter" onchange="searchUsers()">
+                            <option value="">All statuses</option>
+                            <option value="active">✅ Active only</option>
+                            <option value="banned">🚫 Banned only</option>
+                        </select>
                     </div>
                     <div style="overflow-x: auto;">
                         <table id="usersTable">
-                            <thead><tr><th>User</th><th>Balance</th><th>Status</th><th>Actions</th></tr></thead>
+                            <thead><tr>
+                                <th class="sortable" onclick="setUserSort('username')">User <span class="arrow">⇅</span></th>
+                                <th class="sortable" onclick="setUserSort('balance')">Balance <span class="arrow">⇅</span></th>
+                                <th>Status</th><th>Actions</th>
+                            </tr></thead>
                             <tbody id="usersBody"><tr class="empty-row"><td colspan="4">Loading…</td></tr></tbody>
                         </table>
                     </div>
                     <div class="pagination" id="usersPagination"></div>
+                    <div class="last-updated" id="usersUpdated"></div>
                 </div>
             </div>
 
             <div id="stats-tab" class="tab-content">
                 <div class="card">
-                    <div class="card-head"><h2>📊 System Statistics</h2></div>
+                    <div class="card-head">
+                        <h2>📊 System Statistics</h2>
+                        <span class="refresh-btn" onclick="loadStats(this)">🔄 Refresh</span>
+                    </div>
                     <div id="statsContent">Loading…</div>
+                    <div class="last-updated" id="statsUpdated"></div>
                 </div>
             </div>
 
             <div id="miners-tab" class="tab-content">
                 <div class="card">
                     <div class="card-head">
-                        <h2>🚩 Flagged & Suspended Workers</h2>
+                        <h2>🚩 Flagged & Suspended Workers <span class="count-chip" id="flaggedCount">0</span></h2>
                         <span class="refresh-btn" onclick="loadFlaggedWorkers(this)">🔄 Refresh</span>
                     </div>
                     <div style="overflow-x: auto;">
@@ -336,6 +440,7 @@
                             <tbody id="flaggedBody"><tr class="empty-row"><td colspan="7">Loading…</td></tr></tbody>
                         </table>
                     </div>
+                    <div class="last-updated" id="flaggedUpdated"></div>
                 </div>
                 <div class="card">
                     <div class="card-head"><h2>🔧 Manual Worker Control</h2></div>
@@ -357,13 +462,54 @@
             <div id="nodes-tab" class="tab-content">
                 <div class="card">
                     <div class="card-head">
-                        <h2>🌐 Mining Nodes</h2>
-                        <span class="refresh-btn" onclick="loadNodes(this)">🔄 Refresh</span>
+                        <h2>⛏️ Mining Node Fleet <span class="count-chip" id="nodesCount">0</span></h2>
+                        <div class="card-head-controls">
+                            <span style="font-size:0.72rem;color:var(--text-faint);">Live stats pulled directly from each node</span>
+                            <span class="refresh-btn" onclick="loadNodes(this)">🔄 Refresh</span>
+                        </div>
+                    </div>
+                    <div class="nodes-grid" id="nodesGrid"><div class="empty-row" style="grid-column:1/-1;">Loading…</div></div>
+                    <div class="last-updated" id="nodesUpdated"></div>
+                </div>
+                <div class="card">
+                    <div class="card-head">
+                        <h2>💾 Backup Nodes <span class="count-chip" id="backupNodesCount">0</span></h2>
+                        <span class="refresh-btn" onclick="loadBackupNodes(this)">🔄 Refresh</span>
                     </div>
                     <div style="overflow-x: auto;">
-                        <table id="nodesTable">
-                            <thead><tr><th>Name</th><th>URL</th><th>Miners</th><th>CPU</th><th>Ping</th><th>Blocks Relayed</th><th>Actions</th></tr></thead>
-                            <tbody id="nodesBody"><tr class="empty-row"><td colspan="7">Loading…</td></tr></tbody>
+                        <table id="backupNodesTable">
+                            <thead><tr><th>Name</th><th>Owner</th><th>Platform</th><th>Users</th><th>Blocks</th><th>Last Heartbeat</th></tr></thead>
+                            <tbody id="backupNodesBody"><tr class="empty-row"><td colspan="6">Loading…</td></tr></tbody>
+                        </table>
+                    </div>
+                    <div class="last-updated" id="backupNodesUpdated"></div>
+                </div>
+            </div>
+
+            <div id="network-tab" class="tab-content">
+                <div class="card">
+                    <div class="card-head">
+                        <h2>⛓️ Blockchain Overview</h2>
+                        <span class="refresh-btn" onclick="loadNetwork(this)">🔄 Refresh</span>
+                    </div>
+                    <div id="networkStatsContent">Loading…</div>
+                    <div class="last-updated" id="networkUpdated"></div>
+                </div>
+                <div class="card">
+                    <div class="card-head"><h2>🧱 Recent Blocks</h2></div>
+                    <div style="overflow-x: auto;">
+                        <table id="blocksTable">
+                            <thead><tr><th>Height</th><th>Hash</th><th>Miner</th><th>Reward</th><th>Difficulty</th><th>Mined</th></tr></thead>
+                            <tbody id="blocksBody"><tr class="empty-row"><td colspan="6">Loading…</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-head"><h2>🏛️ Active Validators (Top Stakers)</h2></div>
+                    <div style="overflow-x: auto;">
+                        <table id="validatorsTable">
+                            <thead><tr><th>#</th><th>Username</th><th>Staked (CC)</th><th>Role</th></tr></thead>
+                            <tbody id="validatorsBody"><tr class="empty-row"><td colspan="4">Loading…</td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -478,10 +624,88 @@
         <script>
             let allSwaps = [];
             let allUsers = [];
+            let allBlocks = [];
             let currentEditUser = null;
             let currentPendingSwap = null;
             let usersPage = 1, completedPage = 1;
+            let userSort = { key: null, dir: 1 };
             const PAGE_SIZE = 12;
+
+            // ─── Who am I / health ─────────────────────────────────────
+            async function loadWhoAmI() {
+                try {
+                    const resp = await fetch('/admin/api/whoami');
+                    const data = await resp.json();
+                    document.getElementById('adminUsernameLabel').innerText = data.status === 'success' ? data.username : 'admin';
+                } catch (e) { document.getElementById('adminUsernameLabel').innerText = 'admin'; }
+            }
+
+            async function checkHealth() {
+                const pill = document.getElementById('healthPill');
+                const label = document.getElementById('healthLabel');
+                try {
+                    const resp = await fetch('/health');
+                    const data = await resp.json();
+                    if (data.status === 'healthy') {
+                        pill.className = 'health-pill'; label.innerText = 'Backend healthy';
+                    } else {
+                        pill.className = 'health-pill down'; label.innerText = 'Backend degraded';
+                    }
+                } catch (e) {
+                    pill.className = 'health-pill down'; label.innerText = 'Backend unreachable';
+                }
+            }
+
+            // ─── Copy to clipboard ─────────────────────────────────────
+            function copyText(text, e) {
+                if (e) e.stopPropagation();
+                navigator.clipboard.writeText(text).then(() => toast('Copied to clipboard', 'success')).catch(() => toast('Copy failed', 'error'));
+            }
+            function copyBtn(text) {
+                const safe = String(text).replace(/'/g, "\\'");
+                return '<button class="copy-btn" onclick="copyText(\'' + safe + '\', event)" title="Copy">📋</button>';
+            }
+
+            // ─── Last updated timestamps ───────────────────────────────
+            function stampUpdated(elId) {
+                const el = document.getElementById(elId);
+                if (el) el.innerText = 'Updated ' + new Date().toLocaleTimeString();
+            }
+
+            function timeAgo(tsSeconds) {
+                if (!tsSeconds) return '-';
+                const ms = tsSeconds > 2e10 ? tsSeconds : tsSeconds * 1000; // handle sec vs ms
+                const diff = Math.max(0, Date.now() - ms);
+                const s = Math.floor(diff / 1000);
+                if (s < 60) return s + 's ago';
+                const m = Math.floor(s / 60);
+                if (m < 60) return m + 'm ago';
+                const h = Math.floor(m / 60);
+                if (h < 24) return h + 'h ago';
+                return Math.floor(h / 24) + 'd ago';
+            }
+
+            // ─── Auto-refresh ───────────────────────────────────────────
+            let autoRefreshEnabled = localStorage.getItem('chocohub_admin_autorefresh') !== 'off';
+            document.getElementById('autoRefreshToggle').checked = autoRefreshEnabled;
+            function onAutoRefreshToggle() {
+                autoRefreshEnabled = document.getElementById('autoRefreshToggle').checked;
+                localStorage.setItem('chocohub_admin_autorefresh', autoRefreshEnabled ? 'on' : 'off');
+                toast('Auto-refresh ' + (autoRefreshEnabled ? 'enabled' : 'disabled'), 'info');
+            }
+            function refreshActiveTab() {
+                if (!autoRefreshEnabled) return;
+                const active = document.querySelector('.tab-btn.active');
+                if (!active) return;
+                const tab = active.dataset.tab;
+                if (tab === 'swaps') loadAllSwaps();
+                else if (tab === 'users') loadUsers();
+                else if (tab === 'stats') loadStats();
+                else if (tab === 'miners') loadFlaggedWorkers();
+                else if (tab === 'nodes') { loadNodes(); loadBackupNodes(); }
+                else if (tab === 'network') loadNetwork();
+                checkHealth();
+            }
 
             // ─── Toast + Confirm (replaces alert/confirm) ─────────────
             function toast(message, type = 'info') {
@@ -507,17 +731,22 @@
             function closeConfirm() { document.getElementById('confirmModal').style.display = 'none'; }
 
             // ─── Tabs ──────────────────────────────────────────────────
+            function activateTab(tabName, persist) {
+                const btn = document.querySelector('.tab-btn[data-tab="' + tabName + '"]');
+                if (!btn) return;
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById(tabName + '-tab').classList.add('active');
+                if (persist) localStorage.setItem('chocohub_admin_tab', tabName);
+                if (tabName === 'users') loadUsers();
+                if (tabName === 'stats') loadStats();
+                if (tabName === 'miners') loadFlaggedWorkers();
+                if (tabName === 'nodes') { loadNodes(); loadBackupNodes(); }
+                if (tabName === 'network') loadNetwork();
+            }
             document.querySelectorAll('.tab-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                    btn.classList.add('active');
-                    document.getElementById(btn.dataset.tab + '-tab').classList.add('active');
-                    if (btn.dataset.tab === 'users') loadUsers();
-                    if (btn.dataset.tab === 'stats') loadStats();
-                    if (btn.dataset.tab === 'miners') loadFlaggedWorkers();
-                    if (btn.dataset.tab === 'nodes') loadNodes();
-                });
+                btn.addEventListener('click', () => activateTab(btn.dataset.tab, true));
             });
 
             function spinBtn(btn) {
@@ -552,13 +781,18 @@
                     const data = await resp.json();
                     if (data.status === 'success' && Array.isArray(data.swaps)) {
                         allSwaps = data.swaps;
-                        renderPending(allSwaps.filter(s => s.status === 'pending'));
-                        renderCompleted(allSwaps.filter(s => s.status === 'completed'));
+                        renderPending();
+                        renderCompleted();
+                        stampUpdated('pendingUpdated'); stampUpdated('completedUpdated');
                     }
-                } catch(e) { console.error(e); }
+                } catch(e) { console.error(e); toast('Failed to load swaps', 'error'); }
             }
 
-            function renderPending(swaps) {
+            function renderPending() {
+                const typeFilter = document.getElementById('pendingTypeFilter').value;
+                let swaps = allSwaps.filter(s => s.status === 'pending');
+                if (typeFilter) swaps = swaps.filter(s => s.swap_type === typeFilter);
+                document.getElementById('pendingCount').innerText = swaps.length;
                 const tbody = document.getElementById('pendingBody');
                 if (swaps.length === 0) { tbody.innerHTML = '<tr class="empty-row"><td colspan="8">✨ No pending swaps</td></tr>'; return; }
                 tbody.innerHTML = '';
@@ -582,7 +816,11 @@
                 }
             }
 
-            function renderCompleted(swaps) {
+            function renderCompleted() {
+                const term = (document.getElementById('completedSearch').value || '').toLowerCase();
+                let swaps = allSwaps.filter(s => s.status === 'completed');
+                if (term) swaps = swaps.filter(s => (s.from_user || '').toLowerCase().includes(term) || (s.receiver || '').toLowerCase().includes(term) || (s.xno_txid || '').toLowerCase().includes(term));
+                document.getElementById('completedCount').innerText = swaps.length;
                 const tbody = document.getElementById('completedBody');
                 const totalPages = Math.max(1, Math.ceil(swaps.length / PAGE_SIZE));
                 if (completedPage > totalPages) completedPage = totalPages;
@@ -596,11 +834,11 @@
                     row.insertCell(2).innerText = swap.amount_cc;
                     row.insertCell(3).innerHTML = getSwapTypeBadge(swap.swap_type);
                     row.insertCell(4).innerText = swap.receiver;
-                    row.insertCell(5).innerHTML = swap.xno_txid ? '<span style="color:#5b9dff;font-size:0.7rem;" class="mono">' + swap.xno_txid.substring(0, 18) + '…</span>' : '-';
+                    row.insertCell(5).innerHTML = swap.xno_txid ? '<span style="color:#5b9dff;font-size:0.7rem;" class="mono">' + swap.xno_txid.substring(0, 18) + '…</span>' + copyBtn(swap.xno_txid) : '-';
                     row.insertCell(6).innerHTML = '<span class="status-completed">completed</span>';
                     row.insertCell(7).innerText = swap.completed_at ? new Date(swap.completed_at).toLocaleString() : '-';
                 }
-                renderPagination('completedPagination', totalPages, completedPage, (p) => { completedPage = p; renderCompleted(swaps); });
+                renderPagination('completedPagination', totalPages, completedPage, (p) => { completedPage = p; renderCompleted(); });
             }
 
             function renderPagination(containerId, totalPages, current, onClick) {
@@ -636,11 +874,34 @@
                 try {
                     const resp = await fetch('/admin/api/all-users');
                     const data = await resp.json();
-                    if (data.status === 'success') { allUsers = data.users; renderUsers(allUsers); }
-                } catch(e) { console.error(e); }
+                    if (data.status === 'success') {
+                        allUsers = data.users;
+                        document.getElementById('usersCount').innerText = allUsers.length;
+                        searchUsers();
+                        stampUpdated('usersUpdated');
+                    }
+                } catch(e) { console.error(e); toast('Failed to load users', 'error'); }
             }
 
             function initials(name) { return name.substring(0, 2).toUpperCase(); }
+
+            function setUserSort(key) {
+                if (userSort.key === key) userSort.dir *= -1;
+                else { userSort.key = key; userSort.dir = 1; }
+                document.querySelectorAll('#usersTable th.sortable').forEach(th => th.classList.remove('sort-active'));
+                const idx = key === 'username' ? 0 : 1;
+                document.querySelectorAll('#usersTable th.sortable')[idx === 0 ? 0 : 1].classList.add('sort-active');
+                searchUsers();
+            }
+
+            function applyUserSort(users) {
+                if (!userSort.key) return users;
+                const sorted = users.slice().sort((a, b) => {
+                    if (userSort.key === 'balance') return (a.balance - b.balance) * userSort.dir;
+                    return String(a.username).localeCompare(String(b.username)) * userSort.dir;
+                });
+                return sorted;
+            }
 
             function renderUsers(users) {
                 const tbody = document.getElementById('usersBody');
@@ -714,8 +975,12 @@
 
             function searchUsers() {
                 const term = document.getElementById('userSearch').value.toLowerCase();
+                const statusFilter = document.getElementById('userStatusFilter').value;
                 usersPage = 1;
-                renderUsers(allUsers.filter(u => u.username.toLowerCase().includes(term)));
+                let filtered = allUsers.filter(u => u.username.toLowerCase().includes(term));
+                if (statusFilter === 'active') filtered = filtered.filter(u => !u.banned);
+                if (statusFilter === 'banned') filtered = filtered.filter(u => u.banned);
+                renderUsers(applyUserSort(filtered));
             }
 
             function exportUsers() { window.open('/admin/api/users/export/csv', '_blank'); }
@@ -885,12 +1150,18 @@
             }
 
             // ─── Statistics ────────────────────────────────────────────
-            async function loadStats() {
+            async function loadStats(btn) {
+                spinBtn(btn);
                 try {
                     const resp = await fetch('/admin/api/all-swaps');
                     const data = await resp.json();
                     const usersResp = await fetch('/admin/api/all-users');
                     const usersData = await usersResp.json();
+                    let netData = null;
+                    try {
+                        const netResp = await fetch('/admin/api/network-overview');
+                        netData = await netResp.json();
+                    } catch (e) { /* network overview optional */ }
                     if (data.status === 'success' && usersData.status === 'success') {
                         const totalSwaps = data.swaps.length;
                         const pendingSwaps = data.swaps.filter(s => s.status === 'pending').length;
@@ -901,6 +1172,15 @@
                         const totalBalance = usersData.users.reduce((sum, u) => sum + u.balance, 0);
                         const avgBalance = totalUsers > 0 ? totalBalance / totalUsers : 0;
                         const topHolder = usersData.users.slice().sort((a,b) => b.balance - a.balance)[0];
+
+                        let extraCards = '';
+                        if (netData && netData.status === 'success') {
+                            extraCards =
+                                statCard('🧱', 'Block Height', netData.total_blocks ?? 0) +
+                                statCard('📥', 'Mempool Pending', netData.mempool_pending ?? 0) +
+                                statCard('🏛️', 'PoS Reward Pool', (Number(netData.pos_reward_pool?.balance) || 0).toFixed(4) + ' CC') +
+                                statCard('💾', 'Backup Nodes', (netData.backup_nodes || []).length);
+                        }
 
                         document.getElementById('statsContent').innerHTML =
                             '<div class="stats-grid">' +
@@ -913,9 +1193,11 @@
                             statCard('💰', 'Total CC Supply', totalBalance.toFixed(4) + ' CC') +
                             statCard('📈', 'Average Balance', avgBalance.toFixed(4) + ' CC') +
                             statCard('👑', 'Top Holder', topHolder ? topHolder.username + ' (' + topHolder.balance.toFixed(2) + ' CC)' : '-') +
+                            extraCards +
                             '</div>';
+                        stampUpdated('statsUpdated');
                     }
-                } catch(e) { console.error(e); }
+                } catch(e) { console.error(e); toast('Failed to load statistics', 'error'); }
             }
             function statCard(icon, label, value) {
                 return '<div class="stat-card"><div class="stat-label">' + icon + ' ' + label + '</div><strong>' + value + '</strong></div>';
@@ -928,6 +1210,8 @@
                     const resp = await fetch('/admin/api/flagged-workers');
                     const data = await resp.json();
                     const tbody = document.getElementById('flaggedBody');
+                    document.getElementById('flaggedCount').innerText = (data.workers || []).length;
+                    stampUpdated('flaggedUpdated');
                     if (!data.workers || data.workers.length === 0) { tbody.innerHTML = '<tr class="empty-row"><td colspan="7">✅ No flagged workers</td></tr>'; return; }
                     tbody.innerHTML = '';
                     for (const w of data.workers) {
@@ -984,28 +1268,127 @@
             }
 
             // ─── Mining Nodes ──────────────────────────────────────────
+            // ─── Mining Nodes (live, enriched from each node directly) ─
+            const NODE_FETCH_TIMEOUT = 6000;
+
+            function fetchWithTimeout(url, opts, timeoutMs) {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), timeoutMs);
+                return fetch(url, Object.assign({}, opts, { signal: controller.signal }))
+                    .finally(() => clearTimeout(timer));
+            }
+
+            function fmtGB(v) { return (Number(v) || 0).toFixed(1); }
+            function fmtMB(v) { return (Number(v) || 0).toFixed(1); }
+
+            function nodeCardHTML(n) {
+                return '' +
+                    '<div class="node-card checking" id="node-card-' + n.id + '">' +
+                        '<div class="node-card-head">' +
+                            '<div>' +
+                                '<div class="node-title"><span class="node-dot checking" id="node-dot-' + n.id + '"></span>' + n.name + '</div>' +
+                                '<div class="node-location">' + (n.location ? '[' + n.location + ']' : '') + '</div>' +
+                            '</div>' +
+                            '<span class="node-type-badge unknown" id="node-type-' + n.id + '">Checking…</span>' +
+                        '</div>' +
+                        '<div class="node-meta">ID: <b class="mono" style="color:var(--text-dim)">' + n.id + '</b> · Latency: <b class="mono" id="node-latency-' + n.id + '" style="color:var(--text-dim)">…</b></div>' +
+                        '<div class="node-stats">' +
+                            '<div>Miners: <b>' + (n.connected_miners ?? 0) + '</b></div>' +
+                            '<div>Blocks: <b>' + (n.total_blocks_relayed ?? 0) + '</b></div>' +
+                            '<div id="node-cpu-' + n.id + '">CPU: <b>…</b></div>' +
+                            '<div>Earned: <b style="color:var(--gold-bright)">' + (Number(n.total_earned) || 0).toFixed(4) + ' CC</b></div>' +
+                            '<div class="full" id="node-ram-' + n.id + '">RAM: <b>…</b></div>' +
+                            '<div class="full" id="node-backup-' + n.id + '"></div>' +
+                            '<div class="full" id="node-storage-' + n.id + '"></div>' +
+                        '</div>' +
+                        '<div class="node-card-footer"><button class="btn btn-delete" onclick="deleteNode(' + n.id + ')">🗑️ Delete</button></div>' +
+                    '</div>';
+            }
+
+            async function enrichNode(n) {
+                const dot = document.getElementById('node-dot-' + n.id);
+                const typeBadge = document.getElementById('node-type-' + n.id);
+                const latencyEl = document.getElementById('node-latency-' + n.id);
+                const cpuEl = document.getElementById('node-cpu-' + n.id);
+                const ramEl = document.getElementById('node-ram-' + n.id);
+                const backupEl = document.getElementById('node-backup-' + n.id);
+                const storageEl = document.getElementById('node-storage-' + n.id);
+                const card = document.getElementById('node-card-' + n.id);
+
+                const base = (n.url || '').replace(/\/+$/, '');
+                let online = false;
+                let perf = null;
+
+                if (base) {
+                    const started = performance.now();
+                    try {
+                        const resp = await fetchWithTimeout(base + '/node/performance/stats', {}, NODE_FETCH_TIMEOUT);
+                        const latency = Math.round(performance.now() - started);
+                        if (resp.ok) {
+                            perf = await resp.json();
+                            online = true;
+                            latencyEl.innerText = latency + 'ms';
+                        } else {
+                            latencyEl.innerText = 'nullms';
+                        }
+                    } catch (e) {
+                        latencyEl.innerText = 'nullms';
+                    }
+                } else {
+                    latencyEl.innerText = 'nullms';
+                }
+
+                card.classList.remove('checking');
+                dot.classList.remove('checking');
+                if (online) {
+                    dot.classList.add('online'); dot.classList.remove('offline');
+                    cpuEl.innerHTML = 'CPU: <b>' + (Number(perf.cpuPercent) || 0).toFixed(2) + '%</b>' + (perf.totalThreads ? ' (<b>' + perf.totalThreads + '</b> thr)' : '');
+                    ramEl.innerHTML = 'RAM: <b>' + fmtMB(perf.totalMemUsageMB) + 'MB</b> / <b>' + fmtGB(perf.totalMemGB) + 'GB</b>';
+                } else {
+                    card.classList.add('offline');
+                    dot.classList.add('offline'); dot.classList.remove('online');
+                    cpuEl.innerHTML = 'CPU: <b>' + (Number(n.cpu_load) || 0).toFixed(2) + '%</b>';
+                    ramEl.innerHTML = 'RAM: <b>0.0MB</b> / <b>0.0GB</b>';
+                }
+
+                // Backup/storage info — presence of this endpoint marks a "Merged" node
+                if (base) {
+                    try {
+                        const bResp = await fetchWithTimeout(base + '/api/backup/status', {}, NODE_FETCH_TIMEOUT);
+                        if (bResp.ok) {
+                            const b = await bResp.json();
+                            typeBadge.className = 'node-type-badge merged'; typeBadge.innerText = 'Merged';
+                            const storage = b.storage || {};
+                            backupEl.innerHTML = 'Backup Size: <b>' + (storage.used_human || '-') + '</b> · Users: <b>' + (b.total_users ?? b.users ?? '-') + '</b>';
+                            storageEl.innerHTML = 'Storage: <b>' + (storage.disk_total_human || '-') + '</b> (<b>' + (storage.disk_free_human || '-') + '</b> free)';
+                        } else {
+                            typeBadge.className = 'node-type-badge mining'; typeBadge.innerText = 'Mining';
+                            backupEl.innerHTML = ''; storageEl.innerHTML = '';
+                        }
+                    } catch (e) {
+                        typeBadge.className = 'node-type-badge ' + (online ? 'mining' : 'unknown');
+                        typeBadge.innerText = online ? 'Mining' : 'Offline';
+                        backupEl.innerHTML = ''; storageEl.innerHTML = '';
+                    }
+                } else {
+                    typeBadge.className = 'node-type-badge unknown'; typeBadge.innerText = 'Unknown';
+                }
+            }
+
             async function loadNodes(btn) {
                 spinBtn(btn);
                 try {
                     const resp = await fetch('/api/nodes');
                     const data = await resp.json();
-                    const tbody = document.getElementById('nodesBody');
-                    if (!data.nodes || data.nodes.length === 0) { tbody.innerHTML = '<tr class="empty-row"><td colspan="7">🌐 No nodes registered</td></tr>'; return; }
-                    tbody.innerHTML = '';
-                    for (const n of data.nodes) {
-                        const row = tbody.insertRow();
-                        row.insertCell(0).innerText = n.name;
-                        row.insertCell(1).innerHTML = '<small class="mono" style="color:var(--text-dim)">' + n.url + '</small>';
-                        row.insertCell(2).innerText = n.connected_miners;
-                        row.insertCell(3).innerText = (n.cpu_load || 0).toFixed(1) + '%';
-                        row.insertCell(4).innerText = (n.ping_ms || 0) + 'ms';
-                        row.insertCell(5).innerText = n.total_blocks_relayed || 0;
-                        const actions = row.insertCell(6);
-                        const delBtn = document.createElement('button'); delBtn.className = 'btn btn-delete'; delBtn.textContent = '🗑️ Delete';
-                        delBtn.onclick = () => deleteNode(n.id);
-                        actions.appendChild(delBtn);
-                    }
-                } catch(e) { console.error(e); }
+                    const grid = document.getElementById('nodesGrid');
+                    const nodes = data.nodes || [];
+                    document.getElementById('nodesCount').innerText = nodes.length;
+                    if (nodes.length === 0) { grid.innerHTML = '<div class="empty-row" style="grid-column:1/-1;">🌐 No nodes registered</div>'; return; }
+                    grid.innerHTML = nodes.map(nodeCardHTML).join('');
+                    stampUpdated('nodesUpdated');
+                    // Enrich each node card in parallel; each updates independently as it resolves
+                    nodes.forEach(n => enrichNode(n));
+                } catch(e) { console.error(e); toast('Failed to load mining nodes', 'error'); }
             }
 
             function deleteNode(id) {
@@ -1019,11 +1402,115 @@
                 }, '🗑️ Delete node?');
             }
 
+            // ─── Backup Nodes ──────────────────────────────────────────
+            async function loadBackupNodes(btn) {
+                spinBtn(btn);
+                try {
+                    const resp = await fetch('/api/backup/nodes');
+                    const data = await resp.json();
+                    const tbody = document.getElementById('backupNodesBody');
+                    const nodes = data.nodes || [];
+                    document.getElementById('backupNodesCount').innerText = nodes.length;
+                    stampUpdated('backupNodesUpdated');
+                    if (nodes.length === 0) { tbody.innerHTML = '<tr class="empty-row"><td colspan="6">💾 No backup nodes registered</td></tr>'; return; }
+                    tbody.innerHTML = '';
+                    for (const n of nodes) {
+                        const row = tbody.insertRow();
+                        row.insertCell(0).innerText = n.name || '-';
+                        row.insertCell(1).innerText = n.owner || '-';
+                        row.insertCell(2).innerText = n.platform || '-';
+                        row.insertCell(3).innerText = n.users ?? '-';
+                        row.insertCell(4).innerText = n.blocks ?? '-';
+                        const lastSeen = n.last_heartbeat || n.updated_at || n.last_sync;
+                        row.insertCell(5).innerText = lastSeen ? timeAgo(typeof lastSeen === 'number' ? lastSeen : Date.parse(lastSeen) / 1000) : '-';
+                    }
+                } catch(e) { console.error(e); toast('Failed to load backup nodes', 'error'); }
+            }
+
+            // ─── Network / Blockchain ──────────────────────────────────
+            async function loadNetwork(btn) {
+                spinBtn(btn);
+                try {
+                    const resp = await fetch('/admin/api/network-overview');
+                    const data = await resp.json();
+                    if (data.status !== 'success') { toast(data.message || 'Failed to load network data', 'error'); return; }
+                    allBlocks = data.recent_blocks || [];
+
+                    const lastBlock = data.last_block || {};
+                    const pool = data.pos_reward_pool || { balance: 0, total_fees: 0 };
+                    document.getElementById('networkStatsContent').innerHTML =
+                        '<div class="stats-grid">' +
+                        statCard('🧱', 'Block Height', data.total_blocks ?? (lastBlock.height ?? 0)) +
+                        statCard('🎯', 'Current Difficulty', (lastBlock.difficulty ?? 0).toFixed ? lastBlock.difficulty.toFixed(1) : lastBlock.difficulty) +
+                        statCard('🎁', 'Last Block Reward', (Number(lastBlock.reward) || 0).toFixed(4) + ' CC') +
+                        statCard('📥', 'Mempool Pending', data.mempool_pending ?? 0) +
+                        statCard('🏛️', 'PoS Reward Pool', (Number(pool.balance) || 0).toFixed(4) + ' CC') +
+                        statCard('💧', 'Total Liquidity Locked', (Number(data.total_liquidity_locked) || 0).toFixed(4) + ' CC') +
+                        statCard('🗳️', 'Active Validators', (data.active_validators || []).length) +
+                        statCard('💾', 'Backup Nodes', (data.backup_nodes || []).length) +
+                        '</div>';
+                    stampUpdated('networkUpdated');
+
+                    const blocksBody = document.getElementById('blocksBody');
+                    if (!allBlocks.length) { blocksBody.innerHTML = '<tr class="empty-row"><td colspan="6">🧱 No blocks yet</td></tr>'; }
+                    else {
+                        blocksBody.innerHTML = '';
+                        for (const b of allBlocks) {
+                            const row = blocksBody.insertRow();
+                            row.insertCell(0).innerHTML = '<span class="mono">#' + b.height + '</span>';
+                            row.insertCell(1).innerHTML = '<span class="mono" style="color:var(--text-dim)">' + (b.hash ? b.hash.substring(0, 14) + '…' : '-') + '</span>' + (b.hash ? copyBtn(b.hash) : '');
+                            row.insertCell(2).innerText = b.miner || '-';
+                            row.insertCell(3).innerHTML = '<span style="color:var(--gold-bright)">' + (Number(b.reward) || 0).toFixed(4) + ' CC</span>';
+                            row.insertCell(4).innerText = (typeof b.difficulty === 'number') ? b.difficulty.toFixed(1) : (b.difficulty ?? '-');
+                            row.insertCell(5).innerText = timeAgo(b.timestamp);
+                        }
+                    }
+
+                    const validators = data.active_validators || [];
+                    const currentValidator = validators.length ? validators[0].username : null;
+                    const validatorsBody = document.getElementById('validatorsBody');
+                    if (!validators.length) { validatorsBody.innerHTML = '<tr class="empty-row"><td colspan="4">🏛️ No active validators</td></tr>'; }
+                    else {
+                        validatorsBody.innerHTML = '';
+                        validators.forEach((v, i) => {
+                            const row = validatorsBody.insertRow();
+                            row.insertCell(0).innerText = i + 1;
+                            row.insertCell(1).innerText = v.username;
+                            row.insertCell(2).innerHTML = '<span class="mono" style="color:var(--gold-bright)">' + (Number(v.stake) || 0).toFixed(4) + '</span>';
+                            row.insertCell(3).innerHTML = i === 0 ? '<span class="validator-current">⭐ Top staker</span>' : '<span style="color:var(--text-faint);">Staker</span>';
+                        });
+                    }
+                } catch(e) { console.error(e); toast('Failed to load network overview', 'error'); }
+            }
+
+            // ─── Keyboard shortcuts ────────────────────────────────────
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    closeModal(); closeEditStakeModal(); closeAddUserModal(); closeXnoModal(); closeConfirm(); closeDrawer();
+                }
+                if (e.key === '/' && document.activeElement.tagName !== 'INPUT') {
+                    const active = document.querySelector('.tab-btn.active');
+                    if (active && active.dataset.tab === 'users') {
+                        e.preventDefault();
+                        document.getElementById('userSearch').focus();
+                    }
+                }
+            });
+
             // ─── Init ──────────────────────────────────────────────────
+            loadWhoAmI();
+            checkHealth();
             loadAllSwaps();
             loadUsers();
             loadStats();
-            setInterval(() => { loadAllSwaps(); loadStats(); }, 30000);
+
+            const savedTab = localStorage.getItem('chocohub_admin_tab');
+            if (savedTab && document.querySelector('.tab-btn[data-tab="' + savedTab + '"]')) {
+                activateTab(savedTab, false);
+            }
+
+            setInterval(refreshActiveTab, 30000);
+            setInterval(checkHealth, 15000);
         </script>
     </body>
     </html>
