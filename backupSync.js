@@ -1,7 +1,3 @@
-// backupSync.js – Client đồng bộ full-snapshot + TLS 1.3 + DH (có fallback token)
-// ✅ FIX: KHÔNG gửi token trong body khi dùng DH mode
-// ✅ FIX: Xóa bodyObj.token trong sendWithDH
-
 const net = require('net');
 const https = require('https');
 const http = require('http');
@@ -9,8 +5,6 @@ const crypto = require('crypto');
 const os = require('os');
 const db = require('./db');
 const DHExchange = require('./dh');
-
-// ─── Cấu hình từ môi trường ────────────────────────────
 const BACKUP_SERVERS = (process.env.BACKUP_SERVERS || '').split(',').filter(Boolean);
 const BACKUP_TOKEN = process.env.BACKUP_TOKEN || 'chocohub';
 const RECONNECT_DELAY = 5000;
@@ -22,7 +16,6 @@ const NODE_SYNC_INTERVAL = 300000;
 const MAX_RETRIES = 5;
 const MAX_HEARTBEAT_FAILURES = 3;
 
-// ─── Helper: canonical JSON ─────────────────────────────
 function canonicalStringify(obj) {
   if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
   if (Array.isArray(obj)) return '[' + obj.map(canonicalStringify).join(',') + ']';
@@ -31,7 +24,6 @@ function canonicalStringify(obj) {
   return '{' + pairs.join(',') + '}';
 }
 
-// ─── TLS Agent ────────────────────────────────────────────
 function makeSecureHttpsAgent(hostname, allowUnauthorized = false) {
   return new https.Agent({
     rejectUnauthorized: !allowUnauthorized,
@@ -178,7 +170,7 @@ class BackupClient {
     }
   }
 
-  // ==================== TCP ====================
+  // tcp
   connectTcp(server) {
     const serverKey = `${server.host}:${server.port}`;
     const client = new net.Socket();
@@ -265,7 +257,6 @@ class BackupClient {
     if (this.snapshotTimers[serverKey]) { clearInterval(this.snapshotTimers[serverKey]); delete this.snapshotTimers[serverKey]; }
   }
 
-  // ==================== Lấy public key ====================
   async fetchServerPublicKey(server, agent) {
     const httpModule = server.protocol === 'https' ? https : http;
     const serverKey = `${server.host}:${server.port}`;
@@ -298,7 +289,6 @@ class BackupClient {
     });
   }
 
-  // ==================== DH Exchange ====================
   async performSecureDHExchange(server, serverKey, agent) {
     let serverPubKey = this.serverPublicKeys.get(serverKey);
     if (!serverPubKey) {
@@ -317,7 +307,7 @@ class BackupClient {
     const payload = canonicalStringify({
       clientId,
       clientPublicKey: clientDHKeys.publicKey,
-      token: server.token  // ✅ CHỈ GỬI TOKEN TRONG DH EXCHANGE
+      token: server.token
     });
 
     return new Promise((resolve) => {
@@ -393,8 +383,7 @@ class BackupClient {
       req.end();
     });
   }
-
-  // ─── sendWithToken (giữ nguyên) ──────────────────────────
+  
   sendWithToken(method, path, bodyObj, server, agent, isEmpty) {
     bodyObj.token = server.token;
     if (isEmpty !== undefined) { bodyObj.empty = isEmpty; }
@@ -409,11 +398,9 @@ class BackupClient {
     return { payload, headers };
   }
 
-  // ✅ FIX: sendWithDH - KHÔNG gửi token trong body
   sendWithDH(method, path, bodyObj, session, isEmpty) {
-    // ✅ Tạo bản sao KHÔNG có token
     const cleanBody = { ...bodyObj };
-    delete cleanBody.token;  // ✅ XÓA token khỏi body!
+    delete cleanBody.token;
     
     if (isEmpty !== undefined) { cleanBody.empty = isEmpty; }
     
@@ -444,7 +431,6 @@ class BackupClient {
 
   sendSnapshotNow(server, serverKey, agent, session, useDH) {
     const httpModule = server.protocol === 'https' ? https : http;
-    // ✅ SNAPSHOT payload sẽ được xử lý bởi sendWithDH (xóa token)
     const snapshotPayload = { type: 'FULL_SNAPSHOT', token: server.token, state: db.exportFullState() };
     let payload, headers;
     if (useDH && session) {
@@ -511,7 +497,6 @@ class BackupClient {
     });
   }
 
-  // ✅ FIX: launchReadyProtocol - KHÔNG gửi token trong body
   launchReadyProtocol(server, serverKey, httpModule, agent, session, useDH) {
     const tryReady = () => {
       if (this.restored) {
@@ -519,7 +504,6 @@ class BackupClient {
         return;
       }
 
-      // ✅ KHÔNG có token trong payload!
       const readyPayload = { type: 'READY' };
       const isEmpty = db.getSeq() === 0;
 
@@ -529,7 +513,6 @@ class BackupClient {
         payload = result.payload;
         headers = result.headers;
       } else {
-        // ⚠️ Fallback token mode - vẫn gửi token (kém an toàn)
         const result = this.sendWithToken('POST', '/api/backup/sync', { type: 'READY' }, server, agent, isEmpty);
         payload = result.payload;
         headers = result.headers;
@@ -678,7 +661,6 @@ class BackupClient {
     }
   }
 
-  // ==================== Heartbeat & Snapshot - TOKEN MODE ====================
   startHttpHeartbeatToken(server, serverKey, agent) {
     const httpModule = server.protocol === 'https' ? https : http;
     if (!this.heartbeatLogCounter[serverKey]) this.heartbeatLogCounter[serverKey] = 0;
@@ -791,17 +773,13 @@ class BackupClient {
     sendSnapshot();
   }
 
-  // ==================== Heartbeat & Snapshot - DH MODE ====================
   startHttpHeartbeatDH(server, serverKey, agent, session) {
     const httpModule = server.protocol === 'https' ? https : http;
     if (!this.heartbeatLogCounter[serverKey]) this.heartbeatLogCounter[serverKey] = 0;
     if (this.heartbeatFailureCount[serverKey] === undefined) this.heartbeatFailureCount[serverKey] = 0;
 
     const heartbeat = () => {
-      // ✅ FIX: sempre busca a sessão ATUAL no mapa, nunca a capturada no closure —
-      // evita assinar com uma chave DH desatualizada depois de um re-handshake.
       const currentSession = this.dhSessions.get(serverKey) || session;
-      // ✅ PING KHÔNG có token trong body
       const pingPayload = { type: 'PING' };
       const { payload, headers } = this.sendWithDH('POST', '/api/backup/sync', pingPayload, currentSession);
 
@@ -857,17 +835,13 @@ class BackupClient {
     heartbeat();
   }
 
-  // ✅ FIX: startHttpSnapshotDH - KHÔNG gửi token trong body
   startHttpSnapshotDH(server, serverKey, agent, session) {
     const httpModule = server.protocol === 'https' ? https : http;
     let lastSnapshotHash = null;
 
     const sendSnapshot = () => {
-      // ✅ FIX: sempre busca a sessão ATUAL no mapa, nunca a capturada no closure —
-      // evita assinar com uma chave DH desatualizada depois de um re-handshake.
       const currentSession = this.dhSessions.get(serverKey) || session;
       const state = db.exportFullState();
-      // ✅ SNAPSHOT payload sẽ được xử lý bởi sendWithDH (xóa token)
       const snapshotPayload = { type: 'FULL_SNAPSHOT', state };
       const { payload, headers } = this.sendWithDH('POST', '/api/backup/sync', snapshotPayload, currentSession);
       const hash = crypto.createHash('sha256').update(payload).digest('hex').substring(0, 16);
