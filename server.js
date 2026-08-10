@@ -636,17 +636,12 @@ app.get('/network_status', (req, res) => {
     const blocks = db.getBlocks(10);
     const validators = db.getValidators(10).map(v => ({ username: v.username, stake: v.amount }));
     const posRewardPool = db.getPosRewardPool ? db.getPosRewardPool() : { balance: 0, total_fees: 0 };
-    const liquidity_pool_user = db.getUser('swap_liquidity');
-    const CC_liquidity_locked = liquidity_pool_user.balance || 0;
-    const mempool_pending = db.getMempoolCount();
     res.json({
       recent_blocks: blocks,
       last_block: lastBlock,
       active_validators: validators,
       pos_reward_pool: posRewardPool,
-      total_blocks: db.getBlockCount ? db.getBlockCount() : 0,
-      total_liquidity_locked: CC_liquidity_locked,
-      mempool_pending: mempool_pending
+      total_blocks: db.getBlockCount ? db.getBlockCount() : 0
     });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
@@ -1780,14 +1775,14 @@ NodeFeesRouter.initNodeFees();
 app.listen(PORT, () => {
   console.log('');
   console.log('╔══════════════════════════════════════╗');
-  console.log('║     CHOCO HUB - PoW+PoS + SWAP       ║');
+  console.log('║     CHOCO HUB - PoW+PoS + SWAP              ║');
   console.log('╠══════════════════════════════════════╣');
-  console.log(`║  HTTP/1.1  : http://localhost:${PORT} ║`);
-  console.log(`║  HTTP/2 TLS: https://localhost:${HTTPS_PORT} ║`);
+  console.log(`║  HTTP/1.1  : http://localhost:${PORT}       ║`);
+  console.log(`║  HTTP/2 TLS: https://localhost:${HTTPS_PORT}║`);
   console.log('║  Admin web : http://localhost:' + PORT + '/admin ║');
-  console.log('║  Blockchain: Genesis created        ║');
-  console.log('║  Mempool + Node Fees: Enabled       ║');
-  console.log('║  User Management: Enabled           ║');
+  console.log('║  Blockchain: Genesis created                ║');
+  console.log('║  Mempool + Node Fees: Enabled               ║');
+  console.log('║  User Management: Enabled                   ║');
   console.log('╚══════════════════════════════════════╝');
   console.log('');
   backupClient.start();
