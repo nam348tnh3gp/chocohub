@@ -43,7 +43,6 @@
     background-repeat:no-repeat;
   }
 
-  /* soft vignette so the card always has contrast regardless of photo content */
   body::before{
     content:"";
     position:absolute;
@@ -207,7 +206,7 @@
     <div class="logo-mark" aria-hidden="true">🍫</div>
 
     <h1>ChocoHub Admin</h1>
-    <p class="subtitle">Staff Console</p>
+    <p class="subtitle">Admin Dashboard</p>
 
     <form id="loginForm" novalidate>
       <div class="input-group">
@@ -221,8 +220,6 @@
       <button type="submit">Sign in</button>
       <div id="errorMsg" class="error" role="alert" aria-live="polite"></div>
     </form>
-
-    <div class="footer">Secure session · HttpOnly cookie</div>
   </div>
 
 <script>
