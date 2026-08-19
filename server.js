@@ -1756,6 +1756,17 @@ app.get('*', (req, res) => {
   }
 });
 
+// endpoint for miniminer, made by sunnystew
+app.get('/miniminer', (req, res) => {
+  const indexPath = path.join(__dirname, 'public', 'miniminer.html');
+  try {
+    if (fs.existsSync(indexPath)) res.sendFile(indexPath);
+    else res.status(200).send('<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>ChocoHub</title><style>body{background:#0a0a12;color:#eee4d8;font-family:"Outfit",sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;text-align:center}h1{color:#f58a00;font-size:2.5rem}p{color:#8b8296;margin-top:10px}</style></head><body><div><h1>ChocoHub</h1><p>Server is running. Please upload frontend files to continue.</p><p style="font-size:0.8rem;margin-top:20px;">API: <code style="color:#f58a00;">/api/test</code></p></div></body></html>');
+  } catch(e) {
+    res.status(500).send('Server error');
+  }
+});
+
 app.use((err, req, res, next) => {
   console.error('Server error:', err.message);
   res.status(500).json({ status: 'error', message: 'Internal server error' });
