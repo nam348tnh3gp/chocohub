@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>ChocoHub Mini Miner</title>
+</head>
+<body>
+    </header>
+
+    <div>
+        <div>
+
+            <!-- Stats -->
+            <div>
+                <div>
+                    <div>0 H/s</div>
+                    <div>Hashrate</div>
+                </div>
+                <div>
+                    <div>0</div>
+                    <div>Total Hashes</div>
+                </div>
+                <div>
+                    <div>0s</div>
+                    <div>Session Time</div>
+                </div>
+            </div>
+
+            <!-- Current job -->
+            <div>
+                <div>
+                    <span>No active job</span>
+                    <span>— CC</span>
+                </div>
+                <div>
+                    <span>Difficulty</span>
+                    <span id="difficultyValue" style="color: var(--accent-orange); font-family:'Space Mono',monospace;">—</span>
+                </div>
+                <div>
+                    <div></div>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div>
+                <div>
+                    <button>▶ Start Mining</button>
+                    <button disabled>⏹ Stop</button>
+                </div>
+                <div>
+                    <div>
+
+                        <div>
+                            <button>
+                                <span></span>
+                                <span id="nodeSelectLabel">Detecting node...</span>
+                                <span>▾</span>
+                            </button>
+                            <div></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div>&gt; Ready. Waiting for job...</div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <aside>
+        </aside>
+    </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+    // ---------- UI-only enhancements: clock, date, theme toggle ----------
+    // Isolated from the mining logic below; touches only cosmetic elements.
+    (function () {
+        const root = document.documentElement;
+        const themeToggle = document.getElementById('themeToggle');
+        const themeIcon = document.getElementById('themeIcon');
+        const themeLabel = document.getElementById('themeLabel');
+        const liveClock = document.getElementById('liveClock');
+        const liveDate = document.getElementById('liveDate');
+        const miniTime = document.getElementById('miniTime');
+        const greetingText = document.getElementById('greetingText');
+        const greetingSub = document.getElementById('greetingSub');
+
+        const SUN = '<path d="M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z" stroke="#FF9F0A" stroke-width="2"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" stroke="#FF9F0A" stroke-width="2" stroke-linecap="round"/>';
+        const MOON = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" stroke="#0A84FF" stroke-width="2" stroke-linejoin="round"/>';
+
+        function applyTheme(theme) {
+            root.setAttribute('data-theme', theme);
+            try { localStorage.setItem('choco_miner_theme', theme); } catch (e) {}
+            if (themeIcon) themeIcon.innerHTML = theme === 'dark' ? MOON : SUN;
+            if (themeLabel) themeLabel.textContent = theme === 'dark' ? 'Night mode' : 'Day mode';
+        }
+
+        let savedTheme = 'dark';
+        try { savedTheme = localStorage.getItem('choco_miner_theme') || 'dark'; } catch (e) {}
+        applyTheme(savedTheme);
+
+        if (themeToggle) {
+            themeToggle.addEventListener('click', () => {
+                const current = root.getAttribute('data-theme');
+                applyTheme(current === 'dark' ? 'light' : 'dark');
+            });
+        }
+
+        function pad(n) { return n.toString().padStart(2, '0'); }
+
+        function updateClock() {
+            const now = new Date();
+            const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+            const dateStr = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+            if (liveClock) liveClock.textContent = timeStr;
+            if (liveDate) liveDate.textContent = dateStr;
+            if (miniTime) miniTime.textContent = timeStr;
+
+            const hour = now.getHours();
+            let greeting = 'Good evening';
+            let sub = "Let's find some blocks tonight.";
+            if (hour < 5) { greeting = 'Still up?'; sub = 'The night shift earns CC too.'; }
+            else if (hour < 12) { greeting = 'Good morning'; sub = "Let's find some blocks today."; }
+            else if (hour < 17) { greeting = 'Good afternoon'; sub = 'Keep those hashes flowing.'; }
+            else if (hour < 21) { greeting = 'Good evening'; sub = 'Prime time for mining.'; }
+            if (greetingText) greetingText.textContent = `${greeting}, miner 👋`;
+            if (greetingSub) greetingSub.textContent = sub;
+        }
+
+        updateClock();
+        setInterval(updateClock, 1000);
+    })();
+</script>
+
+<script>
+    (function() {
+        // ---------- Lấy username từ localStorage ----------
+        const workerName = localStorage.getItem('choco_user');
+
+        // ---------- DOM elements ----------
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const hashrateSpan = document.getElementById('hashrateValue');
+        const totalHashesSpan = document.getElementById('totalHashesValue');
+        const uptimeSpan = document.getElementById('uptimeValue');
+        const jobIdSpan = document.getElementById('jobId');
+        const rewardSpan = document.getElementById('rewardBadge');
+        const difficultySpan = document.getElementById('difficultyValue');
+        const progressFill = document.getElementById('progressFill');
+        const consoleDiv = document.getElementById('console');
+
+        // ---------- Helper functions ----------
+        function log(msg, type = 'info') {
+            const line = document.createElement('div');
+            line.className = `log-line log-${type}`;
+            line.textContent = `> ${msg}`;
+            consoleDiv.appendChild(line);
+            line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            while (consoleDiv.children.length > 100) consoleDiv.removeChild(consoleDiv.firstChild);
+        }
+
+        // Nếu chưa đăng nhập, không cho mining
+        if (!workerName) {
+            log('Not logged in. Please log in to start mining.', 'warn');
+            startBtn.disabled = true;
+            stopBtn.disabled = true;
+            return;
+        }
+
+        // ---------- State ----------
+        let miningActive = false;
+        let autoMineEnabled = false;
+        let currentJob = null;
+        let totalHashes = 0;
+        let sessionStart = null;
+        let hashrateInterval = null;
+        let currentHashCount = 0;
+        let lastTimestamp = Date.now();
+        let currentHashrate = 0;
+        let worker = null;
+        // Per-instance identity for independent difficulty tracking (persist across refreshes)
+        let instanceId = localStorage.getItem('choco_instance_id');
+        if (!instanceId) {
+            instanceId = Math.random().toString(36).substring(2, 10);
+            localStorage.setItem('choco_instance_id', instanceId);
+        }
+        const effectiveWorker = workerName + ':' + instanceId;
+        // Device type for starting difficulty hint
+        const deviceType = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+            || window.innerWidth < 768 ? 'mobile' : 'cpu';
+        // Node auto-discovery
+        let currentServer = '';  // '' = direct, or '/api/proxy'
+        let selectedNode = null;
+        let heartbeatInterval = null;
+
+        // ---------- UI helpers ----------
+        function showToast(msg, isError = false) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = `toast show ${isError ? 'error' : 'success'}`;
+            setTimeout(() => toast.classList.remove('show'), 3500);
+        }
+
+        function formatHashrate(hps) {
+            if (hps >= 1e6) return (hps / 1e6).toFixed(2) + ' MH/s';
+            if (hps >= 1e3) return (hps / 1e3).toFixed(2) + ' kH/s';
+            return hps.toFixed(1) + ' H/s';
+        }
+
+        function formatNumber(n) {
+            if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+            if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+            if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+            return n.toString();
+        }
+
+        // ---------- Node Auto-Discovery (server-side ping) ----------
+        async function discoverBestNode() {
+            try {
+                const resp = await fetch('/api/nodes/discover');
+                const data = await resp.json();
+                if (data.status !== 'success' || !data.nodes || data.nodes.length === 0) {
+                    log('No mining nodes found. Using direct connection.', 'info');
+                    currentServer = '';
+                    selectedNode = null;
+                    return;
+                }
+                log(`Found ${data.nodes.length} node(s). Testing latency...`, 'info');
+
+                discoveredNodes = data.nodes;
+                rebuildNodeOptions(discoveredNodes);
+
+                if (ccNodeMode !== 'auto') {
+                    const manualNode = discoveredNodes.find(n => n.id === ccNodeMode);
+                    if (manualNode) {
+                        selectedNode = manualNode;
+                        currentServer = '/api/proxy';
+                        setActiveCcNode(manualNode, manualNode.latency);
+                        log(`Connected to: ${selectedNode.name} (${selectedNode.location})`, 'info');
+                        return;
+                    }
+                }
+
+                // Filter reachable nodes
+                const reachable = data.nodes.filter(n => n.reachable && n.latency !== Infinity);
+                if (reachable.length === 0) {
+                    log('All nodes unreachable. Using direct connection.', 'warn');
+                    currentServer = '';
+                    selectedNode = null;
+                    setNoNodeAvailable();
+                    return;
+                }
+
+                selectedNode = reachable[0]; // Already sorted by latency
+                currentServer = '/api/proxy'; // Route through main server
+                setActiveCcNode(selectedNode, selectedNode.latency);
+                log(`Connected to: ${selectedNode.name} (${selectedNode.location}) — ${selectedNode.latency}ms`, 'info');
+            } catch (e) {
+                log(`Node discovery failed: ${e.message}. Using direct connection.`, 'warn');
+                currentServer = '';
+                selectedNode = null;
+            }
+        }
+
+        // 'auto' = ping all discovered nodes and connect to lowest ping
+        // otherwise holds a node id for a manually-selected node
+        let discoveredNodes = [];      // full list from /api/nodes/discover
+        let ccNodeMode = 'auto';
+        let ccActiveNode = null;       // the node entry currently connected
+        let ccPingResults = {};        // id -> ms (or null if unreachable)
+        const ccNodeSelectEl = document.getElementById('nodeSelect');
+        const ccNodeBtnEl = document.getElementById('nodeSelectBtn');
+        const ccNodeDotEl = document.getElementById('nodeSelectDot');
+        const ccNodeLabelEl = document.getElementById('nodeSelectLabel');
+        const ccNodeDropdownEl = document.getElementById('nodeDropdown');
+        const ccNodeBackdropEl = document.getElementById('nodeDropdownBackdrop');
+        const ccNodeOptionsListEl = document.getElementById('nodeOptionsList');
+        const ccNodeAutoOptionEl = document.getElementById('nodeOptionAuto');
+        const ccNodeAutoDotEl = document.getElementById('nodeAutoDot');
+        const ccNodeAutoPingEl = document.getElementById('nodeAutoPing');
+
+        function rebuildNodeOptions(nodes) {
+            // Clear existing options (keep the Auto option at the top)
+            while (ccNodeOptionsListEl.firstChild) ccNodeOptionsListEl.removeChild(ccNodeOptionsListEl.firstChild);
+            nodes.forEach(node => {
+                const row = document.createElement('button');
+                row.className = 'node-option';
+                row.dataset.node = node.id;
+                row.id = `nodeOption_${node.id}`;
+                row.innerHTML = `
+                    <span></span>
+                    <span>
+                        <div>${node.name}</div>
+                        <div>${node.location}</div>
+                    </span>
+                    <span>—</span>
+                `;
+                row.addEventListener('click', () => selectCcNode(node.id));
+                ccNodeOptionsListEl.appendChild(row);
+            });
+        }
+
+        function pingNode(node, timeoutMs = 6000) {
+            return new Promise(resolve => {
+                const start = performance.now();
+                let done = false;
+                const finish = ms => {
+                    if (done) return;
+                    done = true;
+                    resolve(ms);
+                };
+                const timer = setTimeout(() => finish(null), timeoutMs);
+                // no-cors: we can't read the response body/status cross-origin,
+                // but a resolved/rejected fetch still tells us whether the host answered in time.
+                fetch(node.url, { mode: 'no-cors', cache: 'no-store' })
+                    .then(() => { clearTimeout(timer); finish(Math.round(performance.now() - start)); })
+                    .catch(() => { clearTimeout(timer); finish(null); });
+            });
+        }
+
+        function updateNodePingUI(id, ms) {
+            const dotOpt = document.getElementById(`nodeDot_${id}`);
+            const pingOpt = document.getElementById(`nodePing_${id}`);
+            if (!dotOpt || !pingOpt) return;
+            if (ms === null) {
+                dotOpt.className = 'node-dot bad';
+                pingOpt.textContent = 'timeout';
+                pingOpt.className = 'node-option-ping bad';
+            } else {
+                dotOpt.className = 'node-dot ok';
+                pingOpt.textContent = ms + 'ms';
+                pingOpt.className = 'node-option-ping ok';
+            }
+        }
+
+        function highlightSelectedOption() {
+            document.querySelectorAll('.node-option').forEach(el => el.classList.remove('selected'));
+            if (ccNodeMode === 'auto') {
+                ccNodeAutoOptionEl.classList.add('selected');
+            } else {
+                const el = document.getElementById(`nodeOption_${ccNodeMode}`);
+                if (el) el.classList.add('selected');
+            }
+        }
+
+        function setActiveCcNode(node, ms) {
+            ccActiveNode = node;
+            ccNodeLabelEl.textContent = `${node.name} \u00b7 ${ms !== null && ms !== undefined ? ms + 'ms' : '—'}`;
+            ccNodeDotEl.className = ms === null ? 'node-dot bad' : 'node-dot ok';
+            highlightSelectedOption();
+        }
+
+        function setNoNodeAvailable() {
+            ccActiveNode = null;
+            ccNodeLabelEl.textContent = 'All nodes unreachable';
+            ccNodeDotEl.className = 'node-dot bad';
+        }
+
+        // Ping all discovered nodes, then either auto-connect to the fastest
+        // or (re)connect to whichever node the user manually selected.
+        async function refreshCcNodes() {
+            const nodes = discoveredNodes;
+            if (nodes.length === 0) return;
+            ccNodeDotEl.className = 'node-dot pinging';
+            ccNodeLabelEl.textContent = 'Pinging nodes...';
+            nodes.forEach(n => {
+                const dotOpt = document.getElementById(`nodeDot_${n.id}`);
+                const pingOpt = document.getElementById(`nodePing_${n.id}`);
+                if (dotOpt) dotOpt.className = 'node-dot pinging';
+                if (pingOpt) { pingOpt.textContent = 'pinging...'; pingOpt.className = 'node-option-ping'; }
+            });
+            ccNodeAutoDotEl.className = 'node-dot pinging';
+            ccNodeAutoPingEl.textContent = 'pinging...';
+
+            const results = await Promise.all(nodes.map(async node => {
+                const ms = await pingNode(node);
+                ccPingResults[node.id] = ms;
+                updateNodePingUI(node.id, ms);
+                return { node, ms };
+            }));
+
+            const reachable = results.filter(r => r.ms !== null).sort((a, b) => a.ms - b.ms);
+            if (reachable.length > 0) {
+                ccNodeAutoDotEl.className = 'node-dot ok';
+                ccNodeAutoPingEl.textContent = `best: ${reachable[0].ms}ms`;
+            } else {
+                ccNodeAutoDotEl.className = 'node-dot bad';
+                ccNodeAutoPingEl.textContent = 'none reachable';
+            }
+
+            if (ccNodeMode === 'auto') {
+                if (reachable.length > 0) {
+                    const best = reachable[0];
+                    setActiveCcNode(best.node, best.ms);
+                    log(`Node ping: ${best.node.name} (${best.node.location}) — ${best.ms}ms (lowest ping)`, 'info');
+                } else {
+                    setNoNodeAvailable();
+                    log('Node ping: all mining nodes unreachable.', 'warn');
+                }
+            } else {
+                const manual = results.find(r => r.node.id === ccNodeMode);
+                if (manual && manual.ms !== null) {
+                    setActiveCcNode(manual.node, manual.ms);
+                    log(`Node selected: ${manual.node.name} (${manual.node.location}) — ${manual.ms}ms`, 'info');
+                } else if (manual) {
+                    setActiveCcNode(manual.node, null);
+                    log(`${manual.node.name} is not responding, but staying selected per your choice.`, 'warn');
+                }
+            }
+        }
+
+        async function selectCcNode(id) {
+            ccNodeMode = id; // 'auto' or a discovered node id
+            closeNodeDropdown();
+            if (id === 'auto') {
+                log('Switched to Auto (Best Ping) mode.', 'info');
+                await discoverBestNode();
+            } else {
+                const node = discoveredNodes.find(n => n.id === id);
+                if (node) {
+                    selectedNode = node;
+                    currentServer = '/api/proxy';
+                    log(`Manually selected node: ${node.name} (${node.location})`, 'info');
+                }
+            }
+            highlightSelectedOption();
+            refreshCcNodes();
+        }
+
+        function isMobileLayout() {
+            return window.innerWidth <= 640;
+        }
+
+        function positionNodeDropdown() {
+            if (isMobileLayout()) {
+                // CSS handles centered "sheet" positioning on small screens
+                ccNodeDropdownEl.style.top = '';
+                ccNodeDropdownEl.style.left = '';
+                ccNodeDropdownEl.style.transform = '';
+                ccNodeDropdownEl.style.maxHeight = '';
+                return;
+            }
+            const btnRect = ccNodeBtnEl.getBoundingClientRect();
+            const margin = 10;
+            const spaceBelow = window.innerHeight - btnRect.bottom - margin;
+            const spaceAbove = btnRect.top - margin;
+
+            // Reset maxHeight before measuring natural height
+            ccNodeDropdownEl.style.maxHeight = '';
+            const ddRect = ccNodeDropdownEl.getBoundingClientRect();
+            const naturalHeight = ddRect.height || 260;
+            const ddWidth = ddRect.width || 300;
+
+            // Prefer opening upward (button often sits inside a scrolling terminal log),
+            // fall back to downward if there's more room below.
+            const openUpward = spaceAbove >= spaceBelow;
+            const available = Math.max(120, openUpward ? spaceAbove : spaceBelow);
+
+            // Clamp height to whichever side we're opening into, so the panel
+            // can never extend past the top or bottom of the viewport.
+            const finalHeight = Math.min(naturalHeight, available);
+            ccNodeDropdownEl.style.maxHeight = `${finalHeight}px`;
+
+            let top;
+            if (openUpward) {
+                top = Math.max(margin, btnRect.top - finalHeight - margin);
+            } else {
+                top = Math.min(window.innerHeight - finalHeight - margin, btnRect.bottom + margin);
+            }
+
+            // Anchor to the button's right edge, but always stay fully inside the viewport
+            let left = btnRect.right - ddWidth;
+            const minLeft = margin;
+            const maxLeft = window.innerWidth - ddWidth - margin;
+            left = Math.max(minLeft, Math.min(left, maxLeft));
+
+            ccNodeDropdownEl.style.transform = '';
+            ccNodeDropdownEl.style.top = `${top}px`;
+            ccNodeDropdownEl.style.left = `${left}px`;
+        }
+
+        function openNodeDropdown() {
+            ccNodeSelectEl.classList.add('open');
+            ccNodeBtnEl.setAttribute('aria-expanded', 'true');
+            // Dropdown must be visible (display:block) before we can measure its height
+            positionNodeDropdown();
+            requestAnimationFrame(positionNodeDropdown);
+        }
+        function closeNodeDropdown() {
+            ccNodeSelectEl.classList.remove('open');
+            ccNodeBtnEl.setAttribute('aria-expanded', 'false');
+        }
+        ccNodeBtnEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (ccNodeSelectEl.classList.contains('open')) closeNodeDropdown();
+            else openNodeDropdown();
+        });
+        ccNodeAutoOptionEl.addEventListener('click', () => selectCcNode('auto'));
+        ccNodeBackdropEl.addEventListener('click', () => closeNodeDropdown());
+        document.addEventListener('click', (e) => {
+            if (!ccNodeSelectEl.contains(e.target) && !ccNodeDropdownEl.contains(e.target)) closeNodeDropdown();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeNodeDropdown();
+        });
+        window.addEventListener('resize', () => {
+            if (ccNodeSelectEl.classList.contains('open')) positionNodeDropdown();
+        });
+        document.getElementById('console').addEventListener('scroll', () => {
+            if (ccNodeSelectEl.classList.contains('open')) positionNodeDropdown();
+        });
+
+        // ---------- Miner heartbeat to node (updates connected_miners count) ----------
+        function startHeartbeat() {
+            stopHeartbeat();
+            heartbeatInterval = setInterval(async () => {
+                if (!selectedNode) return;
+                try {
+                    await fetch('/api/proxy/heartbeat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ node_id: selectedNode.id, miners: 1 })
+                    });
+                } catch (e) { /* silent */ }
+            }, 15000);
+        }
+        function stopHeartbeat() {
+            if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
+        }
+
+        function updateUI() {
+            totalHashesSpan.textContent = formatNumber(totalHashes);
+            hashrateSpan.textContent = formatHashrate(currentHashrate);
+            if (sessionStart) {
+                const elapsed = Math.floor((Date.now() - sessionStart) / 1000);
+                uptimeSpan.textContent = elapsed + 's';
+            } else {
+                uptimeSpan.textContent = '0s';
+            }
+        }
+
+        function startHashrateTracker() {
+            if (hashrateInterval) clearInterval(hashrateInterval);
+            currentHashCount = 0;
+            lastTimestamp = Date.now();
+            hashrateInterval = setInterval(() => {
+                const now = Date.now();
+                const delta = (now - lastTimestamp) / 1000;
+                if (delta >= 1) {
+                    currentHashrate = currentHashCount / delta;
+                    currentHashCount = 0;
+                    lastTimestamp = now;
+                    updateUI();
+                }
+            }, 1000);
+        }
+
+        // ---------- Job handling ----------
+        async function fetchNewJob() {
+            try {
+                const body = { worker_name: workerName, instance_id: instanceId, device_type: deviceType };
+                // When using node proxy, include node_id
+                if (currentServer === '/api/proxy' && selectedNode) {
+                    body.node_id = selectedNode.id;
+                }
+                const url = currentServer === '/api/proxy' ? '/api/proxy/get_job' : `${currentServer}/get_job`;
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const job = await res.json();
+                if (!job || !(job.bounty_id || job.job_id)) {
+                    throw new Error('Invalid job response (missing id)');
+                }
+                return job;
+            } catch (err) {
+                log(`Failed to fetch job: ${err.message}`, 'err');
+                return null;
+            }
+        }
+
+        async function startMiningWithJob(job) {
+            if (!job) return false;
+            currentJob = job;
+
+            const jobId = job.bounty_id || job.job_id;
+            jobIdSpan.textContent = jobId.substring(0, 12) + '...';
+            const reward = (job.reward !== undefined && job.reward !== null) ? parseFloat(job.reward).toFixed(4) : '?';
+            rewardSpan.textContent = `${reward} CC`;
+            difficultySpan.textContent = job.difficulty || '?';
+            document.getElementById('jobCard').classList.add('mining');
+            progressFill.style.width = '0%';
+
+            // Tạo Worker nếu chưa có
+            if (!worker) {
+                worker = new Worker('/static/js/cpu.js');
+                worker.onmessage = handleWorkerMessage;
+                worker.onerror = (e) => log(`Worker error: ${e.message}`, 'err');
+            }
+
+            // ⚠️ QUAN TRỌNG: truyền username vào worker để hash khớp với server
+            worker.postMessage({
+                type: 'start',
+                ...job,
+                username: effectiveWorker,
+                worker_name: effectiveWorker
+            });
+
+            miningActive = true;
+            totalHashes = 0;
+            sessionStart = Date.now();
+            currentHashCount = 0;
+            currentHashrate = 0;
+            startHashrateTracker();
+            updateUI();
+
+            log(`Mining job #${jobId.substring(0,10)}... | diff: ${job.difficulty} | reward: ${reward} CC`, 'info');
+            return true;
+        }
+
+        function stopMiningProcess(keepJob = false) {
+            if (worker && miningActive) {
+                worker.postMessage({ type: 'stop' });
+            }
+            miningActive = false;
+            if (hashrateInterval) clearInterval(hashrateInterval);
+            hashrateInterval = null;
+            if (!keepJob) {
+                currentJob = null;
+                document.getElementById('jobCard').classList.remove('mining');
+                jobIdSpan.textContent = 'No active job';
+                rewardSpan.textContent = '— CC';
+                difficultySpan.textContent = '—';
+                progressFill.style.width = '0%';
+            }
+            updateUI();
+        }
+
+        // ---------- Xử lý tin nhắn từ Worker ----------
+        function handleWorkerMessage(e) {
+            const data = e.data;
+            switch (data.type) {
+                case 'ready':
+                    log('Worker ready', 'info');
+                    break;
+                case 'debug':
+                    log(`[Worker] ${data.message}`, 'info');
+                    break;
+                case 'progress':
+                    const newHashes = data.hashes || 0;
+                    totalHashes += newHashes;
+                    currentHashCount += newHashes;
+                    updateUI();
+                    const targetTotal = currentJob?.difficulty ? parseInt(currentJob.difficulty) : 50000;
+                    const percent = Math.min(95, (totalHashes / targetTotal) * 100);
+                    progressFill.style.width = percent + '%';
+                    break;
+                case 'found':
+                    log(`🎉 Nonce found: ${data.nonce}`, 'win');
+                    progressFill.style.width = '100%';
+                    miningActive = false;
+                    if (worker) worker.postMessage({ type: 'stop' });
+                    const jobId = data.job_id || data.bounty_id;
+                    if (jobId) {
+                        submitSolution(jobId, data.nonce, workerName, instanceId);
+                    } else {
+                        log('No job id in found message', 'err');
+                    }
+                    break;
+                case 'pong':
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        // ---------- Gửi solution ----------
+        async function submitSolution(jobId, nonce, wName, instId) {
+            log(`Submitting solution for #${jobId.substring(0,8)}...`, 'info');
+            try {
+                const body = {
+                    bounty_id: jobId,
+                    nonce: nonce,
+                    worker_name: wName,
+                    instance_id: instId,
+                    device_type: deviceType
+                };
+                if (currentServer === '/api/proxy' && selectedNode) {
+                    body.node_id = selectedNode.id;
+                }
+                const url = currentServer === '/api/proxy' ? '/api/proxy/submit_solution' : `${currentServer}/submit_solution`;
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const result = await res.json();
+                if (res.ok && result.status === 'success') {
+                    const reward = result.reward || '?';
+                    log(`✅ BLOCK SOLVED! +${reward} CC`, 'win');
+                    showToast(`+${reward} CC earned!`, false);
+                    if (autoMineEnabled) {
+                        setTimeout(() => startMiningLoop(), 2000);
+                    } else {
+                        stopMiningProcess(true);
+                        startBtn.textContent = '▶ Start Mining';
+                        stopBtn.disabled = true;
+                    }
+                } else {
+                    log(`❌ Submission rejected: ${result.reason || result.message || 'unknown'}`, 'err');
+                    showToast('Solution rejected', true);
+                    if (autoMineEnabled) {
+                        setTimeout(() => startMiningLoop(), 3000);
+                    }
+                }
+            } catch (err) {
+                log(`Submission error: ${err.message}`, 'err');
+                if (autoMineEnabled) {
+                    setTimeout(() => startMiningLoop(), 5000);
+                }
+            }
+        }
+
+        // ---------- Vòng lặp mining tự động ----------
+        async function startMiningLoop() {
+            if (!autoMineEnabled) return;
+            stopMiningProcess(true);
+            const job = await fetchNewJob();
+            if (!job) {
+                log('No job available, retrying in 5s...', 'warn');
+                setTimeout(() => startMiningLoop(), 5000);
+                return;
+            }
+            const ok = await startMiningWithJob(job);
+            if (!ok) {
+                setTimeout(() => startMiningLoop(), 3000);
+            } else {
+                startBtn.textContent = '⏸ Pause';
+                stopBtn.disabled = false;
+            }
+        }
+
+        // ---------- UI actions ----------
+        function onStart() {
+            if (miningActive) {
+                autoMineEnabled = false;
+                stopMiningProcess(true);
+                startBtn.textContent = '▶ Start Mining';
+                stopBtn.disabled = true;
+                log('Mining paused.', 'info');
+            } else {
+                autoMineEnabled = true;
+                startBtn.textContent = '⏸ Pause';
+                stopBtn.disabled = false;
+                log('Starting mining...', 'info');
+                startHeartbeat();
+                startMiningLoop();
+            }
+        }
+
+        function onStop() {
+            autoMineEnabled = false;
+            stopMiningProcess(false);
+            stopHeartbeat();
+            startBtn.textContent = '▶ Start Mining';
+            stopBtn.disabled = true;
+            log('Miner stopped completely.', 'warn');
+        }
+
+        // ---------- Mining Boost (ad-view) ----------
+        const boostBtn = document.getElementById('boostBtn');
+        const boostStatus = document.getElementById('boostStatus');
+
+        let boostExpiresAt = 0;
+        let adVisibleDuration = 0;
+        let adWatchInterval = null;
+        let boostPollInterval = null;
+
+        function formatTime(sec) {
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            return h > 0 ? `${h}h ${m}m` : `${m}m`;
+        }
+
+        function updateBoostUI() {
+            const now = Math.floor(Date.now() / 1000);
+            const active = boostExpiresAt > now;
+
+            if (adWatchInterval) {
+                const pct = Math.min(100, Math.round((adVisibleDuration / 15) * 100));
+                boostStatus.textContent = `⏳ Ad visible ${adVisibleDuration}s / 15s (${pct}%) — keep the ad in view`;
+                boostBtn.disabled = adVisibleDuration < 15;
+                boostBtn.textContent = adVisibleDuration >= 15 ? '⚡ Activate Boost' : '⏳ Watching ad...';
+                boostStatus.className = 'boost-status';
+                document.getElementById('boostCard').classList.remove('active');
+            } else if (adVisibleDuration >= 15) {
+                boostBtn.disabled = false;
+                boostBtn.textContent = '⚡ Activate Boost';
+                boostStatus.textContent = '✅ Ad watched! Activate your 1.3× multiplier';
+                boostStatus.className = 'boost-status';
+                document.getElementById('boostCard').classList.remove('active');
+            } else if (active) {
+                const rem = boostExpiresAt - now;
+                boostBtn.disabled = false;
+                boostBtn.textContent = '▶ Watch Ad (+1h)';
+                boostStatus.textContent = `✅ 1.3× boost active — ${formatTime(rem)} remaining`;
+                boostStatus.className = 'boost-status active';
+                document.getElementById('boostCard').classList.add('active');
+            } else {
+                boostBtn.disabled = false;
+                boostBtn.textContent = '▶ Watch Ad';
+                boostStatus.textContent = 'Click "Watch Ad" and keep the ad in view for 15s to activate a 1.3× mining boost';
+                boostStatus.className = 'boost-status';
+                document.getElementById('boostCard').classList.remove('active');
+            }
+        }
+
+        function stopAdTracking() {
+            if (adWatchInterval) {
+                clearInterval(adWatchInterval);
+                adWatchInterval = null;
+            }
+            adVisibleDuration = 0;
+            document.querySelector('.ad-sidebar').classList.remove('visible');
+            updateBoostUI();
+        }
+
+        function startAdTracking() {
+            if (adWatchInterval) return;
+            adVisibleDuration = 0;
+            const adSidebar = document.querySelector('.ad-sidebar');
+            const adIframe = document.querySelector('.ad-iframe');
+            if (!adIframe) { log('Boost: ad not found', 'warn'); return; }
+            if (adSidebar) adSidebar.classList.add('visible');
+            adWatchInterval = setInterval(() => {
+                const rect = adIframe.getBoundingClientRect();
+                const vw = window.innerWidth;
+                const vh = window.innerHeight;
+                const visible = rect.left < vw && rect.right > 0 && rect.top < vh && rect.bottom > 0;
+                if (visible && rect.width > 0 && rect.height > 0) {
+                    const area = rect.width * rect.height;
+                    if (area / (vw * vh) > 0.02) {
+                        adVisibleDuration = Math.min(15, adVisibleDuration + 1);
+                        updateBoostUI();
+                        if (adVisibleDuration >= 15) {
+                            clearInterval(adWatchInterval);
+                            adWatchInterval = null;
+                            updateBoostUI();
+                        }
+                        return;
+                    }
+                }
+                updateBoostUI();
+            }, 1000);
+            updateBoostUI();
+        }
+
+        async function activateBoost() {
+            try {
+                const r1 = await fetch('/mining/boost/challenge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: workerName }) });
+                if (!r1.ok) { log('Boost: challenge failed', 'error'); return; }
+                const { challenge_id } = await r1.json();
+                boostBtn.disabled = true;
+                boostBtn.textContent = '⏳ Verifying 10s...';
+                boostStatus.textContent = '⏺ Server verifying ad view time...';
+                await new Promise(r => setTimeout(r, 10000));
+                const r2 = await fetch('/mining/boost/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: workerName, challenge_id }) });
+                const data = await r2.json();
+                if (!r2.ok || data.status !== 'success') {
+                    log('Boost: ' + (data.message || 'activation failed'), 'error');
+                    updateBoostUI();
+                    return;
+                }
+                boostExpiresAt = data.expires_at;
+                log(`Mining Boost 1.3× activated! Expires at ${new Date(data.expires_at * 1000).toLocaleTimeString()}`, 'info');
+                updateBoostUI();
+                fetchBoostStatus();
+            } catch (e) {
+                log('Boost: ' + (e.message || e), 'error');
+                updateBoostUI();
+            }
+        }
+
+        async function fetchBoostStatus() {
+            try {
+                const r = await fetch('/mining/boost/status?username=' + encodeURIComponent(workerName));
+                const data = await r.json();
+                boostExpiresAt = (data.status === 'success' && data.active) ? data.expires_at : 0;
+                updateBoostUI();
+            } catch (e) {}
+        }
+
+        function startBoostPolling() {
+            fetchBoostStatus();
+            boostPollInterval = setInterval(fetchBoostStatus, 30000);
+        }
+
+        boostBtn.addEventListener('click', async () => {
+            if (adVisibleDuration >= 15) {
+                await activateBoost();
+                stopAdTracking();
+            } else if (!adWatchInterval) {
+                startAdTracking();
+            }
+        });
+
+        // ---------- Khởi tạo ----------
+        function init() {
+            startBtn.addEventListener('click', onStart);
+            stopBtn.addEventListener('click', onStop);
+            startBoostPolling();
+            updateBoostUI();
+            log(`Logged in as: ${workerName}`, 'info');
+            refreshCcNodes();
+            // Discover the real mining backend, then auto-mine
+            discoverBestNode().then(() => {
+                setTimeout(() => {
+                    autoMineEnabled = true;
+                    startMiningLoop();
+                }, 1000);
+            });
+        }
+
+        init();
+    })();
+</script>
+</body>
+</html>
