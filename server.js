@@ -244,10 +244,13 @@ app.get('/admin', (req, res) => {
   }
   res.sendFile(path.join(__dirname, 'views', 'admin', 'login.html'));
 });
-app.post('/admin/login', async (req, res) => {
+app.post('/admin/login', authLimiter, async (req, res) => {
   const { username, pin } = req.body;
   if (!username || !pin) return res.status(400).json({ status: 'error', message: 'Missing credentials' });
   try {
+    if (isAdmin(username) && !db.getUser(username)) {
+      return res.status(403).json({ status: 'error', message: 'Not an admin user' });
+    }
     const authResult = db.authenticate(username, pin);
     if (authResult.status !== 'success') {
       return res.status(401).json({ status: 'error', message: 'Invalid credentials' });
