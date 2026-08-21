@@ -68,7 +68,7 @@ def save_config(cfg):
 # ---------------------------------------------------------------------------
 # Default values
 # ---------------------------------------------------------------------------
-DEFAULT_SERVER      = "https://chocohub-r011.onrender.com"
+DEFAULT_SERVER      = "https://choco.qzjvk.link"
 DEFAULT_WORKER      = None
 DEFAULT_THREADS     = None
 DEFAULT_GPU         = False
